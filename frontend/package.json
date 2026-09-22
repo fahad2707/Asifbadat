@@ -7,7 +7,8 @@
     "prebuild": "node scripts/inject-site-api.cjs",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "test:dashboard": "tsx --test lib/dashboard-metrics.test.ts"
   },
   "dependencies": {
     "axios": "^1.6.2",
