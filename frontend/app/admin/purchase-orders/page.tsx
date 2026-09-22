@@ -216,20 +216,26 @@ export default function PurchaseOrdersPage() {
   };
 
   return (
-    <div>
-      <h1 className="text-2xl font-bold text-gray-900">Purchase Orders</h1>
-      <div className="bg-white rounded-xl shadow-md p-4 mt-4 mb-6 flex flex-wrap items-center gap-4">
-        <div className="relative flex-1 min-w-[220px]">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
+    <div className="space-y-6">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        <div>
+          <h1 className="text-3xl font-extrabold text-white tracking-tight">Purchase Orders</h1>
+          <p className="text-xs text-slate-400 mt-1">Issue procurement order sheets to wholesale vendors, track inventory shipments and balances.</p>
+        </div>
+      </div>
+
+      <div className="bg-slate-900/40 backdrop-blur-lg border border-white/[0.06] border-t-white/[0.18] shadow-[0_12px_40px_rgba(0,0,0,0.25)] rounded-2xl p-4 flex flex-wrap items-center gap-4">
+        <div className="relative flex-1 min-w-[240px]">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
           <input
             type="text"
             placeholder="Search POs by number, supplier, bill #..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#0f766e] focus:border-[#0f766e]"
+            className="w-full pl-10 pr-4 py-2 bg-slate-950/60 border border-white/10 rounded-xl text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-teal-500 focus:border-teal-500 focus:bg-slate-950/80 transition-all font-semibold"
           />
         </div>
-        <div className="flex items-center gap-3 flex-wrap">
+        <div className="flex items-center gap-2.5 flex-wrap">
           <button
             type="button"
             onClick={() => {
@@ -248,92 +254,100 @@ export default function PurchaseOrdersPage() {
               setShippingCost(0);
               setRows(Array.from({ length: 15 }, emptyRow));
             }}
-            className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-white font-medium bg-[#0f766e] hover:bg-[#0d5d57]"
+            className="inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-gradient-to-tr from-teal-600 to-teal-500 hover:from-teal-500 hover:to-teal-400 border border-white/10 text-white rounded-xl text-xs font-bold shadow-sm transition-all"
           >
-            <Plus className="w-4 h-4" />
+            <Plus className="w-3.5 h-3.5" />
             New PO
           </button>
-          <select value={filter} onChange={(e) => setFilter(e.target.value)} className="border border-gray-300 rounded-lg px-3 py-2 text-sm">
-            <option value="All">All</option>
+          <select value={filter} onChange={(e) => setFilter(e.target.value)} className="bg-slate-955/60 border border-white/10 rounded-xl px-3 py-2 text-xs text-slate-200 focus:outline-none focus:ring-1 focus:ring-teal-500">
+            <option value="All">All Statuses</option>
           </select>
         </div>
       </div>
 
-      <div className="mt-6 bg-white rounded-xl shadow overflow-hidden border border-gray-200">
+      <div className="bg-slate-900/40 backdrop-blur-lg border border-white/[0.06] border-t-white/[0.18] shadow-[0_12px_40px_rgba(0,0,0,0.25)] rounded-2xl overflow-hidden">
         {loading ? (
           <div className="flex items-center justify-center py-16">
-            <div className="animate-spin rounded-full h-10 w-10 border-2 border-[#0f766e] border-t-transparent" />
+            <div className="animate-spin rounded-full h-8 w-8 border-2 border-teal-500 border-t-transparent" />
           </div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead>
-                <tr className="bg-[#0f766e] text-white">
-                  <th className="text-left py-3 px-4 text-sm font-medium">Date</th>
-                  <th className="text-left py-3 px-4 text-sm font-medium">PO ID</th>
-                  <th className="text-left py-3 px-4 text-sm font-medium">Supplier ID</th>
-                  <th className="text-left py-3 px-4 text-sm font-medium">Supplier Name</th>
-                  <th className="text-left py-3 px-4 text-sm font-medium">Bill Num</th>
-                  <th className="text-left py-3 px-4 text-sm font-medium">State</th>
-                  <th className="text-left py-3 px-4 text-sm font-medium">City</th>
-                  <th className="text-right py-3 px-4 text-sm font-medium">Total Amount</th>
-                  <th className="text-right py-3 px-4 text-sm font-medium">Total Paid</th>
-                  <th className="text-right py-3 px-4 text-sm font-medium">PO Balance</th>
-                  <th className="text-left py-3 px-4 text-sm font-medium">PMT Status</th>
-                  <th className="text-left py-3 px-4 text-sm font-medium">Shipping Status</th>
-                  <th className="text-right py-3 px-4 text-sm font-medium">Actions</th>
+            <table className="w-full border-collapse">
+              <thead className="bg-slate-950/60 text-slate-400 border-b border-white/5">
+                <tr>
+                  <th className="text-left py-3.5 px-4 text-[10px] font-bold uppercase tracking-wider">Date</th>
+                  <th className="text-left py-3.5 px-4 text-[10px] font-bold uppercase tracking-wider">PO ID</th>
+                  <th className="text-left py-3.5 px-4 text-[10px] font-bold uppercase tracking-wider">Supplier ID</th>
+                  <th className="text-left py-3.5 px-4 text-[10px] font-bold uppercase tracking-wider">Supplier Name</th>
+                  <th className="text-left py-3.5 px-4 text-[10px] font-bold uppercase tracking-wider">Bill</th>
+                  <th className="text-left py-3.5 px-4 text-[10px] font-bold uppercase tracking-wider">State</th>
+                  <th className="text-left py-3.5 px-4 text-[10px] font-bold uppercase tracking-wider">City</th>
+                  <th className="text-right py-3.5 px-4 text-[10px] font-bold uppercase tracking-wider">Total Amount</th>
+                  <th className="text-right py-3.5 px-4 text-[10px] font-bold uppercase tracking-wider">Total Paid</th>
+                  <th className="text-right py-3.5 px-4 text-[10px] font-bold uppercase tracking-wider">PO Balance</th>
+                  <th className="text-left py-3.5 px-4 text-[10px] font-bold uppercase tracking-wider">PMT Status</th>
+                  <th className="text-left py-3.5 px-4 text-[10px] font-bold uppercase tracking-wider">Shipping</th>
+                  <th className="text-right py-3.5 px-4 text-[10px] font-bold uppercase tracking-wider">Actions</th>
                 </tr>
               </thead>
               <tbody>
                 {pos.length === 0 ? (
                   <tr>
-                    <td colSpan={13} className="py-8 text-center text-gray-500">
-                      No purchase orders. Click &quot;New PO&quot; to create one.
+                    <td colSpan={13} className="py-16 text-center text-slate-500 text-xs font-semibold">
+                      No purchase orders yet. Click Draft PO to register imports.
                     </td>
                   </tr>
                 ) : (
-                  pos.map((po, i) => (
-                    <tr key={po.id} className={i % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
-                      <td className="py-2 px-4 text-sm">{po.created_at ? new Date(po.created_at).toLocaleDateString('en-US', { month: 'short', day: '2-digit', year: 'numeric' }) : '—'}</td>
-                      <td className="py-2 px-4 text-sm font-medium">{po.po_number}</td>
-                      <td className="py-2 px-4 text-sm">{po.supplier_id || '—'}</td>
-                      <td className="py-2 px-4 text-sm">{po.vendor_name}</td>
-                      <td className="py-2 px-4 text-sm">—</td>
-                      <td className="py-2 px-4 text-sm">{po.state || '—'}</td>
-                      <td className="py-2 px-4 text-sm">{po.city || '—'}</td>
-                      <td className="py-2 px-4 text-sm text-right">{Number(po.total_amount || 0).toLocaleString()}</td>
-                      <td className="py-2 px-4 text-sm text-right">0</td>
-                      <td className="py-2 px-4 text-sm text-right">{Number(po.total_amount || 0).toLocaleString()}</td>
-                      <td className="py-2 px-4 text-sm">{pmtStatus(po)}</td>
-                      <td className="py-2 px-4 text-sm">{shippingStatus(po)}</td>
-                      <td className="py-2 px-4 text-right">
-                        <div className="flex items-center justify-end gap-2">
-                          <Link href={`/admin/purchase-orders/${po.id}`} className="inline-flex items-center gap-1 text-[#0f766e] hover:underline text-sm font-medium">
-                            <Eye className="w-4 h-4" />
-                            View
-                          </Link>
-                          <button
-                            type="button"
-                            onClick={async () => {
-                              try {
-                                const res = await adminApi.get(`/purchase-orders/${po.id}/pdf`, { responseType: 'blob' });
-                                if (downloadPdfFromResponse(res.data, `po-${po.po_number || po.id}.pdf`, res.headers['content-type'])) {
-                                  toast.success('PDF downloaded');
+                  pos.map((po) => {
+                    const paySt = pmtStatus(po);
+                    const shipSt = shippingStatus(po);
+                    return (
+                      <tr key={po.id} className="border-b border-white/5 hover:bg-white/[0.02] transition-colors">
+                        <td className="py-3 px-4 text-xs text-slate-350">{po.created_at ? new Date(po.created_at).toLocaleDateString('en-US', { month: 'short', day: '2-digit', year: 'numeric' }) : '—'}</td>
+                        <td className="py-3 px-4 text-xs font-mono font-bold text-teal-450">{po.po_number}</td>
+                        <td className="py-3 px-4 text-xs text-slate-300 font-mono">{po.supplier_id || '—'}</td>
+                        <td className="py-3 px-4 text-xs font-semibold text-slate-200">{po.vendor_name}</td>
+                        <td className="py-3 px-4 text-xs text-slate-400">—</td>
+                        <td className="py-3 px-4 text-xs text-slate-400">{po.state || '—'}</td>
+                        <td className="py-3 px-4 text-xs text-slate-400">{po.city || '—'}</td>
+                        <td className="py-3 px-4 text-xs text-right font-extrabold text-slate-100 font-mono">${Number(po.total_amount || 0).toLocaleString(undefined, {minimumFractionDigits: 2})}</td>
+                        <td className="py-3 px-4 text-xs text-right font-mono text-slate-400">0.00</td>
+                        <td className="py-3 px-4 text-xs text-right font-extrabold text-slate-100 font-mono">${Number(po.total_amount || 0).toLocaleString(undefined, {minimumFractionDigits: 2})}</td>
+                        <td className="py-3 px-4 text-xs">
+                          <span className={`inline-flex px-2 py-0.5 rounded text-[10px] font-bold border ${paySt === 'Paid' ? 'bg-teal-500/10 text-teal-400 border-teal-500/20' : paySt === 'Partial PMT' ? 'bg-amber-500/10 text-amber-400 border-amber-500/20' : 'bg-slate-800 text-slate-400 border-white/10'}`}>{paySt}</span>
+                        </td>
+                        <td className="py-3 px-4 text-xs">
+                          <span className={`inline-flex px-2 py-0.5 rounded text-[10px] font-bold border ${shipSt === 'Received' ? 'bg-teal-500/10 text-teal-450 border-teal-500/20' : shipSt === 'Partial' ? 'bg-amber-500/10 text-amber-400 border-amber-500/20' : 'bg-slate-800 text-slate-400 border-white/10'}`}>{shipSt}</span>
+                        </td>
+                        <td className="py-3 px-4 text-right text-xs">
+                          <div className="flex items-center justify-end gap-2.5">
+                            <Link href={`/admin/purchase-orders/${po.id}`} className="inline-flex items-center gap-1 text-teal-450 hover:text-teal-350 hover:underline font-semibold">
+                              <Eye className="w-3.5 h-3.5" />
+                              View
+                            </Link>
+                            <button
+                              type="button"
+                              onClick={async () => {
+                                try {
+                                  const res = await adminApi.get(`/purchase-orders/${po.id}/pdf`, { responseType: 'blob' });
+                                  if (downloadPdfFromResponse(res.data, `po-${po.po_number || po.id}.pdf`, res.headers['content-type'])) {
+                                    toast.success('PDF downloaded');
+                                  }
+                                } catch {
+                                  toast.error('Failed to download PDF');
                                 }
-                              } catch {
-                                toast.error('Failed to download PDF');
-                              }
-                            }}
-                            className="inline-flex items-center gap-1 text-[#0f766e] hover:underline text-sm font-medium"
-                            title="Download PDF"
-                          >
-                            <Download className="w-4 h-4" />
-                            Download
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))
+                              }}
+                              className="inline-flex items-center gap-1 text-slate-400 hover:text-white hover:underline font-semibold"
+                              title="Download PDF"
+                            >
+                              <Download className="w-3.5 h-3.5" />
+                              PDF
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })
                 )}
               </tbody>
             </table>
@@ -342,114 +356,114 @@ export default function PurchaseOrdersPage() {
       </div>
 
       {showCreate && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 overflow-y-auto">
-          <div className="bg-white rounded-xl shadow-xl max-w-5xl w-full my-8 max-h-[90vh] overflow-y-auto">
-            <div className="p-6 border-b flex items-center justify-between">
-              <h2 className="text-xl font-bold text-gray-900">Create New PO</h2>
-              <button type="button" onClick={() => setShowCreate(false)} className="p-2 hover:bg-gray-100 rounded-lg text-gray-600" aria-label="Close">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-sm p-4 overflow-y-auto">
+          <div className="bg-slate-900 border border-white/10 shadow-[0_24px_50px_rgba(0,0,0,0.4)] rounded-2xl max-w-5xl w-full my-8 max-h-[90vh] overflow-y-auto">
+            <div className="p-5 border-b border-white/5 flex items-center justify-between">
+              <h2 className="text-lg font-bold text-white">Create Purchase Order</h2>
+              <button type="button" onClick={() => setShowCreate(false)} className="p-1.5 hover:bg-white/5 rounded-lg text-slate-400 hover:text-white transition-all" aria-label="Close">
                 <X className="w-5 h-5" />
               </button>
             </div>
 
             <form onSubmit={handleSavePO} className="p-6 space-y-6">
-              <section>
-                <h3 className="text-lg font-semibold text-gray-900 mb-3">PO Information</h3>
+              <section className="space-y-4">
+                <h3 className="text-[10px] font-bold text-slate-400 uppercase tracking-wider pb-1.5 border-b border-white/5">PO Metadata</h3>
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                  <div className="flex gap-2">
+                  <div className="flex gap-2 items-end">
                     <div className="flex-1">
-                      <label className="block text-sm font-medium text-gray-700 mb-1">PO ID *</label>
-                      <input type="text" value={poNumber} onChange={(e) => setPoNumber(e.target.value)} className="w-full border border-gray-300 rounded-lg px-3 py-2" placeholder="e.g. P087684" />
+                      <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">PO ID *</label>
+                      <input type="text" value={poNumber} onChange={(e) => setPoNumber(e.target.value)} className="w-full bg-slate-950/60 border border-white/10 rounded-xl px-4 py-2 text-xs text-slate-205 focus:outline-none placeholder-slate-500" placeholder="e.g. P087684" />
                     </div>
-                    <div className="pt-7">
-                      <button type="button" onClick={generatePoId} className="px-3 py-2 rounded-lg font-medium text-sm bg-[#0f766e] text-white hover:bg-[#0d5d57]">
+                    <div>
+                      <button type="button" onClick={generatePoId} className="px-3.5 py-2.5 bg-slate-800 border border-white/5 text-slate-350 hover:text-white rounded-xl text-xs font-semibold shadow-sm transition-all">
                         Generate
                       </button>
                     </div>
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">PO Date *</label>
-                    <input type="date" value={poDate} onChange={(e) => setPoDate(e.target.value)} className="w-full border border-gray-300 rounded-lg px-3 py-2" />
+                    <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">PO Date *</label>
+                    <input type="date" value={poDate} onChange={(e) => setPoDate(e.target.value)} className="w-full bg-slate-955/60 border border-white/10 rounded-xl px-4 py-2 text-xs text-slate-202 focus:outline-none" />
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Supplier Name *</label>
+                    <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">Supplier Name *</label>
                     <select
                       value={vendorId}
                       onChange={(e) => {
                         if (e.target.value === '__add_new__') { setShowAddVendor(true); return; }
                         setVendorId(e.target.value);
                       }}
-                      className="w-full border border-gray-300 rounded-lg px-3 py-2"
+                      className="w-full bg-slate-955/60 border border-white/10 rounded-xl px-4 py-2 text-xs text-slate-250 focus:outline-none"
                       required
                     >
                       <option value="">Select supplier</option>
-                      <option value="__add_new__">+ New supplier</option>
+                      <option value="__add_new__">+ Add New Supplier</option>
                       {vendors.map((v) => (
                         <option key={v.id} value={v.id}>{v.name}</option>
                       ))}
                     </select>
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Supplier ID</label>
-                    <input type="text" value={selectedVendor?.supplier_id ?? ''} readOnly className="w-full border border-gray-200 rounded-lg px-3 py-2 bg-gray-50" />
+                    <label className="block text-[10px] font-bold text-slate-450 uppercase tracking-wider mb-2">Supplier ID</label>
+                    <input type="text" value={selectedVendor?.supplier_id ?? ''} readOnly className="w-full bg-slate-955/20 border border-white/5 rounded-xl px-4 py-2 text-xs text-slate-450" />
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">State</label>
-                    <input type="text" value={selectedVendor?.state ?? ''} readOnly className="w-full border border-gray-200 rounded-lg px-3 py-2 bg-gray-50" />
+                    <label className="block text-[10px] font-bold text-slate-455 uppercase tracking-wider mb-2">State</label>
+                    <input type="text" value={selectedVendor?.state ?? ''} readOnly className="w-full bg-slate-955/20 border border-white/5 rounded-xl px-4 py-2 text-xs text-slate-450" />
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">City</label>
-                    <input type="text" value={selectedVendor?.city ?? ''} readOnly className="w-full border border-gray-200 rounded-lg px-3 py-2 bg-gray-50" />
+                    <label className="block text-[10px] font-bold text-slate-455 uppercase tracking-wider mb-2">City</label>
+                    <input type="text" value={selectedVendor?.city ?? ''} readOnly className="w-full bg-slate-955/20 border border-white/5 rounded-xl px-4 py-2 text-xs text-slate-455" />
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Bill Num</label>
-                    <input type="text" value={billNum} onChange={(e) => setBillNum(e.target.value)} className="w-full border border-gray-300 rounded-lg px-3 py-2" />
+                    <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">Bill Reference</label>
+                    <input type="text" value={billNum} onChange={(e) => setBillNum(e.target.value)} className="w-full bg-slate-950/60 border border-white/10 rounded-xl px-4 py-2 text-xs text-slate-205 focus:outline-none" placeholder="Invoice bill number" />
                   </div>
                 </div>
               </section>
 
-              <section>
-                <div className="flex items-center justify-between mb-3">
-                  <h3 className="text-lg font-semibold text-gray-900">PO Items</h3>
-                  <button type="button" onClick={addRow} className="inline-flex items-center gap-1 px-3 py-2 rounded-lg text-white text-sm font-medium bg-[#0f766e] hover:bg-[#0d5d57]">
-                    <Plus className="w-4 h-4" />
-                    Add Item
+              <section className="space-y-4">
+                <div className="flex items-center justify-between pb-1.5 border-b border-white/5">
+                  <h3 className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Purchase Items</h3>
+                  <button type="button" onClick={addRow} className="inline-flex items-center justify-center gap-1.5 px-3 py-1.5 bg-slate-800 border border-white/5 text-slate-300 hover:text-white rounded-lg text-xs font-semibold transition-all">
+                    <Plus className="w-3.5 h-3.5" />
+                    Add Row
                   </button>
                 </div>
-                <div className="overflow-x-auto border border-gray-200 rounded-lg">
-                  <table className="w-full text-sm min-w-[480px]">
-                    <thead className="bg-gray-50">
+                <div className="overflow-x-auto border border-white/5 rounded-xl bg-slate-955/20">
+                  <table className="w-full text-xs min-w-[700px] border-collapse">
+                    <thead className="bg-slate-950/60 text-slate-400 border-b border-white/5">
                       <tr>
-                        <th className="text-center py-3 px-3 text-sm font-medium text-gray-700 w-12">#</th>
-                        <th className="text-left py-3 px-4 text-sm font-medium text-gray-700">Product</th>
-                        <th className="text-left py-3 px-4 text-sm font-medium text-gray-700">Category</th>
-                        <th className="text-right py-3 px-4 text-sm font-medium text-gray-700">Qty</th>
-                        <th className="text-right py-3 px-4 text-sm font-medium text-gray-700">Unit Cost</th>
-                        <th className="text-right py-3 px-4 text-sm font-medium text-gray-700">Line Total</th>
-                        <th className="w-10" />
+                        <th className="text-center py-2.5 px-3 w-12 font-bold uppercase tracking-wider text-[9px]">#</th>
+                        <th className="text-left py-2.5 px-4 font-bold uppercase tracking-wider text-[9px]">Product Item</th>
+                        <th className="text-left py-2.5 px-4 font-bold uppercase tracking-wider text-[9px]">Category</th>
+                        <th className="text-right py-2.5 px-4 font-bold uppercase tracking-wider text-[9px]">Quantity</th>
+                        <th className="text-right py-2.5 px-4 font-bold uppercase tracking-wider text-[9px]">Unit Cost</th>
+                        <th className="text-right py-2.5 px-4 font-bold uppercase tracking-wider text-[9px]">Subtotal</th>
+                        <th className="w-10 text-center font-bold uppercase tracking-wider text-[9px]" />
                       </tr>
                     </thead>
                     <tbody>
                       {rows.map((r, idx) => (
-                        <tr key={idx} className="border-t border-gray-100 hover:bg-gray-50/60">
-                          <td className="py-2 px-3 text-center text-sm text-gray-500">{idx + 1}</td>
+                        <tr key={idx} className="border-t border-white/5 hover:bg-white/[0.01]">
+                          <td className="py-2.5 px-3 text-center text-xs text-slate-500 font-mono">{idx + 1}</td>
                           <td className="py-2 px-4">
                             <SearchableProductDropdown
                               products={products}
                               value={r.product_id}
                               displayName={r.product_name || undefined}
                               onSelect={(p) => updateRow(idx, 'product_id', p.id)}
-                              placeholder="Search product or scan barcode…"
+                              placeholder="Search products or scan barcode..."
                               showPrice={false}
                             />
                           </td>
-                          <td className="py-2 px-4 text-sm text-gray-600">{r.category_name || '—'}</td>
+                          <td className="py-2.5 px-4 text-slate-400">{r.category_name || '—'}</td>
                           <td className="py-2 px-4 text-right">
                             <input
                               type="number"
                               min={1}
                               value={r.qty}
                               onChange={(e) => updateRow(idx, 'qty', e.target.value)}
-                              className="w-16 border border-gray-300 rounded px-2 py-1 text-sm text-right"
+                              className="w-16 bg-slate-950/60 border border-white/10 rounded px-2 py-1 text-xs text-right text-slate-200"
                             />
                           </td>
                           <td className="py-2 px-4 text-right">
@@ -459,12 +473,12 @@ export default function PurchaseOrdersPage() {
                               step={0.01}
                               value={r.unit_cost || ''}
                               onChange={(e) => updateRow(idx, 'unit_cost', e.target.value)}
-                              className="w-24 border border-gray-300 rounded px-2 py-1 text-sm text-right"
+                              className="w-24 bg-slate-955/60 border border-white/10 rounded px-2 py-1 text-xs text-right text-slate-200 font-mono font-semibold"
                             />
                           </td>
-                          <td className="py-2 px-4 text-right text-sm font-medium">${(Number(r.qty) * Number(r.unit_cost)).toFixed(2)}</td>
-                          <td className="py-2 px-4">
-                            <button type="button" onClick={() => removeRow(idx)} className="text-gray-400 hover:text-red-600 hover:bg-red-50 rounded p-1" title="Remove item">
+                          <td className="py-2.5 px-4 text-right font-bold text-slate-350 font-mono">${(Number(r.qty) * Number(r.unit_cost)).toFixed(2)}</td>
+                          <td className="py-2 px-4 text-center">
+                            <button type="button" onClick={() => removeRow(idx)} className="p-1 text-slate-405 hover:text-rose-455 hover:bg-rose-500/10 rounded-lg transition-colors" title="Remove row">
                               <Trash2 className="w-4 h-4" />
                             </button>
                           </td>
@@ -480,26 +494,26 @@ export default function PurchaseOrdersPage() {
                   const grandTotal = itemSubtotal + Number(shippingCost);
                   return (
                     <div className="flex justify-end mt-4">
-                      <div className="w-72 space-y-2 text-sm">
+                      <div className="w-80 bg-slate-955/40 border border-white/5 rounded-xl p-4 space-y-2 text-xs text-slate-350">
                         <div className="flex justify-between">
-                          <span className="text-gray-600">Subtotal</span>
-                          <span className="font-medium">${itemSubtotal.toFixed(2)}</span>
+                          <span className="text-slate-500 font-bold uppercase text-[9px] tracking-wider">Subtotal</span>
+                          <span className="font-bold text-slate-205 font-mono">${itemSubtotal.toFixed(2)}</span>
                         </div>
-                        <div className="flex justify-between items-center">
-                          <span className="text-gray-600">Shipping Cost</span>
+                        <div className="flex justify-between items-center text-xs">
+                          <span className="text-slate-500 font-bold uppercase text-[9px] tracking-wider">Shipping/Freight Cost</span>
                           <input
                             type="number"
                             min={0}
                             step={0.01}
                             value={shippingCost || ''}
                             onChange={(e) => setShippingCost(Number(e.target.value) || 0)}
-                            className="w-28 border border-gray-300 rounded px-2 py-1 text-sm text-right"
+                            className="w-28 bg-slate-950/60 border border-white/10 rounded px-2 py-1 text-xs text-right text-slate-200"
                             placeholder="0.00"
                           />
                         </div>
-                        <div className="flex justify-between border-t pt-2 font-semibold text-gray-900">
-                          <span>Grand Total</span>
-                          <span>${grandTotal.toFixed(2)}</span>
+                        <div className="flex justify-between border-t border-dashed border-white/10 pt-2 font-bold text-slate-200">
+                          <span className="text-[10px] uppercase font-bold tracking-wider">Grand Total Billing</span>
+                          <span className="text-teal-400 font-mono text-sm">${grandTotal.toFixed(2)}</span>
                         </div>
                       </div>
                     </div>
@@ -507,12 +521,12 @@ export default function PurchaseOrdersPage() {
                 })()}
               </section>
 
-              <div className="flex justify-end gap-2 pt-4 border-t">
-                <button type="button" onClick={() => setShowCreate(false)} className="px-4 py-2 rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50">
+              <div className="flex justify-end gap-2.5 pt-4 border-t border-white/5">
+                <button type="button" onClick={() => setShowCreate(false)} className="px-4 py-2.5 bg-slate-800 border border-white/5 text-slate-400 hover:text-white rounded-xl text-xs font-semibold">
                   Close
                 </button>
-                <button type="submit" className="px-4 py-2 rounded-lg text-white font-medium bg-[#0f766e] hover:bg-[#0d5d57]">
-                  Save PO
+                <button type="submit" className="px-4 py-2.5 bg-gradient-to-tr from-teal-600 to-teal-500 hover:from-teal-500 hover:to-teal-400 border border-white/10 text-white rounded-xl text-xs font-bold transition-all shadow-sm">
+                  Save Purchase Order
                 </button>
               </div>
             </form>
@@ -521,9 +535,9 @@ export default function PurchaseOrdersPage() {
       )}
 
       {showAddVendor && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-4">
-          <div className="bg-white rounded-xl shadow-xl max-w-sm w-full p-6" onClick={(e) => e.stopPropagation()}>
-            <h3 className="text-lg font-semibold text-gray-900 mb-4">+ Add new supplier</h3>
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-955/80 backdrop-blur-sm p-4">
+          <div className="bg-slate-900 border border-white/10 shadow-[0_24px_50px_rgba(0,0,0,0.4)] rounded-2xl max-w-sm w-full p-6" onClick={(e) => e.stopPropagation()}>
+            <h3 className="text-sm font-bold text-white mb-4 uppercase tracking-wider text-slate-400 text-[10px]">+ Register Supplier Vendor</h3>
             <form
               onSubmit={async (e) => {
                 e.preventDefault();
@@ -547,14 +561,14 @@ export default function PurchaseOrdersPage() {
                 type="text"
                 value={newVendorName}
                 onChange={(e) => setNewVendorName(e.target.value)}
-                placeholder="Supplier name"
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg mb-4"
+                placeholder="Supplier business name"
+                className="w-full bg-slate-950/60 border border-white/10 rounded-xl px-4 py-2 text-xs text-slate-200 placeholder-slate-600 focus:outline-none mb-4"
                 autoFocus
                 required
               />
-              <div className="flex justify-end gap-2">
-                <button type="button" onClick={() => { setShowAddVendor(false); setNewVendorName(''); }} className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg">Cancel</button>
-                <button type="submit" disabled={savingVendor} className="px-4 py-2 bg-[#0f766e] text-white rounded-lg hover:bg-[#0d5d57] disabled:opacity-50">{savingVendor ? 'Saving...' : 'Add'}</button>
+              <div className="flex justify-end gap-2.5">
+                <button type="button" onClick={() => { setShowAddVendor(false); setNewVendorName(''); }} className="px-4 py-2 bg-slate-800 border border-white/5 text-slate-450 hover:text-white rounded-xl text-xs font-semibold">Cancel</button>
+                <button type="submit" disabled={savingVendor} className="px-4 py-2 bg-gradient-to-tr from-teal-600 to-teal-500 text-white rounded-xl hover:from-teal-500 text-xs font-bold shadow-sm disabled:opacity-40">{savingVendor ? 'Saving...' : 'Add Supplier'}</button>
               </div>
             </form>
           </div>
@@ -562,10 +576,10 @@ export default function PurchaseOrdersPage() {
       )}
 
       {showPdfModal && savedPoId && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-          <div className="bg-white rounded-xl shadow-xl p-6 max-w-sm w-full" onClick={(e) => e.stopPropagation()}>
-            <h3 className="text-lg font-semibold text-gray-900 mb-2">PO saved</h3>
-            <p className="text-gray-600 text-sm mb-4">Download or print the PDF.</p>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-955/80 backdrop-blur-sm p-4">
+          <div className="bg-slate-900 border border-white/10 shadow-[0_24px_50px_rgba(0,0,0,0.4)] rounded-2xl p-6 max-w-sm w-full" onClick={(e) => e.stopPropagation()}>
+            <h3 className="text-lg font-bold text-white mb-2">Purchase Order Saved</h3>
+            <p className="text-slate-450 text-xs mb-5">Procurement saved. Retrieve or print PO document sheet.</p>
             <div className="flex flex-col gap-2">
               <button
                 type="button"
@@ -579,7 +593,7 @@ export default function PurchaseOrdersPage() {
                     toast.error('Failed to download PDF');
                   }
                 }}
-                className="w-full px-4 py-2.5 rounded-lg font-medium bg-[#0f766e] text-white hover:bg-[#0d6b63]"
+                className="w-full px-4 py-2.5 bg-gradient-to-tr from-teal-600 to-teal-500 hover:from-teal-500 border border-white/10 text-white rounded-xl text-xs font-bold transition-all shadow-sm"
               >
                 Download PDF
               </button>
@@ -595,9 +609,9 @@ export default function PurchaseOrdersPage() {
                     toast.error('Failed to open PDF for printing');
                   }
                 }}
-                className="w-full px-4 py-2.5 rounded-lg font-medium border border-gray-300 text-gray-700 hover:bg-gray-50"
+                className="w-full px-4 py-2.5 bg-slate-800 border border-white/5 text-slate-350 hover:text-white rounded-xl text-xs font-semibold transition-all"
               >
-                Print PDF
+                Print PO PDF
               </button>
               <button
                 type="button"
@@ -605,9 +619,9 @@ export default function PurchaseOrdersPage() {
                   setShowPdfModal(false);
                   setSavedPoId(null);
                 }}
-                className="w-full px-4 py-2.5 rounded-lg font-medium text-gray-600 hover:bg-gray-100"
+                className="w-full px-4 py-2.5 bg-slate-900 border border-white/5 text-slate-500 hover:text-slate-400 rounded-xl text-xs font-semibold transition-all"
               >
-                Done
+                Finish
               </button>
             </div>
           </div>

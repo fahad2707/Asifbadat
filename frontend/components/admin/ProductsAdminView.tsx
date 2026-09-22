@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState, useRef, useCallback } from 'react';
+import { useRouter } from 'next/navigation';
 import {
   Plus,
   Edit,
@@ -90,6 +91,7 @@ interface ImportExecuteResult {
 export type ProductsAdminMode = 'active' | 'inactive';
 
 export function ProductsAdminView({ mode }: { mode: ProductsAdminMode }) {
+  const router = useRouter();
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
@@ -382,16 +384,18 @@ export function ProductsAdminView({ mode }: { mode: ProductsAdminMode }) {
     <div>
       <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between mb-8">
         <div>
-          <h1 className="text-4xl font-bold text-gray-900">
-            {mode === 'inactive' ? 'Inactive products' : 'Products'}
+          <h1 className="text-3xl font-extrabold text-white tracking-tight">
+            {mode === 'inactive' ? 'Inactive Catalog Products' : 'Products & Catalog'}
           </h1>
-          {mode === 'inactive' && (
-            <p className="text-gray-600 mt-2 max-w-2xl text-sm">
-              Hidden from the public storefront. Use <strong>Set active</strong> or edit the product and turn on “Active on website”.
+          {mode === 'inactive' ? (
+            <p className="text-slate-400 mt-2 max-w-2xl text-xs">
+              Hidden from the public storefront. Use <strong>Set active</strong> or edit the product and turn on &ldquo;Active on website&rdquo;.
             </p>
+          ): (
+            <p className="text-slate-400 text-xs mt-1">Manage active catalog items, stock limits, and bulk categorical settings.</p>
           )}
           {totalCount !== null && (
-            <p className="text-gray-600 mt-1 font-medium">
+            <p className="text-teal-400 mt-1.5 font-bold text-xs uppercase tracking-wider">
               {mode === 'inactive' ? 'Inactive' : 'Active'}: {totalCount.toLocaleString()} product{totalCount !== 1 ? 's' : ''}
             </p>
           )}
@@ -408,17 +412,17 @@ export function ProductsAdminView({ mode }: { mode: ProductsAdminMode }) {
             <a
               href="/product-import-sample.csv"
               download="product-import-sample.csv"
-              className="bg-gray-100 text-gray-700 px-5 py-3 rounded-lg font-semibold hover:bg-gray-200 transition-colors flex items-center gap-2 border border-gray-300"
+              className="inline-flex items-center gap-2 px-3.5 py-2.5 bg-gradient-to-b from-white/[0.10] to-white/[0.02] border border-white/[0.08] hover:bg-white/[0.06] active:scale-[0.98] rounded-xl text-xs font-semibold text-white transition-all cursor-pointer"
             >
-              <FileSpreadsheet className="w-5 h-5" />
+              <FileSpreadsheet className="w-4 h-4 text-slate-400" />
               Sample CSV
             </a>
             <button
               type="button"
               onClick={() => fileInputRef.current?.click()}
-              className="bg-gray-100 text-gray-700 px-5 py-3 rounded-lg font-semibold hover:bg-gray-200 transition-colors flex items-center gap-2 border border-gray-300"
+              className="inline-flex items-center gap-2 px-3.5 py-2.5 bg-gradient-to-b from-white/[0.10] to-white/[0.02] border border-white/[0.08] hover:bg-white/[0.06] active:scale-[0.98] rounded-xl text-xs font-semibold text-white transition-all cursor-pointer"
             >
-              <Upload className="w-5 h-5" />
+              <Upload className="w-4 h-4 text-slate-400" />
               Import CSV
             </button>
             <button
@@ -427,36 +431,36 @@ export function ProductsAdminView({ mode }: { mode: ProductsAdminMode }) {
                 setEditingProduct(null);
                 setShowModal(true);
               }}
-              className="bg-[#0f766e] text-white px-6 py-3 rounded-lg font-semibold hover:bg-[#0d5d57] transition-colors flex items-center gap-2"
+              className="inline-flex items-center gap-2 px-5 py-3 bg-gradient-to-tr from-teal-600 to-teal-500 hover:from-teal-500 hover:to-teal-400 border border-white/10 active:scale-[0.98] rounded-xl text-xs font-bold text-white transition-all shadow-md shadow-teal-500/10 cursor-pointer"
             >
-              <Plus className="w-5 h-5" />
+              <Plus className="w-4 h-4" />
               Add new product
             </button>
           </div>
         )}
       </div>
 
-      <div className="bg-white rounded-xl shadow-md border border-gray-200 p-4 mb-6 space-y-3">
+      <div className="bg-slate-900/40 backdrop-blur-lg border border-white/[0.06] border-t-white/[0.18] shadow-[0_12px_40px_rgba(0,0,0,0.25)] rounded-2xl p-4 mb-6 space-y-3">
         <div className="relative w-full">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400 pointer-events-none" />
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500 pointer-events-none" />
           <input
             type="text"
             placeholder="Search name, Product ID, SKU, category, description…"
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
-            className="w-full pl-10 pr-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 text-base"
+            className="w-full pl-10 pr-4 py-2.5 bg-slate-950/60 border border-white/10 rounded-xl focus:ring-1 focus:ring-teal-500 text-xs text-slate-200 placeholder-slate-500 focus:outline-none font-semibold"
           />
         </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="text-sm text-gray-600 font-medium shrink-0">Pictures:</span>
+        <div className="flex flex-wrap items-center gap-2 text-xs">
+          <span className="text-slate-450 font-bold tracking-wider uppercase shrink-0">Pictures:</span>
           <div className="flex flex-wrap gap-2">
             <button
               type="button"
               onClick={() => setImageFilter('all')}
-              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium border transition-colors ${
+              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-semibold border transition-colors ${
                 imageFilter === 'all'
-                  ? 'bg-[#0f766e] text-white border-[#0f766e]'
-                  : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
+                  ? 'bg-teal-600/30 text-teal-400 border-teal-500/40'
+                  : 'bg-slate-950/40 text-slate-350 border-white/10 hover:bg-white/5'
               }`}
             >
               All
@@ -464,48 +468,48 @@ export function ProductsAdminView({ mode }: { mode: ProductsAdminMode }) {
             <button
               type="button"
               onClick={() => setImageFilter(imageFilter === 'no_image' ? 'all' : 'no_image')}
-              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium border transition-colors ${
+              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-semibold border transition-colors ${
                 imageFilter === 'no_image'
-                  ? 'bg-amber-600 text-white border-amber-600'
-                  : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
+                  ? 'bg-amber-600/30 text-amber-400 border-amber-500/40'
+                  : 'bg-slate-950/40 text-slate-350 border-white/10 hover:bg-white/5'
               }`}
             >
-              <ImageOff className="w-4 h-4" />
+              <ImageOff className="w-3.5 h-3.5" />
               Missing image
               <span className="tabular-nums opacity-90">({noImageCount.toLocaleString()})</span>
             </button>
             <button
               type="button"
               onClick={() => setImageFilter(imageFilter === 'has_image' ? 'all' : 'has_image')}
-              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium border transition-colors ${
+              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-semibold border transition-colors ${
                 imageFilter === 'has_image'
-                  ? 'bg-[#0f766e] text-white border-[#0f766e]'
-                  : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
+                  ? 'bg-teal-600/30 text-teal-400 border-teal-500/40'
+                  : 'bg-slate-950/40 text-slate-350 border-white/10 hover:bg-white/5'
               }`}
             >
-              <Image className="w-4 h-4" />
+              <Image className="w-3.5 h-3.5" />
               Has image
             </button>
           </div>
         </div>
-        <div className="flex flex-wrap items-center justify-between gap-3 pt-1 border-t border-gray-100">
-          <p className="text-sm text-gray-600">
+        <div className="flex flex-wrap items-center justify-between gap-3 pt-1 border-t border-white/5 text-xs font-semibold text-slate-400">
+          <p>
             {totalFiltered === 0 ? (
               <>No products match.</>
             ) : (
               <>
                 Showing{' '}
-                <span className="font-medium text-gray-900 tabular-nums">
-                  {(safePage - 1) * pageSize + 1}–{Math.min(safePage * pageSize, totalFiltered)}
+                <span className="font-semibold text-slate-200 tabular-nums">
+                  {((safePage - 1) * pageSize + 1).toLocaleString()}–{Math.min(safePage * pageSize, totalFiltered).toLocaleString()}
                 </span>{' '}
-                of <span className="font-medium text-gray-900 tabular-nums">{totalFiltered.toLocaleString()}</span>
+                of <span className="font-semibold text-slate-200 tabular-nums">{totalFiltered.toLocaleString()}</span>
                 {searchTerm.trim() || imageFilter !== 'all' || (mode === 'active' && stockFilter !== 'all') ? (
-                  <span className="text-gray-500"> (filtered)</span>
+                  <span className="text-slate-500"> (filtered)</span>
                 ) : null}
               </>
             )}
           </p>
-          <label className="flex items-center gap-2 text-sm text-gray-700">
+          <label className="flex items-center gap-2 text-slate-455">
             <span className="shrink-0">Rows per page</span>
             <select
               value={pageSize}
@@ -513,7 +517,7 @@ export function ProductsAdminView({ mode }: { mode: ProductsAdminMode }) {
                 setPageSize(Number(e.target.value));
                 setPage(1);
               }}
-              className="border border-gray-300 rounded-lg px-2 py-1.5 bg-white font-medium"
+              className="border border-white/10 rounded-lg px-2.5 py-1 bg-slate-950/60 font-medium text-white focus:outline-none focus:ring-1 focus:ring-teal-500"
             >
               <option value={25}>25</option>
               <option value={50}>50</option>
@@ -522,46 +526,45 @@ export function ProductsAdminView({ mode }: { mode: ProductsAdminMode }) {
           </label>
         </div>
       </div>
-
       {/* Low stock / Out of stock indicators - click to filter */}
       {mode === 'active' && (
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6">
         <button
           type="button"
           onClick={() => setStockFilter(stockFilter === 'low_stock' ? 'all' : 'low_stock')}
-          className={`flex items-center gap-4 p-5 rounded-xl border-2 transition-all text-left ${
-            stockFilter === 'low_stock' ? 'border-amber-500 bg-amber-50' : 'border-gray-200 bg-white hover:border-amber-300 hover:bg-amber-50/50'
+          className={`flex items-center gap-4 p-5 rounded-2xl border transition-all text-left ${
+            stockFilter === 'low_stock' ? 'border-amber-500/40 bg-amber-950/20' : 'border-white/5 bg-slate-900/40 hover:border-amber-300/30'
           }`}
         >
-          <div className="w-14 h-14 rounded-full bg-amber-100 flex items-center justify-center shrink-0">
-            <AlertCircle className="w-7 h-7 text-amber-600" />
+          <div className="w-12 h-12 rounded-full bg-amber-500/10 flex items-center justify-center shrink-0">
+            <AlertCircle className="w-6 h-6 text-amber-500 animate-pulse" />
           </div>
           <div>
-            <p className="text-2xl font-bold text-amber-700">{lowStockCount}</p>
-            <p className="text-sm font-medium text-gray-600">LOW STOCK</p>
+            <p className="text-2xl font-black text-amber-400">{lowStockCount}</p>
+            <p className="text-[10px] font-bold text-slate-450 tracking-wider uppercase">LOW STOCK WARNINGS</p>
           </div>
         </button>
         <button
           type="button"
           onClick={() => setStockFilter(stockFilter === 'out_of_stock' ? 'all' : 'out_of_stock')}
-          className={`flex items-center gap-4 p-5 rounded-xl border-2 transition-all text-left ${
-            stockFilter === 'out_of_stock' ? 'border-red-500 bg-red-50' : 'border-gray-200 bg-white hover:border-red-300 hover:bg-red-50/50'
+          className={`flex items-center gap-4 p-5 rounded-2xl border transition-all text-left ${
+            stockFilter === 'out_of_stock' ? 'border-red-500/40 bg-red-950/20' : 'border-white/5 bg-slate-900/40 hover:border-red-300/30'
           }`}
         >
-          <div className="w-14 h-14 rounded-full bg-red-100 flex items-center justify-center shrink-0">
-            <XCircle className="w-7 h-7 text-red-600" />
+          <div className="w-12 h-12 rounded-full bg-red-500/10 flex items-center justify-center shrink-0">
+            <XCircle className="w-6 h-6 text-red-500" />
           </div>
           <div>
-            <p className="text-2xl font-bold text-red-700">{outOfStockCount}</p>
-            <p className="text-sm font-medium text-gray-600">OUT OF STOCK</p>
+            <p className="text-2xl font-black text-red-400">{outOfStockCount}</p>
+            <p className="text-[10px] font-bold text-slate-450 tracking-wider uppercase">OUT OF STOCK PRODUCTS</p>
           </div>
         </button>
       </div>
       )}
       {mode === 'active' && stockFilter !== 'all' && (
-        <p className="text-sm text-gray-600 mb-2">
+        <p className="text-xs text-slate-400 mb-2 font-semibold flex items-center gap-2">
           Showing only {stockFilter === 'low_stock' ? 'low stock' : 'out of stock'} products.
-          <button type="button" onClick={() => setStockFilter('all')} className="ml-2 text-[#0f766e] font-medium hover:underline">Show all</button>
+          <button type="button" onClick={() => setStockFilter('all')} className="text-teal-400 font-bold hover:underline">Show all catalog items</button>
         </p>
       )}
 
@@ -569,73 +572,73 @@ export function ProductsAdminView({ mode }: { mode: ProductsAdminMode }) {
       <>
       {/* Import preview / progress / summary */}
       {importStep === 'preview' && preview && (
-        <div className="bg-white rounded-xl shadow-md border border-gray-200 p-6 mb-6">
-          <h2 className="text-xl font-bold text-gray-900 mb-4">Import preview</h2>
-          <p className="text-sm text-gray-600 mb-4">
-            File: <span className="font-medium">{selectedFile?.name}</span>
+        <div className="bg-slate-900/40 backdrop-blur-lg border border-white/[0.06] border-t-white/[0.18] shadow-[0_12px_40px_rgba(0,0,0,0.25)] rounded-2xl p-6 mb-6">
+          <h2 className="text-xl font-bold text-white mb-4">Import Preview</h2>
+          <p className="text-xs text-slate-400 mb-4 font-semibold">
+            File target: <span className="font-mono text-slate-200">{selectedFile?.name}</span>
           </p>
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-6">
-            <div className="bg-gray-50 rounded-lg p-3">
-              <p className="text-2xl font-bold text-gray-900">{preview.summary.total}</p>
-              <p className="text-sm text-gray-500">Total rows</p>
+            <div className="bg-slate-950/40 border border-white/5 rounded-xl p-3">
+              <p className="text-2xl font-black text-white">{preview.summary.total}</p>
+              <p className="text-[10px] text-slate-500 font-bold uppercase tracking-wider mt-0.5">Total rows</p>
             </div>
-            <div className="bg-green-50 rounded-lg p-3">
-              <p className="text-2xl font-bold text-green-700">{preview.summary.valid}</p>
-              <p className="text-sm text-green-600">Ready to import</p>
+            <div className="bg-teal-950/20 border border-teal-500/20 rounded-xl p-3">
+              <p className="text-2xl font-black text-teal-400">{preview.summary.valid}</p>
+              <p className="text-[10px] text-teal-300/80 font-bold uppercase tracking-wider mt-0.5 font-bold">Ready to import</p>
             </div>
-            <div className="bg-red-50 rounded-lg p-3">
-              <p className="text-2xl font-bold text-red-700">{preview.summary.invalid}</p>
-              <p className="text-sm text-red-600">Invalid</p>
+            <div className="bg-rose-955/20 border border-rose-500/20 rounded-xl p-3">
+              <p className="text-2xl font-black text-rose-400">{preview.summary.invalid}</p>
+              <p className="text-[10px] text-rose-350/80 font-bold uppercase tracking-wider mt-0.5 font-bold">Invalid rows</p>
             </div>
-            <div className="bg-amber-50 rounded-lg p-3">
-              <p className="text-2xl font-bold text-amber-700">{preview.summary.duplicate_skipped}</p>
-              <p className="text-sm text-amber-600">Duplicates (in file)</p>
+            <div className="bg-amber-955/20 border border-amber-500/20 rounded-xl p-3">
+              <p className="text-2xl font-black text-amber-400">{preview.summary.duplicate_skipped}</p>
+              <p className="text-[10px] text-amber-300/80 font-bold uppercase tracking-wider mt-0.5 font-bold">Duplicates</p>
             </div>
           </div>
-          <div className="max-h-60 overflow-y-auto border border-gray-200 rounded-lg mb-4">
-            <table className="w-full text-sm">
-              <thead className="bg-gray-50 sticky top-0">
+          <div className="max-h-60 overflow-y-auto border border-white/5 rounded-xl bg-slate-950/20 mb-4">
+            <table className="w-full text-xs">
+              <thead className="bg-slate-950/60 sticky top-0 border-b border-white/5 text-slate-400">
                 <tr>
-                  <th className="text-left py-2 px-3 text-gray-700">Row</th>
-                  <th className="text-left py-2 px-3 text-gray-700">Status</th>
-                  <th className="text-left py-2 px-3 text-gray-700">Category / Sub</th>
-                  <th className="text-left py-2 px-3 text-gray-700">Product</th>
-                  <th className="text-right py-2 px-3 text-gray-700">Price</th>
-                  <th className="text-left py-2 px-3 text-gray-700">Errors</th>
+                  <th className="text-left py-2.5 px-3 text-[9px] font-bold uppercase tracking-wider">Row</th>
+                  <th className="text-left py-2.5 px-3 text-[9px] font-bold uppercase tracking-wider">Status</th>
+                  <th className="text-left py-2.5 px-3 text-[9px] font-bold uppercase tracking-wider">Category / Sub</th>
+                  <th className="text-left py-2.5 px-3 text-[9px] font-bold uppercase tracking-wider">Product</th>
+                  <th className="text-right py-2.5 px-3 text-[9px] font-bold uppercase tracking-wider">Price</th>
+                  <th className="text-left py-2.5 px-3 text-[9px] font-bold uppercase tracking-wider">Errors</th>
                 </tr>
               </thead>
               <tbody>
                 {preview.rows.slice(0, 50).map((r, i) => (
-                  <tr key={i} className="border-t border-gray-100">
-                    <td className="py-2 px-3 font-mono text-gray-600">{r.rowIndex}</td>
+                  <tr key={i} className="border-t border-white/5 hover:bg-white/[0.01]">
+                    <td className="py-2 px-3 font-mono text-slate-500">{r.rowIndex}</td>
                     <td className="py-2 px-3">
-                      {r.status === 'valid' && <span className="inline-flex items-center gap-1 text-green-600"><CheckCircle2 className="w-4 h-4" /> Valid</span>}
-                      {r.status === 'invalid' && <span className="inline-flex items-center gap-1 text-red-600"><XCircle className="w-4 h-4" /> Invalid</span>}
-                      {r.status === 'duplicate_skipped' && <span className="inline-flex items-center gap-1 text-amber-600"><AlertCircle className="w-4 h-4" /> Duplicate</span>}
+                      {r.status === 'valid' && <span className="inline-flex items-center gap-1 text-teal-400"><CheckCircle2 className="w-3.5 h-3.5" /> Valid</span>}
+                      {r.status === 'invalid' && <span className="inline-flex items-center gap-1 text-rose-400"><XCircle className="w-3.5 h-3.5" /> Invalid</span>}
+                      {r.status === 'duplicate_skipped' && <span className="inline-flex items-center gap-1 text-amber-400"><AlertCircle className="w-3.5 h-3.5" /> Duplicate</span>}
                     </td>
-                    <td className="py-2 px-3 text-gray-700">
+                    <td className="py-2 px-3 text-slate-350 font-semibold">
                       {r.data ? `${r.data.category}${r.data.subcategory ? ' / ' + r.data.subcategory : ''}` : '-'}
                     </td>
-                    <td className="py-2 px-3 font-medium text-gray-900">{r.data?.name ?? '-'}</td>
-                    <td className="py-2 px-3 text-right text-gray-700">{r.data ? `$${r.data.price.toFixed(2)}` : '-'}</td>
-                    <td className="py-2 px-3 text-red-600 text-xs">{r.errors.join('; ') || '-'}</td>
+                    <td className="py-2 px-3 font-bold text-white">{r.data?.name ?? '-'}</td>
+                    <td className="py-2 px-3 text-right text-slate-205 font-mono font-bold">{r.data ? `$${r.data.price.toFixed(2)}` : '-'}</td>
+                    <td className="py-2 px-3 text-rose-400 font-semibold">{r.errors.join('; ') || '-'}</td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
           {preview.rows.length > 50 && (
-            <p className="text-sm text-gray-500 mb-4">Showing first 50 rows. All will be processed on import.</p>
+            <p className="text-xs text-slate-500 mb-4 font-semibold">Showing first 50 rows. All {preview.summary.total} rows will be processed on import.</p>
           )}
-          <div className="flex gap-3">
+          <div className="flex gap-2.5">
             <button
               onClick={handleConfirmImport}
               disabled={preview.summary.valid === 0}
-              className="bg-primary-600 text-white px-6 py-2 rounded-lg font-semibold hover:bg-primary-700 disabled:opacity-50 disabled:cursor-not-allowed"
+              className="px-5 py-2.5 bg-gradient-to-tr from-teal-600 to-teal-500 hover:from-teal-500 hover:to-teal-400 border border-white/10 text-white rounded-xl text-xs font-bold transition-all shadow-sm disabled:opacity-40"
             >
-              Import {preview.summary.valid} product{preview.summary.valid !== 1 ? 's' : ''}
+              Import {preview.summary.valid} Product{preview.summary.valid !== 1 ? 's' : ''}
             </button>
-            <button onClick={handleCloseImport} className="px-6 py-2 border border-gray-300 rounded-lg hover:bg-gray-50">
+            <button onClick={handleCloseImport} className="px-4 py-2.5 bg-slate-800 border border-white/5 text-slate-400 hover:text-white rounded-xl text-xs font-semibold">
               Cancel
             </button>
           </div>
@@ -643,53 +646,53 @@ export function ProductsAdminView({ mode }: { mode: ProductsAdminMode }) {
       )}
 
       {importStep === 'importing' && (
-        <div className="bg-white rounded-xl shadow-md border border-gray-200 p-8 mb-6 text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-2 border-primary-600 border-t-transparent mx-auto mb-4" />
-          <p className="text-gray-700 font-medium">Importing products…</p>
-          <p className="text-sm text-gray-500 mt-1">Do not close this page.</p>
+        <div className="bg-slate-900/40 backdrop-blur-lg border border-white/[0.06] border-t-white/[0.18] shadow-[0_12px_40px_rgba(0,0,0,0.25)] rounded-2xl p-8 mb-6 text-center">
+          <div className="animate-spin rounded-full h-10 w-10 border-2 border-teal-500 border-t-transparent mx-auto mb-4" />
+          <p className="text-white font-bold text-sm">Executing CSV Database Upsert...</p>
+          <p className="text-xs text-slate-500 mt-1 font-semibold">Do not close this window or navigate away.</p>
         </div>
       )}
 
       {importStep === 'done' && importResult && (
-        <div className="bg-white rounded-xl shadow-md border border-gray-200 p-6 mb-6">
-          <h2 className="text-xl font-bold text-gray-900 mb-4">Import summary</h2>
+        <div className="bg-slate-900/40 backdrop-blur-lg border border-white/[0.06] border-t-white/[0.18] shadow-[0_12px_40px_rgba(0,0,0,0.25)] rounded-2xl p-6 mb-6">
+          <h2 className="text-xl font-bold text-white mb-4">Import Run Summary</h2>
           <div className="grid grid-cols-2 sm:grid-cols-5 gap-4 mb-4">
-            <div className="bg-gray-50 rounded-lg p-3">
-              <p className="text-2xl font-bold text-gray-900">{importResult.total}</p>
-              <p className="text-sm text-gray-500">Total rows</p>
+            <div className="bg-slate-950/40 border border-white/5 rounded-xl p-3">
+              <p className="text-2xl font-black text-white">{importResult.total}</p>
+              <p className="text-[10px] text-slate-500 font-bold uppercase tracking-wider mt-0.5">Rows read</p>
             </div>
-            <div className="bg-green-50 rounded-lg p-3">
-              <p className="text-2xl font-bold text-green-700">{importResult.imported}</p>
-              <p className="text-sm text-green-600">Imported</p>
+            <div className="bg-teal-950/20 border border-teal-500/20 rounded-xl p-3">
+              <p className="text-2xl font-black text-teal-400">{importResult.imported}</p>
+              <p className="text-[10px] text-teal-350/85 font-bold uppercase tracking-wider mt-0.5">Imported</p>
             </div>
-            <div className="bg-red-50 rounded-lg p-3">
-              <p className="text-2xl font-bold text-red-700">{importResult.failed}</p>
-              <p className="text-sm text-red-600">Failed</p>
+            <div className="bg-rose-955/20 border border-rose-500/20 rounded-xl p-3">
+              <p className="text-2xl font-black text-rose-400">{importResult.failed}</p>
+              <p className="text-[10px] text-rose-350/85 font-bold uppercase tracking-wider mt-0.5">Failed</p>
             </div>
-            <div className="bg-amber-50 rounded-lg p-3">
-              <p className="text-2xl font-bold text-amber-700">{importResult.duplicate_skipped}</p>
-              <p className="text-sm text-amber-600">Duplicates skipped</p>
+            <div className="bg-amber-955/20 border border-amber-500/20 rounded-xl p-3">
+              <p className="text-2xl font-black text-amber-400">{importResult.duplicate_skipped}</p>
+              <p className="text-[10px] text-amber-350/85 font-bold uppercase tracking-wider mt-0.5">Duplicates</p>
             </div>
-            <div className="bg-blue-50 rounded-lg p-3">
-              <p className="text-2xl font-bold text-blue-700">{importResult.categories_created + importResult.subcategories_created}</p>
-              <p className="text-sm text-blue-600">Categories/Subs created</p>
+            <div className="bg-blue-955/20 border border-blue-500/20 rounded-xl p-3">
+              <p className="text-2xl font-black text-blue-400">{importResult.categories_created + importResult.subcategories_created}</p>
+              <p className="text-[10px] text-blue-350/85 font-bold uppercase tracking-wider mt-0.5">Taxonomy tags</p>
             </div>
           </div>
           {(importResult.errors?.length > 0 || importResult.duplicate_skipped_rows?.length) && (
-            <div className="max-h-40 overflow-y-auto text-sm mb-4">
-              <p className="text-gray-600 font-medium mb-1">Errors / skipped:</p>
-              <ul className="list-disc list-inside text-red-600 space-y-0.5">
+            <div className="max-h-40 overflow-y-auto text-xs font-semibold mb-4 space-y-2 p-3 bg-slate-950/40 rounded-xl border border-white/5">
+              <p className="text-slate-400 uppercase tracking-wider text-[9px] font-bold">Trace errors logs:</p>
+              <ul className="list-disc list-inside text-rose-400 space-y-1">
                 {importResult.errors?.slice(0, 20).map((e, i) => (
                   <li key={i}>Row {e.row}: {e.message}</li>
                 ))}
                 {importResult.duplicate_skipped_rows?.slice(0, 10).map((e, i) => (
-                  <li key={`d-${i}`} className="text-amber-600">Row {e.row}: {e.message}</li>
+                  <li key={`d-${i}`} className="text-amber-400">Row {e.row}: {e.message}</li>
                 ))}
               </ul>
             </div>
           )}
-          <button onClick={handleCloseImport} className="px-6 py-2 bg-gray-100 rounded-lg hover:bg-gray-200 font-medium">
-            Close
+          <button onClick={handleCloseImport} className="px-5 py-2.5 bg-slate-800 border border-white/5 text-slate-400 hover:text-white rounded-xl text-xs font-semibold transition-all">
+            Close Panel
           </button>
         </div>
       )}
@@ -697,23 +700,23 @@ export function ProductsAdminView({ mode }: { mode: ProductsAdminMode }) {
       )}
 
       {selectedIds.size > 0 && (
-      <div className="bg-white rounded-xl shadow-md p-6 mb-6 flex flex-wrap items-center gap-4">
+      <div className="bg-slate-900/40 backdrop-blur-lg border border-white/[0.06] border-t-white/[0.18] p-4 rounded-2xl mb-6 flex flex-wrap items-center gap-4 text-xs font-semibold">
           <div className="flex flex-col gap-3 w-full lg:flex-row lg:flex-wrap lg:items-end">
             <div className="flex items-center gap-2 flex-wrap">
-              <span className="text-sm text-gray-600 font-medium">{selectedIds.size} selected</span>
-              <span className="text-xs text-gray-500 hidden sm:inline">Tip: use the header checkbox to select all rows in the current list.</span>
+              <span className="text-slate-450 font-bold">{selectedIds.size} selected</span>
+              <span className="text-[10px] text-slate-550 hidden sm:inline">Tip: use the header checkbox to select all rows in current page view.</span>
             </div>
             {mode === 'active' && (
-            <div className="flex flex-wrap items-center gap-2 p-3 rounded-lg border border-[#0f766e]/25 bg-teal-50/60 w-full lg:w-auto lg:max-w-3xl">
-              <Layers className="w-5 h-5 text-[#0f766e] shrink-0 hidden sm:block" />
-              <span className="text-sm font-medium text-gray-800 shrink-0">Bulk assign</span>
+            <div className="flex flex-wrap items-center gap-2 p-2 border border-white/5 bg-slate-950/40 rounded-xl w-full lg:w-auto">
+              <Layers className="w-4 h-4 text-teal-400 shrink-0 hidden sm:block" />
+              <span className="text-slate-350 shrink-0">Bulk Category:</span>
               <select
                 value={bulkCategoryId}
                 onChange={(e) => {
                   setBulkCategoryId(e.target.value);
                   setBulkSubId('');
                 }}
-                className="text-sm border border-gray-300 rounded-lg px-3 py-2 bg-white min-w-[160px] max-w-[220px]"
+                className="border border-white/10 rounded-lg px-2.5 py-1 bg-slate-950/60 font-medium text-white focus:outline-none focus:ring-1 focus:ring-teal-500"
               >
                 <option value="">Category…</option>
                 {categories.map((c) => (
@@ -726,7 +729,7 @@ export function ProductsAdminView({ mode }: { mode: ProductsAdminMode }) {
                 value={bulkSubId}
                 disabled={!bulkCategoryId}
                 onChange={(e) => setBulkSubId(e.target.value)}
-                className="text-sm border border-gray-300 rounded-lg px-3 py-2 bg-white min-w-[160px] max-w-[220px] disabled:opacity-50"
+                className="border border-white/10 rounded-lg px-2.5 py-1 bg-slate-950/60 font-medium text-white focus:outline-none focus:ring-1 focus:ring-teal-500 disabled:opacity-50"
               >
                 <option value="">No subcategory</option>
                 {subCategories
@@ -741,7 +744,7 @@ export function ProductsAdminView({ mode }: { mode: ProductsAdminMode }) {
                 type="button"
                 disabled={!bulkCategoryId || bulkAssigning}
                 onClick={handleBulkAssignCategory}
-                className="text-sm bg-[#0f766e] text-white px-4 py-2 rounded-lg font-semibold hover:bg-[#0d5d57] disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
+                className="bg-teal-600 hover:bg-teal-500 text-white px-3 py-1.5 rounded-lg border border-white/10 font-bold whitespace-nowrap active:scale-95 disabled:opacity-40 transition-all cursor-pointer"
               >
                 {bulkAssigning ? 'Applying…' : `Apply to ${selectedIds.size}`}
               </button>
@@ -751,34 +754,34 @@ export function ProductsAdminView({ mode }: { mode: ProductsAdminMode }) {
               <button
                 type="button"
                 onClick={handleExportSelected}
-                className="bg-gray-100 text-gray-700 px-4 py-2 rounded-lg font-medium hover:bg-gray-200 flex items-center gap-2"
+                className="inline-flex items-center gap-2 px-3 py-2 bg-slate-950/40 border border-white/10 hover:bg-white/5 text-slate-300 rounded-lg text-xs font-semibold"
               >
-                <FileDown className="w-4 h-4" />
+                <FileDown className="w-3.5 h-3.5 text-teal-400" />
                 Export
               </button>
               {mode === 'inactive' ? (
               <button
                 type="button"
                 onClick={handleBulkActivate}
-                className="bg-[#0f766e] text-white px-4 py-2 rounded-lg font-medium hover:bg-[#0d5d57] flex items-center gap-2"
+                className="inline-flex items-center gap-1.5 px-3 py-2 bg-gradient-to-tr from-teal-600 to-teal-500 hover:from-teal-500 hover:to-teal-400 border border-white/10 text-white rounded-xl text-xs font-bold cursor-pointer active:scale-95"
               >
-                <RotateCcw className="w-4 h-4" />
+                <RotateCcw className="w-3.5 h-3.5" />
                 Set active
               </button>
               ) : (
               <button
                 type="button"
                 onClick={handleBulkDelete}
-                className="bg-red-600 text-white px-4 py-2 rounded-lg font-medium hover:bg-red-700 flex items-center gap-2"
+                className="inline-flex items-center gap-1.5 px-3 py-2 bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/30 text-rose-455 rounded-xl text-xs font-bold cursor-pointer active:scale-95 transition-all"
               >
-                <Trash2 className="w-4 h-4" />
+                <Trash2 className="w-3.5 h-3.5" />
                 Deactivate
               </button>
               )}
               <button
                 type="button"
                 onClick={() => setSelectedIds(new Set())}
-                className="text-gray-600 hover:text-gray-900 text-sm font-medium"
+                className="text-slate-500 hover:text-slate-205 font-bold"
               >
                 Clear selection
               </button>
@@ -788,69 +791,69 @@ export function ProductsAdminView({ mode }: { mode: ProductsAdminMode }) {
       )}
 
       {loading ? (
-        <div className="flex justify-center h-64">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-600" />
+        <div className="flex justify-center h-64 items-center">
+          <div className="animate-spin rounded-full h-10 w-10 border-2 border-teal-500 border-t-transparent" />
         </div>
       ) : (
-        <div className="bg-white rounded-xl shadow-md">
-          <table className="w-full">
-            <thead className="bg-gray-50 sticky top-0 z-10 shadow-sm">
+        <div className="bg-slate-900/40 backdrop-blur-lg border border-white/[0.06] rounded-2xl shadow-xl overflow-hidden">
+          <table className="w-full text-xs font-semibold">
+            <thead className="bg-slate-950/60 sticky top-0 z-10 border-b border-white/5 text-slate-400">
               <tr>
-                <th className="w-12 py-3 px-4 text-center text-gray-700">#</th>
-                <th className="w-12 py-3 px-4">
+                <th className="w-12 py-3.5 px-4 text-center">#</th>
+                <th className="w-12 py-3.5 px-4">
                   <input
                     type="checkbox"
                     checked={filteredProducts.length > 0 && selectedIds.size === filteredProducts.length}
                     onChange={toggleSelectAll}
-                    className="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+                    className="rounded bg-slate-900 border-white/10 text-teal-400 focus:ring-teal-500"
                   />
                 </th>
-                <th className="text-left py-3 px-4 text-gray-700">Product</th>
-                <th className="text-left py-3 px-4 text-gray-700">Category</th>
-                <th className="text-right py-3 px-4 text-gray-700">Price</th>
-                <th className="text-right py-3 px-4 text-gray-700">Stock</th>
-                <th className="text-left py-3 px-4 text-gray-700">Product ID</th>
-                <th className="text-left py-3 px-4 text-gray-700">SKU</th>
-                <th className="text-right py-3 px-4 text-gray-700 min-w-[200px]">Actions</th>
+                <th className="text-left py-3.5 px-4 font-bold tracking-wider uppercase text-[10px]">Product name</th>
+                <th className="text-left py-3.5 px-4 font-bold tracking-wider uppercase text-[10px]">Category</th>
+                <th className="text-right py-3.5 px-4 font-bold tracking-wider uppercase text-[10px]">Price</th>
+                <th className="text-right py-3.5 px-4 font-bold tracking-wider uppercase text-[10px]">Stock</th>
+                <th className="text-left py-3.5 px-4 font-bold tracking-wider uppercase text-[10px]">Product ID</th>
+                <th className="text-left py-3.5 px-4 font-bold tracking-wider uppercase text-[10px]">SKU</th>
+                <th className="text-right py-3.5 px-4 font-bold tracking-wider uppercase text-[10px] min-w-[200px]">Actions</th>
               </tr>
             </thead>
-            <tbody>
+            <tbody className="divide-y divide-white/5">
               {pagedProducts.map((product, index) => (
-                <tr key={String(product.id)} className="border-b hover:bg-gray-50">
-                  <td className="py-3 px-4 text-center text-gray-600 font-medium">{(safePage - 1) * pageSize + index + 1}</td>
-                  <td className="py-3 px-4">
+                <tr key={String(product.id)} className="hover:bg-white/[0.02] cursor-pointer transition-colors" onClick={() => router.push(`/admin/products/${product.id}`)}>
+                  <td className="py-3 px-4 text-center text-slate-500">{(safePage - 1) * pageSize + index + 1}</td>
+                  <td className="py-3 px-4" onClick={(e) => e.stopPropagation()}>
                     <input
                       type="checkbox"
                       checked={selectedIds.has(String(product.id))}
                       onChange={() => toggleSelect(product.id)}
-                      className="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+                      className="rounded bg-slate-900 border-white/10 text-teal-400 focus:ring-teal-500"
                     />
                   </td>
                   <td className="py-3 px-4">
                     <div className="flex items-center gap-3">
                       {product.image_url && (
-                        <img src={product.image_url} alt={product.name} className="w-12 h-12 object-cover rounded-lg" />
+                        <img src={product.image_url} alt={product.name} className="w-10 h-10 object-cover rounded-xl border border-white/10 shadow-sm" />
                       )}
-                      <span className="font-medium text-gray-900">{product.name}</span>
+                      <span className="font-bold text-white hover:text-teal-400 transition-colors">{product.name}</span>
                     </div>
                   </td>
-                  <td className="py-3 px-4 text-gray-700">{product.category_name || '-'}</td>
-                  <td className="py-3 px-4 text-right font-semibold text-gray-900">
+                  <td className="py-3 px-4 text-slate-350 font-semibold">{product.category_name || '-'}</td>
+                  <td className="py-3 px-4 text-right font-bold text-slate-200">
                     ${parseFloat(product.price.toString()).toFixed(2)}
                   </td>
                   <td className="py-3 px-4 text-right">
-                    <span className={product.stock_quantity <= 10 ? 'text-red-600 font-semibold' : 'text-gray-900'}>
+                    <span className={product.stock_quantity <= 10 ? 'text-rose-400 font-black' : 'text-slate-200'}>
                       {product.stock_quantity}
                     </span>
                   </td>
-                  <td className="py-3 px-4 text-gray-700 font-mono text-sm font-semibold">{product.product_id || '-'}</td>
-                  <td className="py-3 px-4 text-gray-700 font-mono text-sm">{product.sku || '-'}</td>
-                  <td className="py-3 px-4">
+                  <td className="py-3 px-4 text-slate-400 font-mono text-[10px] font-semibold">{product.product_id || '-'}</td>
+                  <td className="py-3 px-4 text-slate-400 font-mono text-[10px]">{product.sku || '-'}</td>
+                  <td className="py-3 px-4" onClick={(e) => e.stopPropagation()}>
                     <div className="flex items-center justify-end gap-3 flex-wrap">
-                      <label className="inline-flex items-center gap-2 cursor-pointer select-none text-xs font-medium text-gray-700">
+                      <label className="inline-flex items-center gap-2 cursor-pointer select-none text-[10px] font-bold text-slate-400 uppercase tracking-wider">
                         <input
                           type="checkbox"
-                          className="rounded border-gray-300 text-[#0f766e] focus:ring-[#0f766e] h-4 w-4 shrink-0 disabled:opacity-50"
+                          className="rounded bg-slate-900 border-white/10 text-teal-500 focus:ring-teal-500 h-3.5 w-3.5 shrink-0 disabled:opacity-50"
                           checked={product.is_active !== false}
                           disabled={togglingId === String(product.id)}
                           onChange={(e) => {
@@ -866,8 +869,8 @@ export function ProductsAdminView({ mode }: { mode: ProductsAdminMode }) {
                           setEditingProduct(product);
                           setShowModal(true);
                         }}
-                        className="p-2 text-primary-600 hover:bg-primary-50 rounded-lg"
-                        title="Edit"
+                        className="p-2 text-slate-450 hover:text-white hover:bg-white/5 rounded-xl border border-white/5 transition-all outline-none"
+                        title="Edit specifications"
                       >
                         <Edit className="w-4 h-4" />
                       </button>
@@ -878,17 +881,17 @@ export function ProductsAdminView({ mode }: { mode: ProductsAdminMode }) {
             </tbody>
           </table>
           {totalFiltered > 0 && pageCount > 1 && (
-            <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3 border-t border-gray-200 bg-gray-50/80">
-              <p className="text-sm text-gray-600">
-                Page <span className="font-semibold text-gray-900 tabular-nums">{safePage}</span> of{' '}
-                <span className="font-semibold text-gray-900 tabular-nums">{pageCount}</span>
+            <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3.5 border-t border-white/5 bg-slate-950/40 text-xs font-semibold text-slate-400">
+              <p>
+                Page <span className="font-bold text-white tabular-nums">{safePage}</span> of{' '}
+                <span className="font-bold text-white tabular-nums">{pageCount}</span>
               </p>
               <div className="flex items-center gap-2">
                 <button
                   type="button"
                   disabled={safePage <= 1}
                   onClick={() => setPage((p) => Math.max(1, p - 1))}
-                  className="inline-flex items-center gap-1 px-3 py-2 rounded-lg border border-gray-300 bg-white text-sm font-medium text-gray-800 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="inline-flex items-center gap-1 px-3 py-2 rounded-xl border border-white/10 bg-slate-950/60 text-xs font-bold text-white hover:bg-white/5 disabled:opacity-40 disabled:cursor-not-allowed transition-all"
                 >
                   <ChevronLeft className="w-4 h-4" />
                   Previous
@@ -897,7 +900,7 @@ export function ProductsAdminView({ mode }: { mode: ProductsAdminMode }) {
                   type="button"
                   disabled={safePage >= pageCount}
                   onClick={() => setPage((p) => p + 1)}
-                  className="inline-flex items-center gap-1 px-3 py-2 rounded-lg border border-gray-300 bg-white text-sm font-medium text-gray-800 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="inline-flex items-center gap-1 px-3 py-2 rounded-xl border border-white/10 bg-slate-950/60 text-xs font-bold text-white hover:bg-white/5 disabled:opacity-40 disabled:cursor-not-allowed transition-all"
                 >
                   Next
                   <ChevronRight className="w-4 h-4" />

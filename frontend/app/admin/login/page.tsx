@@ -22,9 +22,6 @@ export default function AdminLoginPage() {
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
 
-  // If a valid-looking token is already stored, jump straight to the dashboard.
-  // This avoids users being stuck on the login page after a Fast Refresh /
-  // accidental nav while still authenticated.
   useEffect(() => {
     if (typeof window === 'undefined') return;
     const token = localStorage.getItem('adminToken');
@@ -45,10 +42,6 @@ export default function AdminLoginPage() {
         setLoading(false);
         return;
       }
-      // Order matters: write the token + the just-logged-in marker first so the
-      // grace period in admin-api covers any 401 that races with navigation,
-      // then perform a full navigation (router.push has been observed to leave
-      // the page on /admin/login when redirect mechanisms collide).
       localStorage.setItem('adminToken', token);
       markAdminLoggedInNow();
       toast.success('Login successful!');
@@ -65,59 +58,61 @@ export default function AdminLoginPage() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-gray-900 to-gray-800 px-4">
-      <div className="bg-white rounded-2xl shadow-xl p-8 w-full max-w-md">
-        <h1 className="text-3xl font-bold text-center mb-2 text-gray-900">
-          Admin Login
+    <div className="min-h-screen flex items-center justify-center bg-slate-950 px-4 relative overflow-hidden">
+      {/* Background Refraction Mesh Gradients */}
+      <div className="absolute inset-0 z-0">
+        <div className="absolute top-[20%] left-[20%] w-[350px] h-[350px] rounded-full bg-teal-500/10 blur-[130px] animate-pulse" />
+        <div className="absolute bottom-[20%] right-[20%] w-[450px] h-[450px] rounded-full bg-blue-500/10 blur-[150px] animate-pulse" />
+      </div>
+
+      <div className="relative z-10 bg-slate-900/40 backdrop-blur-xl border border-white/[0.08] border-t-white/[0.18] shadow-[0_24px_60px_rgba(0,0,0,0.35)] rounded-3xl p-8 w-full max-w-md">
+        <h1 className="text-3xl font-extrabold text-center mb-1 text-white tracking-tight">
+          Admin Portal
         </h1>
-        <p className="text-center text-gray-600 mb-8">Express Distributors Inc</p>
+        <p className="text-center text-slate-400 mb-8 text-xs font-semibold tracking-wider uppercase">Express Distributors Inc</p>
 
         <form onSubmit={handleLogin} className="space-y-6">
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              Email
+            <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">
+              Email Address
             </label>
             <input
               type="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               placeholder="admin@expressdistributors.com"
-              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+              className="w-full px-4 py-3 bg-slate-950/60 border border-white/10 rounded-xl text-xs text-slate-200 placeholder-slate-600 focus:outline-none focus:ring-1 focus:ring-teal-500"
               required
             />
           </div>
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              Password
+            <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">
+              Sign-In Password
             </label>
             <input
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               placeholder="••••••••"
-              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+              className="w-full px-4 py-3 bg-slate-950/60 border border-white/10 rounded-xl text-xs text-slate-200 placeholder-slate-600 focus:outline-none focus:ring-1 focus:ring-teal-500"
               required
             />
           </div>
           <button
             type="submit"
             disabled={loading}
-            className="w-full bg-gray-900 text-white py-3 rounded-lg font-semibold hover:bg-gray-800 transition-colors disabled:opacity-50"
+            className="w-full bg-gradient-to-tr from-teal-600 to-teal-500 hover:from-teal-500 hover:to-teal-400 border border-white/10 text-white py-3 rounded-xl font-bold text-sm shadow-sm transition-all disabled:opacity-40"
           >
-            {loading ? 'Logging in...' : 'Login'}
+            {loading ? 'Authenticating...' : 'Sign In'}
           </button>
         </form>
-        <p className="mt-6 text-center text-sm text-gray-500">
-          Default: admin@edinc.com / Admin1234
+        <p className="mt-6 text-center text-xs text-slate-500 font-medium">
+          Default: <span className="font-mono text-slate-400">admin@edinc.com</span> / <span className="font-mono text-slate-400">Admin1234</span>
         </p>
-        <p className="mt-1 text-center text-xs text-gray-400">
-          Production: set BACKEND_URL on Vercel to your Railway host (with or without https://).
+        <p className="mt-1.5 text-center text-[10px] text-slate-650 font-medium">
+          Production: configure <span className="font-mono text-slate-600">BACKEND_URL</span> on Vercel deployment variables.
         </p>
       </div>
     </div>
   );
 }
-
-
-
-

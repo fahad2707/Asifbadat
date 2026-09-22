@@ -315,17 +315,25 @@ export default function CustomersPage() {
 
   const getOpenBalance = (customerId: string) => balances[customerId] ?? 0;
 
+  // Liquid Glass Aesthetic Classes
+  const glassPanelClass = `bg-slate-900/40 backdrop-blur-lg border border-white/[0.06] border-t-white/[0.18] shadow-[0_12px_40px_rgba(0,0,0,0.25),inset_0_1px_0_rgba(255,255,255,0.1)] rounded-2xl p-5`;
+  const glassCardClass = `bg-slate-950/40 border border-white/[0.04] border-t-white/[0.12] rounded-xl p-4`;
+  const glassInputClass = `w-full bg-slate-950/60 border border-white/10 rounded-xl px-4 py-2.5 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-teal-500`;
+  const glassButtonClass = `inline-flex items-center gap-2 px-3.5 py-2.5 bg-gradient-to-b from-white/[0.10] to-white/[0.02] border border-white/[0.08] hover:bg-white/[0.06] active:scale-[0.98] rounded-xl text-xs font-semibold text-white transition-all cursor-pointer`;
+  const glassPrimaryBtn = `inline-flex items-center gap-2 px-5 py-3 bg-gradient-to-tr from-teal-600 to-teal-500 hover:from-teal-500 hover:to-teal-400 border border-white/10 active:scale-[0.98] rounded-xl text-xs font-bold text-white transition-all shadow-md shadow-teal-500/10 cursor-pointer`;
+
   return (
-    <div>
-      <div className="flex items-center justify-between mb-6">
-        <h1 className="text-4xl font-bold text-gray-900">Customers</h1>
+    <div className="space-y-6">
+      
+      {/* Title block */}
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-3xl font-extrabold text-white tracking-tight flex items-center gap-2">
+            CRM <span className="text-teal-400">Directory</span>
+          </h1>
+          <p className="text-slate-400 text-xs mt-1">Manage B2B Customer Profiles, credit accounts, and statements.</p>
+        </div>
         <div className="flex items-center gap-2">
-          <button
-            type="button"
-            className="bg-gray-100 text-gray-700 px-4 py-2 rounded-lg font-medium hover:bg-gray-200 flex items-center gap-2 border border-gray-300"
-          >
-            Customer types <ChevronDown className="w-4 h-4" />
-          </button>
           <button
             onClick={() => {
               setEditing(null);
@@ -333,40 +341,40 @@ export default function CustomersPage() {
               setForm({ name: '', phone: '', email: '', company: '', address: '', billing_address: '', city: '', state: '', zip: '', payment_terms: '', notes: '', customer_code: '' });
               setShowModal(true);
             }}
-            className="bg-[#0f766e] text-white px-6 py-3 rounded-lg font-semibold hover:bg-[#0d6b63] flex items-center gap-2"
+            className={glassPrimaryBtn}
           >
-            <Plus className="w-5 h-5" />
-            New customer
+            <Plus className="w-4 h-4" />
+            New Customer
           </button>
         </div>
       </div>
 
       {/* Payment status bar */}
       {summary && (
-        <div className="bg-white rounded-xl shadow border border-gray-200 p-4 mb-6">
+        <div className={glassPanelClass}>
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4 mb-3">
-            <div className="text-center p-3 rounded-lg bg-gray-50">
-              <p className="text-2xl font-bold text-gray-900">$0</p>
-              <p className="text-sm text-gray-500">0 estimates</p>
+            <div className="text-center p-3 rounded-lg bg-slate-950/40 border border-white/5">
+              <p className="text-xl font-black text-white">$0.00</p>
+              <p className="text-[10px] text-slate-500 font-bold uppercase tracking-wider mt-0.5">0 estimates</p>
             </div>
-            <div className="text-center p-3 rounded-lg bg-gray-50">
-              <p className="text-2xl font-bold text-gray-900">$0</p>
-              <p className="text-sm text-gray-500">Unbilled income</p>
+            <div className="text-center p-3 rounded-lg bg-slate-950/40 border border-white/5">
+              <p className="text-xl font-black text-white">$0.00</p>
+              <p className="text-[10px] text-slate-500 font-bold uppercase tracking-wider mt-0.5">Unbilled income</p>
             </div>
-            <button type="button" onClick={() => router.push('/admin/invoices?unpaid_only=1')} className="text-center p-3 rounded-lg bg-purple-50 hover:bg-purple-100 transition-colors">
-              <p className="text-2xl font-bold text-purple-700">${Number(summary.overdueTotal ?? 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}</p>
-              <p className="text-sm text-gray-600">{(summary.overdueCount ?? 0)} overdue invoices</p>
+            <button type="button" onClick={() => router.push('/admin/invoices?unpaid_only=1')} className="text-center p-3 rounded-lg bg-purple-950/20 border border-purple-500/25 hover:bg-purple-950/30 transition-all">
+              <p className="text-xl font-black text-purple-400">${Number(summary.overdueTotal ?? 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}</p>
+              <p className="text-[10px] text-purple-300/80 font-bold uppercase tracking-wider mt-0.5">{(summary.overdueCount ?? 0)} overdue invoices</p>
             </button>
-            <button type="button" onClick={() => router.push('/admin/invoices?unpaid_only=1')} className="text-center p-3 rounded-lg bg-amber-50 hover:bg-amber-100 transition-colors">
-              <p className="text-2xl font-bold text-amber-700">${Number(summary.openTotal ?? 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}</p>
-              <p className="text-sm text-gray-600">{(summary.openCount ?? 0)} open invoices and credits</p>
+            <button type="button" onClick={() => router.push('/admin/invoices?unpaid_only=1')} className="text-center p-3 rounded-lg bg-amber-950/20 border border-amber-500/25 hover:bg-amber-950/30 transition-all">
+              <p className="text-xl font-black text-amber-400">${Number(summary.openTotal ?? 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}</p>
+              <p className="text-[10px] text-amber-300/80 font-bold uppercase tracking-wider mt-0.5">{(summary.openCount ?? 0)} open invoices</p>
             </button>
-            <div className="text-center p-3 rounded-lg bg-green-50">
-              <p className="text-2xl font-bold text-green-700">${Number(summary.recentlyPaidTotal ?? 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}</p>
-              <p className="text-sm text-gray-600">{(summary.paidCount ?? 0)} recently paid</p>
+            <div className="text-center p-3 rounded-lg bg-teal-950/20 border border-teal-500/25">
+              <p className="text-xl font-black text-teal-400">${Number(summary.recentlyPaidTotal ?? 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}</p>
+              <p className="text-[10px] text-teal-300/80 font-bold uppercase tracking-wider mt-0.5">{(summary.paidCount ?? 0)} recently paid</p>
             </div>
           </div>
-          <div className="h-2 rounded-full overflow-hidden flex bg-gray-100">
+          <div className="h-2 rounded-full overflow-hidden flex bg-slate-950 border border-white/5">
             {(() => {
               const total = (Number(summary.openTotal) || 0) + (Number(summary.recentlyPaidTotal) || 0) || 1;
               const overdueW = ((Number(summary.overdueTotal) || 0) / total) * 100;
@@ -374,9 +382,9 @@ export default function CustomersPage() {
               const recentW = (Number(summary.recentlyPaidTotal) || 0) / total * 100;
               return (
                 <>
-                  <div className="bg-purple-500 h-full transition-all" style={{ width: `${Math.max(0, overdueW)}%` }} title="Overdue" />
-                  <div className="bg-amber-500 h-full transition-all" style={{ width: `${Math.max(0, openW)}%` }} title="Open" />
-                  <div className="bg-green-500 h-full flex-1 transition-all" style={{ width: `${Math.max(0, recentW)}%` }} title="Recently paid" />
+                  <div className="bg-purple-600 h-full transition-all" style={{ width: `${Math.max(0, overdueW)}%` }} />
+                  <div className="bg-amber-600 h-full transition-all" style={{ width: `${Math.max(0, openW)}%` }} />
+                  <div className="bg-teal-600 h-full flex-1 transition-all" style={{ width: `${Math.max(0, recentW)}%` }} />
                 </>
               );
             })()}
@@ -384,99 +392,104 @@ export default function CustomersPage() {
         </div>
       )}
 
-      <div className="bg-white rounded-xl shadow-md p-4 mb-6 flex flex-wrap items-center gap-4">
+      {/* Search block */}
+      <div className={`${glassPanelClass} flex flex-wrap items-center gap-4 py-3.5`}>
         <div className="relative flex-1 min-w-[200px]">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
+          <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
           <input
             type="text"
             placeholder="Search by name, company, phone, email..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#0f766e] focus:border-[#0f766e]"
+            className={`${glassInputClass} pl-10`}
           />
         </div>
         {selectedIds.size > 0 && (
           <div className="flex items-center gap-2 flex-wrap">
-            <span className="text-sm text-gray-600 font-medium">{selectedIds.size} selected</span>
-            <button type="button" onClick={handleExportSelected} className="bg-gray-100 text-gray-700 px-4 py-2 rounded-lg font-medium hover:bg-gray-200 flex items-center gap-2">
-              <FileDown className="w-4 h-4" /> Export to Excel
+            <span className="text-xs text-slate-400 font-bold">{selectedIds.size} selected</span>
+            <button type="button" onClick={handleExportSelected} className={glassButtonClass}>
+              <FileDown className="w-3.5 h-3.5 text-teal-400" /> Export Excel
             </button>
-            <button type="button" onClick={handleBulkDelete} className="bg-red-600 text-white px-4 py-2 rounded-lg font-medium hover:bg-red-700 flex items-center gap-2">
-              <Trash2 className="w-4 h-4" /> Delete selected
+            <button type="button" onClick={handleBulkDelete} className="inline-flex items-center gap-1.5 px-3 py-2 bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/30 text-rose-400 rounded-xl text-xs font-semibold cursor-pointer active:scale-95 transition-all">
+              <Trash2 className="w-3.5 h-3.5" /> Deactivate
             </button>
-            <button type="button" onClick={() => setSelectedIds(new Set())} className="text-gray-600 hover:text-gray-900 text-sm font-medium">Clear selection</button>
+            <button type="button" onClick={() => setSelectedIds(new Set())} className="text-slate-500 hover:text-slate-200 text-xs font-semibold">Clear</button>
           </div>
         )}
       </div>
 
+      {/* Main Table */}
       {loading ? (
         <div className="flex justify-center py-12">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-[#0f766e]" />
+          <div className="animate-spin rounded-full h-10 w-10 border-2 border-teal-500 border-t-transparent" />
         </div>
       ) : (
-        <div className="bg-white rounded-xl shadow-md overflow-hidden">
-          <table className="w-full">
-            <thead className="bg-gray-50">
-              <tr>
-                <th className="w-12 py-3 px-4">
-                  <input type="checkbox" checked={customers.length > 0 && selectedIds.size === customers.length} onChange={toggleSelectAll} className="rounded border-gray-300 text-[#0f766e] focus:ring-[#0f766e] focus:border-[#0f766e]" />
-                </th>
-                <th className="text-left py-3 px-4 text-sm font-medium text-gray-700">NAME</th>
-                <th className="text-left py-3 px-4 text-sm font-medium text-gray-700">COMPANY NAME</th>
-                <th className="text-left py-3 px-4 text-sm font-medium text-gray-700">PHONE</th>
-                <th className="text-right py-3 px-4 text-sm font-medium text-gray-700">OPEN BALANCE</th>
-                <th className="text-right py-3 px-4 text-sm font-medium text-gray-700">ACTION</th>
-              </tr>
-            </thead>
-            <tbody>
-              {customers.map((c) => {
-                const openBal = getOpenBalance(c.id);
-                return (
-                  <tr key={c.id} className="border-b hover:bg-gray-50 cursor-pointer" onClick={() => openDetail(c)}>
-                    <td className="py-3 px-4" onClick={(e) => e.stopPropagation()}>
-                      <input type="checkbox" checked={selectedIds.has(c.id)} onChange={() => toggleSelect(c.id)} className="rounded border-gray-300 text-[#0f766e] focus:ring-[#0f766e] focus:border-[#0f766e]" />
-                    </td>
-                    <td className="py-3 px-4">
-                      <div className="flex items-center gap-2">
-                        <User className="w-5 h-5 text-gray-400 shrink-0" />
-                        <span className="font-medium text-gray-900">{c.name}</span>
-                        {c.customer_code && <span className="text-xs text-gray-500">({c.customer_code})</span>}
-                      </div>
-                    </td>
-                    <td className="py-3 px-4 text-gray-700">{c.company || '—'}</td>
-                    <td className="py-3 px-4 text-gray-700">{c.phone}</td>
-                    <td className="py-3 px-4 text-right font-medium text-gray-900">${openBal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-                    <td className="py-3 px-4 text-right" onClick={(e) => e.stopPropagation()}>
-                      <div className="relative inline-block">
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            if (actionDropdownId === c.id) {
-                              setActionDropdownId(null);
-                              setActionDropdownAnchor(null);
-                            } else {
-                              setActionDropdownId(c.id);
-                              setActionDropdownAnchor(e.currentTarget.getBoundingClientRect());
-                            }
-                          }}
-                          className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-sm font-medium bg-[#0f766e] text-white hover:bg-[#0d6b63]"
-                        >
-                          {openBal > 0 ? 'Receive payment' : 'Create invoice'}
-                          <ChevronDown className="w-4 h-4" />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+        <div className={`${glassPanelClass} !p-0 overflow-hidden`}>
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead className="bg-slate-950/60 text-slate-400 border-b border-white/5">
+                <tr>
+                  <th className="w-12 py-3.5 px-4 text-left">
+                    <input type="checkbox" checked={customers.length > 0 && selectedIds.size === customers.length} onChange={toggleSelectAll} className="rounded bg-slate-900 border-white/10 text-teal-500 focus:ring-teal-500" />
+                  </th>
+                  <th className="text-left py-3.5 px-4 font-bold tracking-wider uppercase text-[10px]">NAME</th>
+                  <th className="text-left py-3.5 px-4 font-bold tracking-wider uppercase text-[10px]">COMPANY NAME</th>
+                  <th className="text-left py-3.5 px-4 font-bold tracking-wider uppercase text-[10px]">PHONE</th>
+                  <th className="text-right py-3.5 px-4 font-bold tracking-wider uppercase text-[10px]">OPEN BALANCE</th>
+                  <th className="text-right py-3.5 px-4 font-bold tracking-wider uppercase text-[10px]">ACTION</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-white/5">
+                {customers.map((c) => {
+                  const openBal = getOpenBalance(c.id);
+                  return (
+                    <tr key={c.id} className="hover:bg-white/[0.02] cursor-pointer transition-colors" onClick={() => openDetail(c)}>
+                      <td className="py-3 px-4" onClick={(e) => e.stopPropagation()}>
+                        <input type="checkbox" checked={selectedIds.has(c.id)} onChange={() => toggleSelect(c.id)} className="rounded bg-slate-900 border-white/10 text-teal-500 focus:ring-teal-500" />
+                      </td>
+                      <td className="py-3 px-4">
+                        <div className="flex items-center gap-2">
+                          <User className="w-4 h-4 text-teal-400 shrink-0" />
+                          <span className="font-bold text-white hover:text-teal-400 transition-colors">{c.name}</span>
+                          {c.customer_code && <span className="text-[10px] bg-slate-800 text-slate-400 px-1.5 py-0.5 rounded font-mono font-medium">({c.customer_code})</span>}
+                        </div>
+                      </td>
+                      <td className="py-3 px-4 text-slate-300 font-semibold">{c.company || '—'}</td>
+                      <td className="py-3 px-4 text-slate-400 font-medium">{c.phone}</td>
+                      <td className="py-3 px-4 text-right font-bold text-slate-200">${openBal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                      <td className="py-3 px-4 text-right" onClick={(e) => e.stopPropagation()}>
+                        <div className="relative inline-block">
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (actionDropdownId === c.id) {
+                                setActionDropdownId(null);
+                                setActionDropdownAnchor(null);
+                              } else {
+                                setActionDropdownId(c.id);
+                                setActionDropdownAnchor(e.currentTarget.getBoundingClientRect());
+                              }
+                            }}
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-[#0f766e] text-white hover:bg-[#0d6b63]"
+                          >
+                            {openBal > 0 ? 'Receive payment' : 'Create invoice'}
+                            <ChevronDown className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
           {customers.length === 0 && (
-            <div className="text-center py-12 text-gray-500">No customers found. Add your first customer above.</div>
+            <div className="text-center py-12 text-slate-500 font-semibold">No customers found. Add your first customer above.</div>
           )}
         </div>
       )}
 
+      {/* Action options drop-down menu overlay */}
       {typeof document !== 'undefined' && actionDropdownId && actionDropdownAnchor && (() => {
         const c = customers.find((x) => x.id === actionDropdownId);
         if (!c) return null;
@@ -486,19 +499,19 @@ export default function CustomersPage() {
           <>
             <div className="fixed inset-0 z-[100]" aria-hidden onClick={(e) => { e.stopPropagation(); closeDropdown(); }} />
             <div
-              className="fixed z-[101] py-1 bg-white border border-gray-200 rounded-lg shadow-lg min-w-[160px]"
+              className="fixed z-[101] py-1.5 bg-slate-950 border border-white/10 rounded-xl shadow-[0_10px_30px_rgba(0,0,0,0.55)] min-w-[170px] backdrop-filter backdrop-blur-xl text-xs font-semibold"
               style={{ top: actionDropdownAnchor.bottom + 4, right: typeof window !== 'undefined' ? window.innerWidth - actionDropdownAnchor.right : 0 }}
             >
               {openBal > 0 && (
-                <button type="button" onClick={(e) => { openReceivePayment(c.id, e); closeDropdown(); }} className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">
+                <button type="button" onClick={(e) => { openReceivePayment(c.id, e); closeDropdown(); }} className="w-full text-left px-4 py-2.5 text-slate-200 hover:bg-white/5 transition-colors">
                   Receive payment
                 </button>
               )}
-              <button type="button" onClick={(e) => { openCreateInvoice(c, e); closeDropdown(); }} className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">
+              <button type="button" onClick={(e) => { openCreateInvoice(c, e); closeDropdown(); }} className="w-full text-left px-4 py-2.5 text-slate-200 hover:bg-white/5 transition-colors">
                 Create invoice
               </button>
-              <button type="button" onClick={(e) => { e.stopPropagation(); openEdit(c); closeDropdown(); }} className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">
-                Edit customer
+              <button type="button" onClick={(e) => { e.stopPropagation(); openEdit(c); closeDropdown(); }} className="w-full text-left px-4 py-2.5 text-slate-200 hover:bg-white/5 transition-colors">
+                Edit customer info
               </button>
             </div>
           </>,
@@ -506,167 +519,171 @@ export default function CustomersPage() {
         );
       })()}
 
+      {/* Customer Form Modal Dialog */}
       {showModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={handleCustomerModalClose}>
-          <div className="bg-white rounded-xl shadow-xl max-w-lg w-full max-h-[90vh] overflow-hidden flex flex-col relative" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center justify-between p-4 border-b border-gray-200 shrink-0">
-              <h2 className="text-xl font-bold text-gray-900">{editing ? 'Edit Customer' : 'Add Customer'}</h2>
-              <button type="button" onClick={handleCustomerModalClose} className="p-2 rounded-lg hover:bg-gray-100 text-gray-600" aria-label="Close">
-                <X className="w-5 h-5" />
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4" onClick={handleCustomerModalClose}>
+          <div className="bg-slate-950/95 border border-white/10 rounded-2xl shadow-2xl max-w-lg w-full max-h-[90vh] overflow-hidden flex flex-col relative text-white" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between p-5 border-b border-white/10 shrink-0">
+              <h2 className="text-lg font-black">{editing ? 'Edit B2B Customer' : 'Add B2B Customer'}</h2>
+              <button type="button" onClick={handleCustomerModalClose} className="p-2 rounded-xl bg-slate-900 border border-white/5 text-slate-450 hover:text-white" aria-label="Close">
+                <X className="w-4 h-4" />
               </button>
             </div>
-            <form id="customer-form" onSubmit={handleSubmit} className="flex-1 overflow-y-auto p-6 space-y-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Name *</label>
-                  <input
-                    type="text"
-                    value={form.name || ''}
-                    onChange={(e) => { setForm({ ...form, name: e.target.value }); setCustomerFormDirty(true); }}
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#0f766e] focus:border-[#0f766e]"
-                    required
-                  />
-                </div>
-                {!editing && (
-                  <div className="flex gap-2">
-                    <div className="flex-1">
-                      <label className="block text-sm font-medium text-gray-700 mb-1">Customer ID</label>
-                      <input
-                        type="text"
-                        value={form.customer_code || ''}
-                        onChange={(e) => { setForm({ ...form, customer_code: e.target.value }); setCustomerFormDirty(true); }}
-                        placeholder="Auto-generated if left blank"
-                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#0f766e] focus:border-[#0f766e]"
-                      />
-                    </div>
-                    <div className="pt-6">
-                      <button type="button" onClick={generateCustomerCode} className="px-3 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 text-sm">Generate</button>
-                    </div>
+            
+            <form id="customer-form" onSubmit={handleSubmit} className="flex-1 overflow-y-auto p-5 space-y-4 text-xs font-semibold">
+              <div>
+                <label className="block text-slate-400 mb-1.5 uppercase font-bold tracking-wider">Name *</label>
+                <input
+                  type="text"
+                  value={form.name || ''}
+                  onChange={(e) => { setForm({ ...form, name: e.target.value }); setCustomerFormDirty(true); }}
+                  className={glassInputClass}
+                  required
+                />
+              </div>
+              {!editing && (
+                <div className="flex gap-2">
+                  <div className="flex-1">
+                    <label className="block text-slate-400 mb-1.5 uppercase font-bold tracking-wider">Customer ID</label>
+                    <input
+                      type="text"
+                      value={form.customer_code || ''}
+                      onChange={(e) => { setForm({ ...form, customer_code: e.target.value }); setCustomerFormDirty(true); }}
+                      placeholder="Auto-generated if left blank"
+                      className={glassInputClass}
+                    />
                   </div>
-                )}
+                  <div className="pt-5.5">
+                    <button type="button" onClick={generateCustomerCode} className={glassButtonClass}>Generate</button>
+                  </div>
+                </div>
+              )}
+              <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Phone *</label>
+                  <label className="block text-slate-400 mb-1.5 uppercase font-bold tracking-wider">Phone *</label>
                   <input
                     type="text"
                     value={form.phone || ''}
                     onChange={(e) => { setForm({ ...form, phone: e.target.value }); setCustomerFormDirty(true); }}
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#0f766e] focus:border-[#0f766e]"
+                    className={glassInputClass}
                     required
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Email</label>
+                  <label className="block text-slate-400 mb-1.5 uppercase font-bold tracking-wider">Email</label>
                   <input
                     type="email"
                     value={form.email || ''}
                     onChange={(e) => { setForm({ ...form, email: e.target.value }); setCustomerFormDirty(true); }}
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#0f766e] focus:border-[#0f766e]"
+                    className={glassInputClass}
                   />
                 </div>
+              </div>
+              <div>
+                <label className="block text-slate-400 mb-1.5 uppercase font-bold tracking-wider">Company</label>
+                <input
+                  type="text"
+                  value={form.company || ''}
+                  onChange={(e) => { setForm({ ...form, company: e.target.value }); setCustomerFormDirty(true); }}
+                  className={glassInputClass}
+                />
+              </div>
+              <div>
+                <label className="block text-slate-400 mb-1.5 uppercase font-bold tracking-wider">Address / Bill to</label>
+                <textarea
+                  value={form.address || ''}
+                  onChange={(e) => setForm({ ...form, address: e.target.value })}
+                  rows={2}
+                  className="w-full bg-slate-950/60 border border-white/10 rounded-xl px-4 py-2.5 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-teal-500"
+                />
+              </div>
+              <div>
+                <label className="block text-slate-400 mb-1.5 uppercase font-bold tracking-wider">Billing address (if different)</label>
+                <input
+                  type="text"
+                  value={form.billing_address || ''}
+                  onChange={(e) => { setForm({ ...form, billing_address: e.target.value }); setCustomerFormDirty(true); }}
+                  className={glassInputClass}
+                />
+              </div>
+              <div className="grid grid-cols-3 gap-2">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Company</label>
+                  <label className="block text-slate-400 mb-1.5 uppercase font-bold tracking-wider">City</label>
                   <input
                     type="text"
-                    value={form.company || ''}
-                    onChange={(e) => { setForm({ ...form, company: e.target.value }); setCustomerFormDirty(true); }}
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#0f766e] focus:border-[#0f766e]"
+                    value={form.city || ''}
+                    onChange={(e) => { setForm({ ...form, city: e.target.value }); setCustomerFormDirty(true); }}
+                    className={glassInputClass}
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Address / Bill to</label>
-                  <textarea
-                    value={form.address || ''}
-                    onChange={(e) => setForm({ ...form, address: e.target.value })}
-                    rows={2}
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#0f766e] focus:border-[#0f766e]"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Billing address (if different)</label>
+                  <label className="block text-slate-400 mb-1.5 uppercase font-bold tracking-wider">State</label>
                   <input
                     type="text"
-                    value={form.billing_address || ''}
-                    onChange={(e) => { setForm({ ...form, billing_address: e.target.value }); setCustomerFormDirty(true); }}
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#0f766e] focus:border-[#0f766e]"
+                    value={form.state || ''}
+                    onChange={(e) => { setForm({ ...form, state: e.target.value }); setCustomerFormDirty(true); }}
+                    className={glassInputClass}
                   />
                 </div>
-                <div className="grid grid-cols-3 gap-2">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">City</label>
-                    <input
-                      type="text"
-                      value={form.city || ''}
-                      onChange={(e) => { setForm({ ...form, city: e.target.value }); setCustomerFormDirty(true); }}
-                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#0f766e] focus:border-[#0f766e]"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">State</label>
-                    <input
-                      type="text"
-                      value={form.state || ''}
-                      onChange={(e) => { setForm({ ...form, state: e.target.value }); setCustomerFormDirty(true); }}
-                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#0f766e] focus:border-[#0f766e]"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">ZIP</label>
-                    <input
-                      type="text"
-                      value={form.zip || ''}
-                      onChange={(e) => { setForm({ ...form, zip: e.target.value }); setCustomerFormDirty(true); }}
-                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#0f766e] focus:border-[#0f766e]"
-                    />
-                  </div>
-                </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Payment terms</label>
-                  <select
-                    value={form.payment_terms || ''}
-                    onChange={(e) => { setForm({ ...form, payment_terms: e.target.value }); setCustomerFormDirty(true); }}
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#0f766e] focus:border-[#0f766e]"
-                  >
-                    <option value="">Select payment terms</option>
-                    <option value="Due on receipt">Due on receipt</option>
-                    <option value="Net 7">Net 7</option>
-                    <option value="Net 15">Net 15</option>
-                    <option value="Net 30">Net 30</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Notes</label>
-                  <textarea
-                    value={form.notes || ''}
-                    onChange={(e) => { setForm({ ...form, notes: e.target.value }); setCustomerFormDirty(true); }}
-                    rows={2}
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#0f766e] focus:border-[#0f766e]"
+                  <label className="block text-slate-400 mb-1.5 uppercase font-bold tracking-wider">ZIP</label>
+                  <input
+                    type="text"
+                    value={form.zip || ''}
+                    onChange={(e) => { setForm({ ...form, zip: e.target.value }); setCustomerFormDirty(true); }}
+                    className={glassInputClass}
                   />
                 </div>
-                {!editing && (
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Upload documents (PDF, JPG)</label>
-                    <input type="file" accept=".pdf,.jpg,.jpeg,.png" multiple className="w-full text-sm text-gray-600 file:mr-2 file:py-2 file:px-3 file:rounded file:border-0 file:bg-gray-100 file:text-gray-700" id="customer-docs-form" />
-                  </div>
-                )}
-                <div className="flex gap-3 pt-4">
-                  <button type="submit" className="flex-1 bg-[#0f766e] text-white py-2 rounded-lg font-semibold hover:bg-[#0d6b63]">
-                    {editing ? 'Update' : 'Create'}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={handleCustomerModalClose}
-                    className="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50"
-                  >
-                    Cancel
-                  </button>
+              </div>
+              <div>
+                <label className="block text-slate-400 mb-1.5 uppercase font-bold tracking-wider">Payment terms</label>
+                <select
+                  value={form.payment_terms || ''}
+                  onChange={(e) => { setForm({ ...form, payment_terms: e.target.value }); setCustomerFormDirty(true); }}
+                  className="w-full bg-slate-950/60 border border-white/10 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:ring-1 focus:ring-teal-500"
+                >
+                  <option value="">Select payment terms</option>
+                  <option value="Due on receipt">Due on receipt</option>
+                  <option value="Net 7">Net 7</option>
+                  <option value="Net 15">Net 15</option>
+                  <option value="Net 30">Net 30</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-slate-400 mb-1.5 uppercase font-bold tracking-wider">Notes</label>
+                <textarea
+                  value={form.notes || ''}
+                  onChange={(e) => { setForm({ ...form, notes: e.target.value }); setCustomerFormDirty(true); }}
+                  rows={2}
+                  className="w-full bg-slate-950/60 border border-white/10 rounded-xl px-4 py-2.5 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-teal-500"
+                />
+              </div>
+              {!editing && (
+                <div>
+                  <label className="block text-slate-400 mb-1.5 uppercase font-bold tracking-wider">Upload documents (PDF, JPG)</label>
+                  <input type="file" accept=".pdf,.jpg,.jpeg,.png" multiple className="w-full text-xs text-slate-500 file:mr-2 file:py-1.5 file:px-3 file:rounded-xl file:border file:border-white/10 file:bg-slate-900 file:text-white" id="customer-docs-form" />
                 </div>
-              </form>
+              )}
+              <div className="flex gap-3 pt-4">
+                <button type="submit" className="flex-1 px-5 py-3 rounded-xl bg-gradient-to-tr from-teal-600 to-teal-500 text-xs font-bold text-white shadow-md shadow-teal-500/10 hover:from-teal-500 hover:to-teal-400 transition-all cursor-pointer">
+                  {editing ? 'Update Customer' : 'Create Customer'}
+                </button>
+                <button
+                  type="button"
+                  onClick={handleCustomerModalClose}
+                  className={glassButtonClass}
+                >
+                  Cancel
+                </button>
+              </div>
+            </form>
             {showCustomerCloseConfirm && (
-              <div className="absolute inset-0 flex items-center justify-center bg-black/30 rounded-xl z-10 p-4">
-                <div className="bg-white rounded-lg shadow-xl p-4 max-w-sm w-full">
-                  <p className="text-gray-900 font-medium mb-3">You have unsaved changes.</p>
+              <div className="absolute inset-0 flex items-center justify-center bg-black/60 rounded-2xl z-10 p-4">
+                <div className="bg-slate-950 border border-white/10 rounded-xl p-4 max-w-sm w-full">
+                  <p className="text-white font-medium mb-3">You have unsaved changes.</p>
                   <div className="flex gap-2 justify-end">
-                    <button type="button" onClick={handleCustomerCloseWithoutSaving} className="px-3 py-2 text-gray-700 hover:bg-gray-100 rounded-lg">Continue without saving</button>
-                    <button type="button" onClick={() => { setShowCustomerCloseConfirm(false); const f = document.getElementById('customer-form'); if (f) (f as HTMLFormElement).requestSubmit(); }} className="px-3 py-2 bg-[#0f766e] text-white rounded-lg hover:bg-[#0d6b63]">Save and close</button>
+                    <button type="button" onClick={handleCustomerCloseWithoutSaving} className="px-3 py-2 text-slate-400 hover:text-white rounded-lg text-xs font-semibold">Discard Changes</button>
+                    <button type="button" onClick={() => { setShowCustomerCloseConfirm(false); const f = document.getElementById('customer-form'); if (f) (f as HTMLFormElement).requestSubmit(); }} className="px-3 py-2 bg-teal-500 hover:bg-teal-400 text-white rounded-lg text-xs font-bold">Save and close</button>
                   </div>
                 </div>
               </div>
@@ -676,85 +693,54 @@ export default function CustomersPage() {
       )}
 
       {detailCustomer && (
-        <div className="fixed inset-0 bg-black/50 flex justify-end z-50" onClick={() => setDetailCustomer(null)}>
-          <div className="bg-white w-full max-w-xl shadow-2xl overflow-y-auto" onClick={(e) => e.stopPropagation()}>
-            <div className="p-6 border-b border-gray-200 flex items-center justify-between sticky top-0 bg-white">
-              <h2 className="text-xl font-bold text-gray-900">Customer details</h2>
-              <button type="button" onClick={() => setDetailCustomer(null)} className="p-2 rounded-lg hover:bg-gray-100"><X className="w-5 h-5" /></button>
+        <div className="fixed inset-0 bg-black/65 backdrop-blur-sm flex justify-end z-50" onClick={() => setDetailCustomer(null)}>
+          <div className="bg-slate-950 border-l border-white/10 w-full max-w-xl shadow-2xl overflow-y-auto text-white" onClick={(e) => e.stopPropagation()}>
+            <div className="p-6 border-b border-white/10 flex items-center justify-between sticky top-0 bg-slate-950/90 backdrop-blur">
+              <h2 className="text-lg font-black">Customer Details Summary</h2>
+              <button type="button" onClick={() => setDetailCustomer(null)} className="p-2 rounded-xl bg-slate-900 border border-white/5 text-slate-450 hover:text-white"><X className="w-4 h-4" /></button>
             </div>
-            <div className="p-6 space-y-6">
+            <div className="p-6 space-y-6 text-xs font-semibold">
               <div>
-                <h3 className="font-semibold text-gray-900">{detailCustomer.name}</h3>
-                {detailCustomer.customer_code && <p className="text-sm text-gray-500">ID: {detailCustomer.customer_code}</p>}
+                <h3 className="font-bold text-sm text-teal-400">{detailCustomer.name}</h3>
+                {detailCustomer.customer_code && <p className="text-[10px] text-slate-500 font-mono mt-0.5">ID: {detailCustomer.customer_code}</p>}
               </div>
-              <div className="grid grid-cols-2 gap-3 text-sm">
-                <div><span className="text-gray-500">Phone</span><br />{detailCustomer.phone}</div>
-                <div><span className="text-gray-500">Email</span><br />{detailCustomer.email || '—'}</div>
-                <div className="col-span-2"><span className="text-gray-500">Company</span><br />{detailCustomer.company || '—'}</div>
-                <div className="col-span-2"><span className="text-gray-500">Address</span><br />{[detailCustomer.address, detailCustomer.city, detailCustomer.state, detailCustomer.zip].filter(Boolean).join(', ') || '—'}</div>
-                <div className="col-span-2"><span className="text-gray-500">Payment terms</span><br />{detailCustomer.payment_terms || '—'}</div>
-                {detailCustomer.notes && <div className="col-span-2"><span className="text-gray-500">Notes</span><br />{detailCustomer.notes}</div>}
+              <div className="grid grid-cols-2 gap-4 text-xs font-semibold">
+                <div><span className="text-slate-500 block text-[10px]">Phone</span>{detailCustomer.phone}</div>
+                <div><span className="text-slate-500 block text-[10px]">Email</span>{detailCustomer.email || '—'}</div>
+                <div className="col-span-2"><span className="text-slate-500 block text-[10px]">Company</span>{detailCustomer.company || '—'}</div>
+                <div className="col-span-2"><span className="text-slate-500 block text-[10px]">Address</span>{[detailCustomer.address, detailCustomer.city, detailCustomer.state, detailCustomer.zip].filter(Boolean).join(', ') || '—'}</div>
+                <div className="col-span-2"><span className="text-slate-500 block text-[10px]">Payment terms</span>{detailCustomer.payment_terms || '—'}</div>
+                {detailCustomer.notes && <div className="col-span-2"><span className="text-slate-500 block text-[10px]">Notes</span><p className="text-slate-300 italic">{detailCustomer.notes}</p></div>}
               </div>
-              <div className="flex gap-4 py-2">
+              <div className="flex gap-4 py-2 border-t border-b border-white/5">
                 <div className="flex items-center gap-2">
-                  <DollarSign className="w-5 h-5 text-green-600" />
-                  <span className="text-sm font-medium text-gray-700">Paid: <strong className="text-green-700">${detailPaid.toFixed(2)}</strong></span>
+                  <DollarSign className="w-4 h-4 text-teal-400" />
+                  <span className="text-slate-350">Paid Spending: <strong className="text-teal-400">${detailPaid.toFixed(2)}</strong></span>
                 </div>
                 <div className="flex items-center gap-2">
-                  <DollarSign className="w-5 h-5 text-amber-600" />
-                  <span className="text-sm font-medium text-gray-700">Unpaid: <strong className="text-amber-700">${detailUnpaid.toFixed(2)}</strong></span>
+                  <DollarSign className="w-4 h-4 text-rose-455" />
+                  <span className="text-slate-350">Unpaid Ledger: <strong className="text-rose-400">${detailUnpaid.toFixed(2)}</strong></span>
                 </div>
               </div>
               <div>
-                <h4 className="font-medium text-gray-900 mb-2 flex items-center gap-2"><FileText className="w-4 h-4" /> Documents</h4>
+                <h4 className="font-bold text-slate-400 mb-2 flex items-center gap-2"><FileText className="w-4 h-4" /> Documents Archive</h4>
                 {(detailCustomer.documents?.length ?? 0) > 0 ? (
-                  <ul className="space-y-1 text-sm">
+                  <ul className="space-y-1">
                     {(detailCustomer.documents ?? []).map((d, i)=> (
                       <li key={i}>
-                        <a href={d.url.startsWith('http') ? d.url : `${apiBase}${d.url}`} target="_blank" rel="noopener noreferrer" className="text-[#0f766e] hover:underline">{d.name}</a>
+                        <a href={d.url.startsWith('http') ? d.url : `${apiBase}${d.url}`} target="_blank" rel="noopener noreferrer" className="text-teal-400 hover:underline">{d.name}</a>
                       </li>
                     ))}
                   </ul>
-                ) : <p className="text-sm text-gray-500">No documents uploaded.</p>}
-                <div className="mt-2">
-                  <label className="text-sm font-medium text-gray-700">Upload new (PDF, JPG)</label>
-                  <input type="file" accept=".pdf,.jpg,.jpeg,.png" disabled={uploadingDoc} onChange={(e) => handleDocumentUpload(e, detailCustomer.id)} className="mt-1 w-full text-sm text-gray-600 file:mr-2 file:py-2 file:px-3 file:rounded file:border-0 file:bg-gray-100" />
+                ) : <p className="text-slate-500">No B2B documents signed or uploaded.</p>}
+                <div className="mt-4">
+                  <label className="text-[10px] text-slate-450 block mb-1">Upload signed agreement (PDF, JPG)</label>
+                  <input type="file" accept=".pdf,.jpg,.jpeg,.png" disabled={uploadingDoc} onChange={(e) => handleDocumentUpload(e, detailCustomer.id)} className="w-full text-slate-500 file:mr-2 file:py-1 file:px-2.5 file:rounded-xl file:border file:border-white/10 file:bg-slate-900 file:text-white" />
                 </div>
               </div>
-              <div>
-                <h4 className="font-medium text-gray-900 mb-2">Past invoices</h4>
-                {detailInvoices.length === 0 ? (
-                  <p className="text-sm text-gray-500">No invoices yet.</p>
-                ) : (
-                  <div className="border border-gray-200 rounded-lg overflow-hidden">
-                    <table className="w-full text-sm">
-                      <thead className="bg-gray-50">
-                        <tr>
-                          <th className="text-left py-2 px-2">Date</th>
-                          <th className="text-left py-2 px-2">Invoice #</th>
-                          <th className="text-right py-2 px-2">Amount</th>
-                          <th className="text-left py-2 px-2">Status</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {detailInvoices.map((inv) => (
-                          <tr key={inv.id} className="border-t border-gray-100">
-                            <td className="py-2 px-2">{inv.invoice_date ? new Date(inv.invoice_date).toLocaleDateString() : '—'}</td>
-                            <td className="py-2 px-2 font-mono">{inv.invoice_number}</td>
-                            <td className="py-2 px-2 text-right">${(inv.total_amount || 0).toFixed(2)}</td>
-                            <td className="py-2 px-2">
-                              <span className={inv.payment_status === 'paid' ? 'text-green-600' : 'text-amber-600'}>{(inv.payment_status || 'unpaid').toLowerCase()}</span>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-              </div>
-              <div className="pt-4 border-t border-gray-200">
-                <button type="button" onClick={() => { openEdit(detailCustomer); setDetailCustomer(null); }} className="px-4 py-2 bg-[#0f766e] text-white rounded-lg font-medium hover:bg-[#0d6b63]">
-                  Edit customer
+              <div className="pt-4 border-t border-white/10 flex justify-end">
+                <button type="button" onClick={() => { openEdit(detailCustomer); setDetailCustomer(null); }} className="px-4 py-2 bg-gradient-to-tr from-teal-600 to-teal-500 hover:from-teal-500 hover:to-teal-400 border border-white/10 text-white rounded-xl text-xs font-bold">
+                  Edit B2B Customer Info
                 </button>
               </div>
             </div>

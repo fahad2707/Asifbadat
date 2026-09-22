@@ -57,9 +57,9 @@ interface Product {
 const TABS: { id: TabId; label: string; icon: typeof FolderTree }[] = [
   { id: 'categories', label: 'Categories', icon: FolderTree },
   { id: 'subcategories', label: 'Subcategories', icon: Layers },
-  { id: 'tax', label: 'Tax types', icon: Percent },
-  { id: 'payment', label: 'Payment methods', icon: CreditCard },
-  { id: 'bank', label: 'Bank accounts', icon: Landmark },
+  { id: 'tax', label: 'Tax Types', icon: Percent },
+  { id: 'payment', label: 'Payment Methods', icon: CreditCard },
+  { id: 'bank', label: 'Bank Accounts', icon: Landmark },
 ];
 
 function downloadCSV(filename: string, rows: string[][]) {
@@ -83,14 +83,12 @@ export default function CatalogPage() {
   const [modal, setModal] = useState<{ type: TabId; edit?: any } | null>(null);
   const [form, setForm] = useState<Record<string, any>>({});
 
-  // Multi-select for bulk delete / export
   const [selectedCategoryIds, setSelectedCategoryIds] = useState<Set<string>>(new Set());
   const [selectedSubcategoryIds, setSelectedSubcategoryIds] = useState<Set<string>>(new Set());
   const [selectedTaxIds, setSelectedTaxIds] = useState<Set<string>>(new Set());
   const [selectedPaymentIds, setSelectedPaymentIds] = useState<Set<string>>(new Set());
   const [selectedBankIds, setSelectedBankIds] = useState<Set<string>>(new Set());
 
-  // Single selection to show products panel
   const [selectedCategoryId, setSelectedCategoryId] = useState<string | null>(null);
   const [selectedSubcategoryId, setSelectedSubcategoryId] = useState<string | null>(null);
   const [productsInCategory, setProductsInCategory] = useState<Product[]>([]);
@@ -464,7 +462,7 @@ export default function CatalogPage() {
   const handleExportPaymentCSV = () => {
     const toExport = selectedPaymentIds.size > 0 ? paymentMethods.filter((p) => selectedPaymentIds.has(p.id)) : paymentMethods;
     const rows = [['Name', 'Display order'], ...toExport.map((p) => [p.name, String(p.display_order ?? 0)])];
-    downloadCSV(`payment-methods-${new Date().toISOString().slice(0, 10)}.csv`, rows);
+    downloadCSV(`payment-methods-${new Date().toISOString().slice(0, 15)}.csv`, rows);
     toast.success('CSV downloaded');
   };
 
@@ -544,19 +542,26 @@ export default function CatalogPage() {
   const productsNotInSubcategory = allProducts.filter((p) => p.sub_category_id !== selectedSubcategoryId);
 
   return (
-    <div>
-      <h1 className="text-2xl font-bold text-gray-900">Categories, Subcategories & Tax Types</h1>
-      <p className="text-gray-600 mt-1">Manage your catalog structure, tax rates, and assign products to categories or subcategories.</p>
+    <div className="space-y-6">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        <div>
+          <h1 className="text-3xl font-extrabold text-white tracking-tight">Catalog Configuration</h1>
+          <p className="text-xs text-slate-400 mt-1">Configure retail tax rate brackets, homepage category carousels, sub-categories, dynamic payment gates, and store bank accounts.</p>
+        </div>
+      </div>
 
-      <div className="flex flex-wrap gap-2 mt-6 border-b border-gray-200 pb-4">
+      <div className="flex flex-wrap gap-2.5 mt-6 border-b border-white/5 pb-4">
         {TABS.map((tab) => {
           const Icon = tab.icon;
+          const isAct = activeTab === tab.id;
           return (
             <button
               key={tab.id}
               onClick={() => setActiveTab(tab.id)}
-              className={`flex items-center gap-2 px-4 py-2.5 rounded-lg font-medium transition-colors ${
-                activeTab === tab.id ? 'bg-[#0f766e] text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+              className={`flex items-center gap-2 px-4 py-2.5 rounded-xl font-bold text-xs transition-all ${
+                isAct
+                  ? 'bg-gradient-to-tr from-teal-600 to-teal-500 hover:from-teal-500 hover:to-teal-400 border border-white/10 text-white shadow-sm'
+                  : 'bg-slate-905/60 border border-white/10 text-slate-400 hover:bg-slate-900 hover:text-white'
               }`}
             >
               <Icon className="w-4 h-4" />
@@ -567,348 +572,362 @@ export default function CatalogPage() {
       </div>
 
       {loading ? (
-        <div className="flex justify-center py-12">
-          <div className="animate-spin rounded-full h-12 w-12 border-2 border-[#0f766e] border-t-transparent" />
+        <div className="flex justify-center py-16">
+          <div className="animate-spin rounded-full h-8 w-8 border-2 border-teal-500 border-t-transparent" />
         </div>
       ) : (
-        <>
-          <div className="mt-6 bg-white rounded-xl shadow overflow-hidden border border-gray-200">
+        <div className="space-y-6">
+          <div className="bg-slate-900/40 backdrop-blur-lg border border-white/[0.06] border-t-white/[0.18] shadow-[0_12px_40px_rgba(0,0,0,0.25)] rounded-2xl overflow-hidden">
             {activeTab === 'categories' && (
-              <div className="p-6">
-                <div className="flex flex-wrap justify-between items-center gap-4 mb-4">
+              <div className="p-6 space-y-4">
+                <div className="flex flex-wrap justify-between items-center gap-4 border-b border-white/5 pb-3">
                   <div>
-                    <h2 className="text-lg font-semibold text-gray-900">Categories</h2>
-                    <p className="text-sm text-gray-500 mt-1 max-w-2xl">
-                      The homepage wheel shows the first seven categories (by display order). Add a <strong>wheel image</strong> in Add/Edit so your photo appears on the carousel.
+                    <h2 className="text-sm font-bold text-white uppercase tracking-wider">Product Categories</h2>
+                    <p className="text-[10px] text-slate-400 mt-1.5 max-w-2xl font-medium">
+                      The homepage catalog wheel renders the initial 7 categories. Add a high-resolution wheel thumbnail inside the metadata popup.
                     </p>
                   </div>
                   <div className="flex flex-wrap gap-2">
-                    <button onClick={() => openAdd('categories')} className="bg-[#0f766e] text-white px-4 py-2 rounded-lg font-medium flex items-center gap-2 hover:bg-[#0d5d57]">
-                      <Plus className="w-4 h-4" /> Add category
+                    <button onClick={() => openAdd('categories')} className="inline-flex items-center justify-center gap-1.5 px-3.5 py-2 bg-gradient-to-tr from-teal-600 to-teal-500 hover:from-teal-500 hover:to-teal-400 border border-white/10 text-white rounded-xl text-xs font-bold transition-all shadow-sm">
+                      <Plus className="w-4 h-4" /> Add Category
                     </button>
-                    <button onClick={handleBulkDeleteCategories} disabled={selectedCategoryIds.size === 0} className="px-4 py-2 rounded-lg font-medium border border-red-300 text-red-700 hover:bg-red-50 disabled:opacity-50 disabled:cursor-not-allowed">
-                      Delete selected ({selectedCategoryIds.size})
+                    <button onClick={handleBulkDeleteCategories} disabled={selectedCategoryIds.size === 0} className="inline-flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-xl text-rose-450 hover:bg-rose-500/10 border border-rose-500/20 text-xs font-bold transition-all disabled:opacity-40 disabled:bg-transparent disabled:border-white/5">
+                      Delete Selected ({selectedCategoryIds.size})
                     </button>
-                    <button onClick={handleExportCategoriesCSV} className="px-4 py-2 rounded-lg font-medium border border-gray-300 text-gray-700 hover:bg-gray-50 flex items-center gap-1">
-                      <FileDown className="w-4 h-4" /> Export CSV
+                    <button onClick={handleExportCategoriesCSV} className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-slate-350 bg-slate-800 border border-white/5 hover:text-white text-xs font-bold transition-all">
+                      <FileDown className="w-3.5 h-3.5" /> Export CSV
                     </button>
                   </div>
                 </div>
                 <div className="overflow-x-auto">
-                  <table className="w-full">
-                    <thead className="bg-gray-50">
+                  <table className="w-full border-collapse">
+                    <thead className="bg-slate-950/60 text-slate-400 border-b border-white/5">
                       <tr>
-                        <th className="w-10 py-3 px-4">
-                          <input type="checkbox" checked={categories.length > 0 && selectedCategoryIds.size === categories.length} onChange={selectAllCategories} className="rounded border-gray-300 text-[#0f766e]" />
+                        <th className="w-10 py-3.5 px-4 text-center">
+                          <input type="checkbox" checked={categories.length > 0 && selectedCategoryIds.size === categories.length} onChange={selectAllCategories} className="rounded border-white/10 bg-slate-950 text-teal-600 focus:ring-0 focus:ring-offset-0" />
                         </th>
-                        <th className="text-left py-3 px-4 text-sm font-medium text-gray-700 w-16">Wheel</th>
-                        <th className="text-left py-3 px-4 text-sm font-medium text-gray-700">Name</th>
-                        <th className="text-left py-3 px-4 text-sm font-medium text-gray-700">Slug</th>
-                        <th className="text-left py-3 px-4 text-sm font-medium text-gray-700">Description</th>
-                        <th className="text-right py-3 px-4 text-sm font-medium text-gray-700">Actions</th>
+                        <th className="text-left py-3.5 px-4 text-[10px] font-bold uppercase tracking-wider w-16">Wheel Image</th>
+                        <th className="text-left py-3.5 px-4 text-[10px] font-bold uppercase tracking-wider">Category Name</th>
+                        <th className="text-left py-3.5 px-4 text-[10px] font-bold uppercase tracking-wider">Slug Token</th>
+                        <th className="text-left py-3.5 px-4 text-[10px] font-bold uppercase tracking-wider">Description</th>
+                        <th className="text-right py-3.5 px-4 text-[10px] font-bold uppercase tracking-wider w-24">Actions</th>
                       </tr>
                     </thead>
                     <tbody>
                       {categories.map((c) => (
                         <tr
                           key={c.id}
-                          className={`border-b border-gray-100 hover:bg-gray-50 cursor-pointer ${selectedCategoryId === c.id ? 'bg-teal-50' : ''}`}
+                          className={`border-b border-white/5 hover:bg-white/[0.01] cursor-pointer transition-colors ${selectedCategoryId === c.id ? 'bg-teal-500/[0.03]' : ''}`}
                           onClick={() => setSelectedCategoryId(selectedCategoryId === c.id ? null : c.id)}
                         >
-                          <td className="py-3 px-4" onClick={(e) => e.stopPropagation()}>
-                            <input type="checkbox" checked={selectedCategoryIds.has(c.id)} onChange={() => toggleCategorySelect(c.id)} className="rounded border-gray-300 text-[#0f766e]" />
+                          <td className="py-3 px-4 text-center" onClick={(e) => e.stopPropagation()}>
+                            <input type="checkbox" checked={selectedCategoryIds.has(c.id)} onChange={() => toggleCategorySelect(c.id)} className="rounded border-white/10 bg-slate-950 text-teal-600 focus:ring-0 focus:ring-offset-0" />
                           </td>
-                          <td className="py-3 px-4" onClick={(e) => e.stopPropagation()}>
+                          <td className="py-2 px-4" onClick={(e) => e.stopPropagation()}>
                             {c.image_url ? (
-                              <img src={c.image_url} alt="" className="h-10 w-10 rounded-md object-cover border border-gray-200" />
+                              <img src={c.image_url} alt="" className="h-10 w-10 rounded-xl object-cover border border-white/10 shadow-sm bg-slate-950/40" />
                             ) : (
-                              <span className="inline-flex h-10 w-10 items-center justify-center rounded-md border border-dashed border-gray-200 bg-gray-50 text-[10px] text-gray-400">—</span>
+                              <span className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-dashed border-white/10 bg-slate-950/40 text-[9px] font-mono text-slate-500">—</span>
                             )}
                           </td>
-                          <td className="py-3 px-4 font-medium text-gray-900">{c.name}</td>
-                          <td className="py-3 px-4 text-gray-600">{c.slug}</td>
-                          <td className="py-3 px-4 text-gray-600">{c.description || '—'}</td>
+                          <td className="py-3 px-4 font-semibold text-slate-205">{c.name}</td>
+                          <td className="py-3 px-4 text-xs font-mono text-slate-400">{c.slug}</td>
+                          <td className="py-3 px-4 text-xs text-slate-402">{c.description || '—'}</td>
                           <td className="py-3 px-4 text-right" onClick={(e) => e.stopPropagation()}>
-                            <button onClick={() => openEdit('categories', c)} className="p-2 text-[#0f766e] hover:bg-teal-50 rounded-lg mr-1" title="Edit">
-                              <Edit className="w-4 h-4" />
-                            </button>
-                            <button onClick={() => handleDelete('categories', c.id)} className="p-2 text-red-600 hover:bg-red-50 rounded-lg" title="Delete">
-                              <Trash2 className="w-4 h-4" />
-                            </button>
+                            <div className="flex items-center justify-end gap-1">
+                              <button onClick={() => openEdit('categories', c)} className="p-2 text-teal-450 hover:bg-teal-500/10 rounded-xl transition-all" title="Edit">
+                                <Edit className="w-4 h-4" />
+                              </button>
+                              <button onClick={() => handleDelete('categories', c.id)} className="p-2 text-rose-450 hover:bg-rose-500/10 rounded-xl transition-all" title="Delete">
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            </div>
                           </td>
                         </tr>
                       ))}
                     </tbody>
                   </table>
                 </div>
-                {categories.length === 0 && <p className="text-center py-8 text-gray-500">No categories yet. Click &quot;Add category&quot; to create one.</p>}
+                {categories.length === 0 && <p className="text-center py-16 text-slate-500 text-xs font-semibold">No categories registered yet.</p>}
               </div>
             )}
 
             {activeTab === 'subcategories' && (
-              <div className="p-6">
-                <div className="flex flex-wrap justify-between items-center gap-4 mb-4">
-                  <h2 className="text-lg font-semibold text-gray-900">Subcategories</h2>
+              <div className="p-6 space-y-4">
+                <div className="flex flex-wrap justify-between items-center gap-4 border-b border-white/5 pb-3">
+                  <h2 className="text-sm font-bold text-white uppercase tracking-wider">Subcategories</h2>
                   <div className="flex flex-wrap gap-2">
-                    <button onClick={() => openAdd('subcategories')} className="bg-[#0f766e] text-white px-4 py-2 rounded-lg font-medium flex items-center gap-2 hover:bg-[#0d5d57]">
-                      <Plus className="w-4 h-4" /> Add subcategory
+                    <button onClick={() => openAdd('subcategories')} className="inline-flex items-center justify-center gap-1.5 px-3.5 py-2 bg-gradient-to-tr from-teal-600 to-teal-500 hover:from-teal-500 hover:to-teal-400 border border-white/10 text-white rounded-xl text-xs font-bold transition-all shadow-sm">
+                      <Plus className="w-4 h-4" /> Add Subcategory
                     </button>
-                    <button onClick={handleBulkDeleteSubcategories} disabled={selectedSubcategoryIds.size === 0} className="px-4 py-2 rounded-lg font-medium border border-red-300 text-red-700 hover:bg-red-50 disabled:opacity-50 disabled:cursor-not-allowed">
-                      Delete selected ({selectedSubcategoryIds.size})
+                    <button onClick={handleBulkDeleteSubcategories} disabled={selectedSubcategoryIds.size === 0} className="inline-flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-xl text-rose-455 hover:bg-rose-500/10 border border-rose-500/20 text-xs font-bold transition-all disabled:opacity-40 disabled:bg-transparent disabled:border-white/5">
+                      Delete Selected ({selectedSubcategoryIds.size})
                     </button>
-                    <button onClick={handleExportSubcategoriesCSV} className="px-4 py-2 rounded-lg font-medium border border-gray-300 text-gray-700 hover:bg-gray-50 flex items-center gap-1">
-                      <FileDown className="w-4 h-4" /> Export CSV
+                    <button onClick={handleExportSubcategoriesCSV} className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-slate-350 bg-slate-800 border border-white/5 hover:text-white text-xs font-bold transition-all">
+                      <FileDown className="w-3.5 h-3.5" /> Export CSV
                     </button>
                   </div>
                 </div>
                 <div className="overflow-x-auto">
-                  <table className="w-full">
-                    <thead className="bg-gray-50">
+                  <table className="w-full border-collapse">
+                    <thead className="bg-slate-950/60 text-slate-400 border-b border-white/5">
                       <tr>
-                        <th className="w-10 py-3 px-4">
-                          <input type="checkbox" checked={subcategories.length > 0 && selectedSubcategoryIds.size === subcategories.length} onChange={selectAllSubcategories} className="rounded border-gray-300 text-[#0f766e]" />
+                        <th className="w-10 py-3.5 px-4 text-center">
+                          <input type="checkbox" checked={subcategories.length > 0 && selectedSubcategoryIds.size === subcategories.length} onChange={selectAllSubcategories} className="rounded border-white/10 bg-slate-950 text-teal-600 focus:ring-0 focus:ring-offset-0" />
                         </th>
-                        <th className="text-left py-3 px-4 text-sm font-medium text-gray-700">Name</th>
-                        <th className="text-left py-3 px-4 text-sm font-medium text-gray-700">Category</th>
-                        <th className="text-right py-3 px-4 text-sm font-medium text-gray-700">Actions</th>
+                        <th className="text-left py-3.5 px-4 text-[10px] font-bold uppercase tracking-wider">Subcategory Name</th>
+                        <th className="text-left py-3.5 px-4 text-[10px] font-bold uppercase tracking-wider">Parent Category ID</th>
+                        <th className="text-right py-3.5 px-4 text-[10px] font-bold uppercase tracking-wider w-24">Actions</th>
                       </tr>
                     </thead>
                     <tbody>
                       {subcategories.map((s) => (
                         <tr
                           key={s.id}
-                          className={`border-b border-gray-100 hover:bg-gray-50 cursor-pointer ${selectedSubcategoryId === s.id ? 'bg-teal-50' : ''}`}
+                          className={`border-b border-white/5 hover:bg-white/[0.01] cursor-pointer transition-colors ${selectedSubcategoryId === s.id ? 'bg-teal-500/[0.03]' : ''}`}
                           onClick={() => setSelectedSubcategoryId(selectedSubcategoryId === s.id ? null : s.id)}
                         >
-                          <td className="py-3 px-4" onClick={(e) => e.stopPropagation()}>
-                            <input type="checkbox" checked={selectedSubcategoryIds.has(s.id)} onChange={() => toggleSubcategorySelect(s.id)} className="rounded border-gray-300 text-[#0f766e]" />
+                          <td className="py-3 px-4 text-center" onClick={(e) => e.stopPropagation()}>
+                            <input type="checkbox" checked={selectedSubcategoryIds.has(s.id)} onChange={() => toggleSubcategorySelect(s.id)} className="rounded border-white/10 bg-slate-950 text-teal-600 focus:ring-0 focus:ring-offset-0" />
                           </td>
-                          <td className="py-3 px-4 font-medium text-gray-900">{s.name}</td>
-                          <td className="py-3 px-4 text-gray-600">{s.category_name || s.category_id}</td>
+                          <td className="py-3 px-4 font-semibold text-slate-205">{s.name}</td>
+                          <td className="py-3 px-4 text-xs font-mono text-slate-400">{s.category_name || s.category_id}</td>
                           <td className="py-3 px-4 text-right" onClick={(e) => e.stopPropagation()}>
-                            <button onClick={() => openEdit('subcategories', s)} className="p-2 text-[#0f766e] hover:bg-teal-50 rounded-lg mr-1" title="Edit">
-                              <Edit className="w-4 h-4" />
-                            </button>
-                            <button onClick={() => handleDelete('subcategories', s.id)} className="p-2 text-red-600 hover:bg-red-50 rounded-lg" title="Delete">
-                              <Trash2 className="w-4 h-4" />
-                            </button>
+                            <div className="flex items-center justify-end gap-1">
+                              <button onClick={() => openEdit('subcategories', s)} className="p-2 text-teal-450 hover:bg-teal-500/10 rounded-xl transition-all" title="Edit">
+                                <Edit className="w-4 h-4" />
+                              </button>
+                              <button onClick={() => handleDelete('subcategories', s.id)} className="p-2 text-rose-455 hover:bg-rose-500/10 rounded-xl transition-all" title="Delete">
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            </div>
                           </td>
                         </tr>
                       ))}
                     </tbody>
                   </table>
                 </div>
-                {subcategories.length === 0 && <p className="text-center py-8 text-gray-500">No subcategories yet. Add a category first, then click &quot;Add subcategory&quot;.</p>}
+                {subcategories.length === 0 && <p className="text-center py-16 text-slate-500 text-xs font-semibold">No sub-categories registered yet.</p>}
               </div>
             )}
 
             {activeTab === 'tax' && (
-              <div className="p-6">
-                <div className="flex flex-wrap justify-between items-center gap-4 mb-4">
-                  <h2 className="text-lg font-semibold text-gray-900">Tax types</h2>
+              <div className="p-6 space-y-4">
+                <div className="flex flex-wrap justify-between items-center gap-4 border-b border-white/5 pb-3">
+                  <h2 className="text-sm font-bold text-white uppercase tracking-wider">Tax Brackets</h2>
                   <div className="flex flex-wrap gap-2">
-                    <button onClick={() => openAdd('tax')} className="bg-[#0f766e] text-white px-4 py-2 rounded-lg font-medium flex items-center gap-2 hover:bg-[#0d5d57]">
-                      <Plus className="w-4 h-4" /> Add tax type
+                    <button onClick={() => openAdd('tax')} className="inline-flex items-center justify-center gap-1.5 px-3.5 py-2 bg-gradient-to-tr from-teal-600 to-teal-500 hover:from-teal-500 hover:to-teal-400 border border-white/10 text-white rounded-xl text-xs font-bold transition-all shadow-sm">
+                      <Plus className="w-4 h-4" /> Add Tax Bracket/Type
                     </button>
-                    <button onClick={handleBulkDeleteTax} disabled={selectedTaxIds.size === 0} className="px-4 py-2 rounded-lg font-medium border border-red-300 text-red-700 hover:bg-red-50 disabled:opacity-50 disabled:cursor-not-allowed">
-                      Delete selected ({selectedTaxIds.size})
+                    <button onClick={handleBulkDeleteTax} disabled={selectedTaxIds.size === 0} className="inline-flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-xl text-rose-455 hover:bg-rose-500/10 border border-rose-500/20 text-xs font-bold transition-all disabled:opacity-40 disabled:bg-transparent disabled:border-white/5">
+                      Delete Selected ({selectedTaxIds.size})
                     </button>
-                    <button onClick={handleExportTaxCSV} className="px-4 py-2 rounded-lg font-medium border border-gray-300 text-gray-700 hover:bg-gray-50 flex items-center gap-1">
-                      <FileDown className="w-4 h-4" /> Export CSV
+                    <button onClick={handleExportTaxCSV} className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-slate-350 bg-slate-800 border border-white/5 hover:text-white text-xs font-bold transition-all">
+                      <FileDown className="w-3.5 h-3.5" /> Export CSV
                     </button>
                   </div>
                 </div>
                 <div className="overflow-x-auto">
-                  <table className="w-full">
-                    <thead className="bg-gray-50">
+                  <table className="w-full border-collapse">
+                    <thead className="bg-slate-950/60 text-slate-400 border-b border-white/5">
                       <tr>
-                        <th className="w-10 py-3 px-4">
-                          <input type="checkbox" checked={taxTypes.length > 0 && selectedTaxIds.size === taxTypes.length} onChange={selectAllTax} className="rounded border-gray-300 text-[#0f766e]" />
+                        <th className="w-10 py-3.5 px-4 text-center">
+                          <input type="checkbox" checked={taxTypes.length > 0 && selectedTaxIds.size === taxTypes.length} onChange={selectAllTax} className="rounded border-white/10 bg-slate-950 text-teal-600 focus:ring-0 focus:ring-offset-0" />
                         </th>
-                        <th className="text-left py-3 px-4 text-sm font-medium text-gray-700">Name</th>
-                        <th className="text-right py-3 px-4 text-sm font-medium text-gray-700">Rate %</th>
-                        <th className="text-right py-3 px-4 text-sm font-medium text-gray-700">Actions</th>
+                        <th className="text-left py-3.5 px-4 text-[10px] font-bold uppercase tracking-wider">Tax Type / Formula Title</th>
+                        <th className="text-right py-3.5 px-4 text-[10px] font-bold uppercase tracking-wider">Flat / Percentage Value</th>
+                        <th className="text-right py-3.5 px-4 text-[10px] font-bold uppercase tracking-wider w-24">Actions</th>
                       </tr>
                     </thead>
                     <tbody>
                       {taxTypes.map((t) => (
-                        <tr key={t.id} className="border-b border-gray-100 hover:bg-gray-50">
-                          <td className="py-3 px-4">
-                            <input type="checkbox" checked={selectedTaxIds.has(t.id)} onChange={() => toggleTaxSelect(t.id)} className="rounded border-gray-300 text-[#0f766e]" />
+                        <tr key={t.id} className="border-b border-white/5 hover:bg-white/[0.02] transition-colors">
+                          <td className="py-3 px-4 text-center">
+                            <input type="checkbox" checked={selectedTaxIds.has(t.id)} onChange={() => toggleTaxSelect(t.id)} className="rounded border-white/10 bg-slate-950 text-teal-600 focus:ring-0 focus:ring-offset-0" />
                           </td>
-                          <td className="py-3 px-4 font-medium text-gray-900">{t.name}</td>
-                          <td className="py-3 px-4 text-right text-gray-600">{t.rate_type === 'amount' ? `$${Number(t.rate).toFixed(2)}` : `${t.rate}%`}</td>
+                          <td className="py-3 px-4 font-semibold text-slate-205">{t.name}</td>
+                          <td className="py-3 px-4 text-right text-xs font-mono font-bold text-slate-300">{t.rate_type === 'amount' ? `$${Number(t.rate).toFixed(2)}` : `${t.rate}%`}</td>
                           <td className="py-3 px-4 text-right">
-                            <button onClick={() => openEdit('tax', t)} className="p-2 text-[#0f766e] hover:bg-teal-50 rounded-lg mr-1" title="Edit">
-                              <Edit className="w-4 h-4" />
-                            </button>
-                            <button onClick={() => handleDelete('tax', t.id)} className="p-2 text-red-600 hover:bg-red-50 rounded-lg" title="Delete">
-                              <Trash2 className="w-4 h-4" />
-                            </button>
+                            <div className="flex items-center justify-end gap-1">
+                              <button onClick={() => openEdit('tax', t)} className="p-2 text-teal-450 hover:bg-teal-500/10 rounded-xl transition-all" title="Edit">
+                                <Edit className="w-4 h-4" />
+                              </button>
+                              <button onClick={() => handleDelete('tax', t.id)} className="p-2 text-rose-455 hover:bg-rose-500/10 rounded-xl transition-all" title="Delete">
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            </div>
                           </td>
                         </tr>
                       ))}
                     </tbody>
                   </table>
                 </div>
-                {taxTypes.length === 0 && <p className="text-center py-8 text-gray-500">No tax types yet. Click &quot;Add tax type&quot; to create one.</p>}
+                {taxTypes.length === 0 && <p className="text-center py-16 text-slate-500 text-xs font-semibold">No tax types registered yet.</p>}
               </div>
             )}
 
             {activeTab === 'payment' && (
-              <div className="bg-white rounded-xl shadow border border-gray-200 p-6">
-                <div className="flex flex-wrap justify-between items-center gap-4 mb-4">
-                  <h2 className="text-lg font-semibold text-gray-900">Payment methods</h2>
+              <div className="p-6 space-y-4">
+                <div className="flex flex-wrap justify-between items-center gap-4 border-b border-white/5 pb-3">
+                  <div>
+                    <h2 className="text-sm font-bold text-white uppercase tracking-wider">Payment Tenders</h2>
+                    <p className="text-[10px] text-slate-400 mt-1 max-w-2xl font-medium">Configure active payment methods used on manual invoice receipt closures.</p>
+                  </div>
                   <div className="flex flex-wrap gap-2">
-                    <button onClick={() => openAdd('payment')} className="bg-[#0f766e] text-white px-4 py-2 rounded-lg font-medium flex items-center gap-2 hover:bg-[#0d5d57]">
-                      <Plus className="w-4 h-4" /> Add payment method
+                    <button onClick={() => openAdd('payment')} className="inline-flex items-center justify-center gap-1.5 px-3.5 py-2 bg-gradient-to-tr from-teal-600 to-teal-500 hover:from-teal-500 hover:to-teal-400 border border-white/10 text-white rounded-xl text-xs font-bold transition-all shadow-sm">
+                      <Plus className="w-4 h-4" /> Add Payment Title
                     </button>
-                    <button onClick={handleBulkDeletePayment} disabled={selectedPaymentIds.size === 0} className="px-4 py-2 rounded-lg font-medium border border-red-300 text-red-700 hover:bg-red-50 disabled:opacity-50 disabled:cursor-not-allowed">
-                      Delete selected ({selectedPaymentIds.size})
+                    <button onClick={handleBulkDeletePayment} disabled={selectedPaymentIds.size === 0} className="inline-flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-xl text-rose-455 hover:bg-rose-500/10 border border-rose-500/20 text-xs font-bold transition-all disabled:opacity-40 disabled:bg-transparent disabled:border-white/5">
+                      Delete Selected ({selectedPaymentIds.size})
                     </button>
-                    <button onClick={handleExportPaymentCSV} className="px-4 py-2 rounded-lg font-medium border border-gray-300 text-gray-700 hover:bg-gray-50 flex items-center gap-1">
-                      <FileDown className="w-4 h-4" /> Export CSV
+                    <button onClick={handleExportPaymentCSV} className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-slate-350 bg-slate-800 border border-white/5 hover:text-white text-xs font-bold transition-all">
+                      <FileDown className="w-3.5 h-3.5" /> Export CSV
                     </button>
                   </div>
                 </div>
-                <p className="text-sm text-gray-600 mb-4">These payment methods appear when receiving payment on invoices. Add or edit methods here, then select them in Receive Payment.</p>
                 <div className="overflow-x-auto">
-                  <table className="w-full">
-                    <thead className="bg-gray-50">
+                  <table className="w-full border-collapse">
+                    <thead className="bg-slate-950/60 text-slate-400 border-b border-white/5">
                       <tr>
-                        <th className="w-10 py-3 px-4">
-                          <input type="checkbox" checked={paymentMethods.length > 0 && selectedPaymentIds.size === paymentMethods.length} onChange={selectAllPayment} className="rounded border-gray-300 text-[#0f766e]" />
+                        <th className="w-10 py-3.5 px-4 text-center">
+                          <input type="checkbox" checked={paymentMethods.length > 0 && selectedPaymentIds.size === paymentMethods.length} onChange={selectAllPayment} className="rounded border-white/10 bg-slate-950 text-teal-600 focus:ring-0 focus:ring-offset-0" />
                         </th>
-                        <th className="text-left py-3 px-4 text-sm font-medium text-gray-700">Name</th>
-                        <th className="text-right py-3 px-4 text-sm font-medium text-gray-700">Actions</th>
+                        <th className="text-left py-3.5 px-4 text-[10px] font-bold uppercase tracking-wider">Method Name</th>
+                        <th className="text-right py-3.5 px-4 text-[10px] font-bold uppercase tracking-wider w-24">Actions</th>
                       </tr>
                     </thead>
                     <tbody>
                       {paymentMethods.map((p) => (
-                        <tr key={p.id} className="border-b border-gray-100 hover:bg-gray-50">
-                          <td className="py-3 px-4">
-                            <input type="checkbox" checked={selectedPaymentIds.has(p.id)} onChange={() => togglePaymentSelect(p.id)} className="rounded border-gray-300 text-[#0f766e]" />
+                        <tr key={p.id} className="border-b border-white/5 hover:bg-white/[0.02] transition-colors">
+                          <td className="py-3 px-4 text-center">
+                            <input type="checkbox" checked={selectedPaymentIds.has(p.id)} onChange={() => togglePaymentSelect(p.id)} className="rounded border-white/10 bg-slate-950 text-teal-600 focus:ring-0 focus:ring-offset-0" />
                           </td>
-                          <td className="py-3 px-4 font-medium text-gray-900">{p.name}</td>
+                          <td className="py-3 px-4 font-semibold text-slate-205">{p.name}</td>
                           <td className="py-3 px-4 text-right">
-                            <button onClick={() => openEdit('payment', p)} className="p-2 text-[#0f766e] hover:bg-teal-50 rounded-lg mr-1" title="Edit">
-                              <Edit className="w-4 h-4" />
-                            </button>
-                            <button onClick={() => handleDelete('payment', p.id)} className="p-2 text-red-600 hover:bg-red-50 rounded-lg" title="Delete">
-                              <Trash2 className="w-4 h-4" />
-                            </button>
+                            <div className="flex items-center justify-end gap-1">
+                              <button onClick={() => openEdit('payment', p)} className="p-2 text-teal-450 hover:bg-teal-500/10 rounded-xl transition-all" title="Edit">
+                                <Edit className="w-4 h-4" />
+                              </button>
+                              <button onClick={() => handleDelete('payment', p.id)} className="p-2 text-rose-455 hover:bg-rose-500/10 rounded-xl transition-all" title="Delete">
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            </div>
                           </td>
                         </tr>
                       ))}
                     </tbody>
                   </table>
                 </div>
-                {paymentMethods.length === 0 && <p className="text-center py-8 text-gray-500">No payment methods yet. Click &quot;Add payment method&quot; to create one (e.g. Cash, Card, Bank Transfer).</p>}
+                {paymentMethods.length === 0 && <p className="text-center py-16 text-slate-500 text-xs font-semibold">No payment systems registered yet.</p>}
               </div>
             )}
 
             {activeTab === 'bank' && (
-              <div className="bg-white rounded-xl shadow border border-gray-200 p-6">
-                <div className="flex flex-wrap justify-between items-center gap-4 mb-4">
-                  <h2 className="text-lg font-semibold text-gray-900">Bank accounts</h2>
+              <div className="p-6 space-y-4">
+                <div className="flex flex-wrap justify-between items-center gap-4 border-b border-white/5 pb-3">
+                  <div>
+                    <h2 className="text-sm font-bold text-white uppercase tracking-wider">Deposit Bank Accounts</h2>
+                    <p className="text-[10px] text-slate-400 mt-1 max-w-2xl font-medium">Setup bank accounts where card clearances, check deposits and bulk wires are reconciled.</p>
+                  </div>
                   <div className="flex flex-wrap gap-2">
-                    <button onClick={() => openAdd('bank')} className="bg-[#0f766e] text-white px-4 py-2 rounded-lg font-medium flex items-center gap-2 hover:bg-[#0d5d57]">
-                      <Plus className="w-4 h-4" /> Add bank account
+                    <button onClick={() => openAdd('bank')} className="inline-flex items-center justify-center gap-1.5 px-3.5 py-2 bg-gradient-to-tr from-teal-600 to-teal-500 hover:from-teal-500 hover:to-teal-400 border border-white/10 text-white rounded-xl text-xs font-bold transition-all shadow-sm">
+                      <Plus className="w-4 h-4" /> Add Bank Account
                     </button>
-                    <button onClick={handleBulkDeleteBank} disabled={selectedBankIds.size === 0} className="px-4 py-2 rounded-lg font-medium border border-red-300 text-red-700 hover:bg-red-50 disabled:opacity-50 disabled:cursor-not-allowed">
-                      Delete selected ({selectedBankIds.size})
+                    <button onClick={handleBulkDeleteBank} disabled={selectedBankIds.size === 0} className="inline-flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-xl text-rose-455 hover:bg-rose-500/10 border border-rose-500/20 text-xs font-bold transition-all disabled:opacity-40 disabled:bg-transparent disabled:border-white/5">
+                      Delete Selected ({selectedBankIds.size})
                     </button>
-                    <button onClick={handleExportBankCSV} className="px-4 py-2 rounded-lg font-medium border border-gray-300 text-gray-700 hover:bg-gray-50 flex items-center gap-1">
-                      <FileDown className="w-4 h-4" /> Export CSV
+                    <button onClick={handleExportBankCSV} className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-slate-350 bg-slate-800 border border-white/5 hover:text-white text-xs font-bold transition-all">
+                      <FileDown className="w-3.5 h-3.5" /> Export CSV
                     </button>
                   </div>
                 </div>
-                <p className="text-sm text-gray-600 mb-4">When you receive payment (cash or cheque), you can record which bank account the money is deposited in. Add your bank accounts here (e.g. Main Checking, Savings).</p>
                 <div className="overflow-x-auto">
-                  <table className="w-full">
-                    <thead className="bg-gray-50">
+                  <table className="w-full border-collapse">
+                    <thead className="bg-slate-950/60 text-slate-400 border-b border-white/5">
                       <tr>
-                        <th className="w-10 py-3 px-4">
-                          <input type="checkbox" checked={bankAccounts.length > 0 && selectedBankIds.size === bankAccounts.length} onChange={selectAllBank} className="rounded border-gray-300 text-[#0f766e]" />
+                        <th className="w-10 py-3.5 px-4 text-center">
+                          <input type="checkbox" checked={bankAccounts.length > 0 && selectedBankIds.size === bankAccounts.length} onChange={selectAllBank} className="rounded border-white/10 bg-slate-950 text-teal-600 focus:ring-0 focus:ring-offset-0" />
                         </th>
-                        <th className="text-left py-3 px-4 text-sm font-medium text-gray-700">Name</th>
-                        <th className="text-left py-3 px-4 text-sm font-medium text-gray-700">Account number</th>
-                        <th className="text-right py-3 px-4 text-sm font-medium text-gray-700">Actions</th>
+                        <th className="text-left py-3.5 px-4 text-[10px] font-bold uppercase tracking-wider">Account Title / Bank</th>
+                        <th className="text-left py-3.5 px-4 text-[10px] font-bold uppercase tracking-wider font-mono">Routing / Account number</th>
+                        <th className="text-right py-3.5 px-4 text-[10px] font-bold uppercase tracking-wider w-24">Actions</th>
                       </tr>
                     </thead>
                     <tbody>
                       {bankAccounts.map((b) => (
-                        <tr key={b.id} className="border-b border-gray-100 hover:bg-gray-50">
-                          <td className="py-3 px-4">
-                            <input type="checkbox" checked={selectedBankIds.has(b.id)} onChange={() => toggleBankSelect(b.id)} className="rounded border-gray-300 text-[#0f766e]" />
+                        <tr key={b.id} className="border-b border-white/5 hover:bg-white/[0.02] transition-colors">
+                          <td className="py-3 px-4 text-center">
+                            <input type="checkbox" checked={selectedBankIds.has(b.id)} onChange={() => toggleBankSelect(b.id)} className="rounded border-white/10 bg-slate-950 text-teal-600 focus:ring-0 focus:ring-offset-0" />
                           </td>
-                          <td className="py-3 px-4 font-medium text-gray-900">{b.name}</td>
-                          <td className="py-3 px-4 text-gray-600">{b.account_number || '—'}</td>
+                          <td className="py-3 px-4 font-semibold text-slate-205">{b.name}</td>
+                          <td className="py-3 px-4 text-xs font-mono text-slate-400">{b.account_number || '—'}</td>
                           <td className="py-3 px-4 text-right">
-                            <button onClick={() => openEdit('bank', b)} className="p-2 text-[#0f766e] hover:bg-teal-50 rounded-lg mr-1" title="Edit">
-                              <Edit className="w-4 h-4" />
-                            </button>
-                            <button onClick={() => handleDelete('bank', b.id)} className="p-2 text-red-600 hover:bg-red-50 rounded-lg" title="Delete">
-                              <Trash2 className="w-4 h-4" />
-                            </button>
+                            <div className="flex items-center justify-end gap-1">
+                              <button onClick={() => openEdit('bank', b)} className="p-2 text-teal-450 hover:bg-teal-500/10 rounded-xl transition-all" title="Edit">
+                                <Edit className="w-4 h-4" />
+                              </button>
+                              <button onClick={() => handleDelete('bank', b.id)} className="p-2 text-rose-455 hover:bg-rose-500/10 rounded-xl transition-all" title="Delete">
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            </div>
                           </td>
                         </tr>
                       ))}
                     </tbody>
                   </table>
                 </div>
-                {bankAccounts.length === 0 && <p className="text-center py-8 text-gray-500">No bank accounts yet. Click &quot;Add bank account&quot; to create one (e.g. your 2 bank accounts for depositing cash and cheque).</p>}
+                {bankAccounts.length === 0 && <p className="text-center py-16 text-slate-500 text-xs font-semibold">No bank accounts registered yet.</p>}
               </div>
             )}
           </div>
 
-          {/* Products panel for selected category */}
+          {/* Products mapping drawer sub-panels */}
           {activeTab === 'categories' && selectedCategoryId && (
-            <div className="mt-6 bg-white rounded-xl shadow border border-gray-200 p-6">
-              <h3 className="text-lg font-semibold text-gray-900 flex items-center gap-2 mb-4">
-                <Package className="w-5 h-5" />
-                Products in &quot;{categories.find((c) => c.id === selectedCategoryId)?.name}&quot;
+            <div className="bg-slate-900/40 backdrop-blur-lg border border-white/[0.06] border-t-white/[0.18] p-6 shadow-[0_12px_40px_rgba(0,0,0,0.25)] rounded-2xl space-y-4">
+              <h3 className="text-sm font-bold text-white uppercase tracking-wider flex items-center gap-2">
+                <Package className="w-4 h-4 text-teal-400" />
+                Products Inside Category: &quot;{categories.find((c) => c.id === selectedCategoryId)?.name}&quot;
               </h3>
-              <p className="text-sm text-gray-600 mb-4">Click a category row above to see its products. Add or remove products from this category.</p>
-              <div className="flex flex-wrap gap-2 mb-4">
-                <select value={addProductId} onChange={(e) => setAddProductId(e.target.value)} className="border border-gray-300 rounded-lg px-3 py-2 text-sm min-w-[200px]">
-                  <option value="">Select product to add...</option>
+              <p className="text-[10px] text-slate-400 font-medium">Link products from the wholesale index below to list them inside this category wheel namespace.</p>
+              <div className="flex flex-wrap gap-2.5 items-center">
+                <select value={addProductId} onChange={(e) => setAddProductId(e.target.value)} className="bg-slate-955/65 border border-white/10 rounded-xl px-3 py-2 text-xs text-slate-250 focus:outline-none min-w-[200px] font-semibold">
+                  <option value="">Select product to assign...</option>
                   {productsNotInCategory.map((p) => (
                     <option key={p.id} value={p.id}>{p.name} {p.sku ? `(${p.sku})` : ''}</option>
                   ))}
                 </select>
-                <button onClick={addProductToCategory} disabled={!addProductId} className="bg-[#0f766e] text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-[#0d5d57] disabled:opacity-50">
-                  Add to category
+                <button onClick={addProductToCategory} disabled={!addProductId} className="inline-flex items-center justify-center px-4 py-2.5 bg-gradient-to-tr from-teal-600 to-teal-500 hover:from-teal-500 border border-white/10 text-white rounded-xl text-xs font-bold transition-all shadow-sm disabled:opacity-40">
+                  Link Product
                 </button>
               </div>
               {productsLoading ? (
-                <div className="flex justify-center py-8"><div className="animate-spin rounded-full h-8 w-8 border-2 border-[#0f766e] border-t-transparent" /></div>
+                <div className="flex justify-center py-8"><div className="animate-spin rounded-full h-6 w-6 border-2 border-teal-500 border-t-transparent" /></div>
               ) : (
-                <div className="overflow-x-auto">
-                  <table className="w-full text-sm">
-                    <thead className="bg-gray-50">
+                <div className="overflow-x-auto border border-white/5 rounded-xl bg-slate-950/20">
+                  <table className="w-full border-collapse text-xs">
+                    <thead className="bg-slate-950/60 text-slate-400 border-b border-white/5">
                       <tr>
-                        <th className="text-left py-2 px-4">Product</th>
-                        <th className="text-left py-2 px-4">SKU</th>
-                        <th className="text-right py-2 px-4">Price</th>
-                        <th className="text-right py-2 px-4">Action</th>
+                        <th className="text-left py-2.5 px-4 text-[9px] font-bold uppercase tracking-wider">Product Name</th>
+                        <th className="text-left py-2.5 px-4 text-[9px] font-bold uppercase tracking-wider font-mono">SKU</th>
+                        <th className="text-right py-2.5 px-4 text-[9px] font-bold uppercase tracking-wider font-mono">Price</th>
+                        <th className="text-right py-2.5 px-4 text-[9px] font-bold uppercase tracking-wider w-28">Actions</th>
                       </tr>
                     </thead>
                     <tbody>
                       {productsInCategory.map((p) => (
-                        <tr key={p.id} className="border-b border-gray-100">
-                          <td className="py-2 px-4 font-medium">
+                        <tr key={p.id} className="border-t border-white/5 hover:bg-white/[0.01]">
+                          <td className="py-2.5 px-4 font-semibold text-slate-205">
                             <span className="inline-flex flex-wrap items-center gap-2">
                               {p.name}
                               {p.is_active === false && (
-                                <span className="text-xs font-semibold text-amber-800 bg-amber-100 px-2 py-0.5 rounded-full">Inactive</span>
+                                <span className="text-[9px] font-bold text-amber-400 bg-amber-500/10 border border-amber-500/20 px-2 py-0.5 rounded">Inactive</span>
                               )}
                             </span>
                           </td>
-                          <td className="py-2 px-4 text-gray-600">{p.sku || '—'}</td>
-                          <td className="py-2 px-4 text-right">{p.price != null ? Number(p.price).toLocaleString() : '—'}</td>
-                          <td className="py-2 px-4 text-right">
-                            <button onClick={() => removeProductFromCategory(p.id)} className="text-red-600 hover:underline text-sm">Remove from category</button>
+                          <td className="py-2.5 px-4 font-mono text-slate-400">{p.sku || '—'}</td>
+                          <td className="py-2.5 px-4 text-right font-mono font-semibold text-slate-200">${p.price != null ? Number(p.price).toLocaleString(undefined, {minimumFractionDigits: 2}) : '—'}</td>
+                          <td className="py-2.5 px-4 text-right">
+                            <button onClick={() => removeProductFromCategory(p.id)} className="text-rose-450 hover:text-rose-350 hover:underline font-bold text-[11px] transition-all">Remove</button>
                           </td>
                         </tr>
                       ))}
@@ -916,57 +935,56 @@ export default function CatalogPage() {
                   </table>
                 </div>
               )}
-              {!productsLoading && productsInCategory.length === 0 && <p className="text-gray-500 py-4">No products in this category. Use the dropdown above to add products.</p>}
+              {!productsLoading && productsInCategory.length === 0 && <p className="text-slate-500 text-xs py-4 text-center bg-slate-955/20 rounded-xl font-medium">No products mapped into category stack.</p>}
             </div>
           )}
 
-          {/* Products panel for selected subcategory */}
           {activeTab === 'subcategories' && selectedSubcategoryId && (
-            <div className="mt-6 bg-white rounded-xl shadow border border-gray-200 p-6">
-              <h3 className="text-lg font-semibold text-gray-900 flex items-center gap-2 mb-4">
-                <Package className="w-5 h-5" />
-                Products in &quot;{subcategories.find((s) => s.id === selectedSubcategoryId)?.name}&quot;
+            <div className="bg-slate-900/40 backdrop-blur-lg border border-white/[0.06] border-t-white/[0.18] p-6 shadow-[0_12px_40px_rgba(0,0,0,0.25)] rounded-2xl space-y-4">
+              <h3 className="text-sm font-bold text-white uppercase tracking-wider flex items-center gap-2">
+                <Package className="w-4 h-4 text-teal-400" />
+                Products Inside Subcategory: &quot;{subcategories.find((s) => s.id === selectedSubcategoryId)?.name}&quot;
               </h3>
-              <p className="text-sm text-gray-600 mb-4">Click a subcategory row above to see its products. Add or remove products from this subcategory.</p>
-              <div className="flex flex-wrap gap-2 mb-4">
-                <select value={addProductIdSub} onChange={(e) => setAddProductIdSub(e.target.value)} className="border border-gray-300 rounded-lg px-3 py-2 text-sm min-w-[200px]">
-                  <option value="">Select product to add...</option>
+              <p className="text-[10px] text-slate-400 font-medium">Link products from the wholesale index below to list them inside this subcategory namespace.</p>
+              <div className="flex flex-wrap gap-2.5 items-center">
+                <select value={addProductIdSub} onChange={(e) => setAddProductIdSub(e.target.value)} className="bg-slate-955/65 border border-white/10 rounded-xl px-3 py-2 text-xs text-slate-250 focus:outline-none min-w-[200px] font-semibold">
+                  <option value="">Select product to assign...</option>
                   {productsNotInSubcategory.map((p) => (
                     <option key={p.id} value={p.id}>{p.name} {p.sku ? `(${p.sku})` : ''}</option>
                   ))}
                 </select>
-                <button onClick={addProductToSubcategory} disabled={!addProductIdSub} className="bg-[#0f766e] text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-[#0d5d57] disabled:opacity-50">
-                  Add to subcategory
+                <button onClick={addProductToSubcategory} disabled={!addProductIdSub} className="inline-flex items-center justify-center px-4 py-2.5 bg-gradient-to-tr from-teal-600 to-teal-500 hover:from-teal-500 border border-white/10 text-white rounded-xl text-xs font-bold transition-all shadow-sm disabled:opacity-40">
+                  Link Product
                 </button>
               </div>
               {productsLoading ? (
-                <div className="flex justify-center py-8"><div className="animate-spin rounded-full h-8 w-8 border-2 border-[#0f766e] border-t-transparent" /></div>
+                <div className="flex justify-center py-8"><div className="animate-spin rounded-full h-6 w-6 border-2 border-teal-500 border-t-transparent" /></div>
               ) : (
-                <div className="overflow-x-auto">
-                  <table className="w-full text-sm">
-                    <thead className="bg-gray-50">
+                <div className="overflow-x-auto border border-white/5 rounded-xl bg-slate-950/20">
+                  <table className="w-full border-collapse text-xs">
+                    <thead className="bg-slate-950/60 text-slate-400 border-b border-white/5">
                       <tr>
-                        <th className="text-left py-2 px-4">Product</th>
-                        <th className="text-left py-2 px-4">SKU</th>
-                        <th className="text-right py-2 px-4">Price</th>
-                        <th className="text-right py-2 px-4">Action</th>
+                        <th className="text-left py-2.5 px-4 text-[9px] font-bold uppercase tracking-wider">Product Name</th>
+                        <th className="text-left py-2.5 px-4 text-[9px] font-bold uppercase tracking-wider font-mono">SKU</th>
+                        <th className="text-right py-2.5 px-4 text-[9px] font-bold uppercase tracking-wider font-mono">Price</th>
+                        <th className="text-right py-2.5 px-4 text-[9px] font-bold uppercase tracking-wider w-28">Actions</th>
                       </tr>
                     </thead>
                     <tbody>
                       {productsInSubcategory.map((p) => (
-                        <tr key={p.id} className="border-b border-gray-100">
-                          <td className="py-2 px-4 font-medium">
+                        <tr key={p.id} className="border-t border-white/5 hover:bg-white/[0.01]">
+                          <td className="py-2.5 px-4 font-semibold text-slate-205">
                             <span className="inline-flex flex-wrap items-center gap-2">
                               {p.name}
                               {p.is_active === false && (
-                                <span className="text-xs font-semibold text-amber-800 bg-amber-100 px-2 py-0.5 rounded-full">Inactive</span>
+                                <span className="text-[9px] font-bold text-amber-400 bg-amber-500/10 border border-amber-500/20 px-2 py-0.5 rounded">Inactive</span>
                               )}
                             </span>
                           </td>
-                          <td className="py-2 px-4 text-gray-600">{p.sku || '—'}</td>
-                          <td className="py-2 px-4 text-right">{p.price != null ? Number(p.price).toLocaleString() : '—'}</td>
-                          <td className="py-2 px-4 text-right">
-                            <button onClick={() => removeProductFromSubcategory(p.id)} className="text-red-600 hover:underline text-sm">Remove from subcategory</button>
+                          <td className="py-2.5 px-4 font-mono text-slate-400">{p.sku || '—'}</td>
+                          <td className="py-2.5 px-4 text-right font-mono font-semibold text-slate-200">${p.price != null ? Number(p.price).toLocaleString(undefined, {minimumFractionDigits: 2}) : '—'}</td>
+                          <td className="py-2.5 px-4 text-right">
+                            <button onClick={() => removeProductFromSubcategory(p.id)} className="text-rose-455 hover:text-rose-350 hover:underline font-bold text-[11px] transition-all">Remove</button>
                           </td>
                         </tr>
                       ))}
@@ -974,37 +992,37 @@ export default function CatalogPage() {
                   </table>
                 </div>
               )}
-              {!productsLoading && productsInSubcategory.length === 0 && <p className="text-gray-500 py-4">No products in this subcategory. Use the dropdown above to add products.</p>}
+              {!productsLoading && productsInSubcategory.length === 0 && <p className="text-slate-500 text-xs py-4 text-center bg-slate-955/20 rounded-xl font-medium">No products mapped into subcategory stack.</p>}
             </div>
           )}
-        </>
+        </div>
       )}
 
       {modal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-xl shadow-xl max-w-md w-full max-h-[90vh] overflow-y-auto">
-            <div className="flex items-center justify-between p-4 border-b">
-              <h2 className="text-xl font-bold text-gray-900">
+        <div className="fixed inset-0 bg-slate-955/80 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-slate-900 border border-white/10 shadow-[0_24px_50px_rgba(0,0,0,0.4)] rounded-2xl max-w-md w-full max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between p-5 border-b border-white/5">
+              <h2 className="text-md font-bold text-white uppercase tracking-wider">
                 {modal.edit ? 'Edit' : 'Add'} {TABS.find((t) => t.id === modal!.type)?.label}
               </h2>
-              <button type="button" onClick={() => setModal(null)} className="p-2 hover:bg-gray-100 rounded-lg">
+              <button type="button" onClick={() => setModal(null)} className="p-1.5 hover:bg-white/5 rounded-lg text-slate-400 hover:text-white transition-all">
                 <X className="w-5 h-5" />
               </button>
             </div>
-            <form onSubmit={handleSubmit} className="p-4 space-y-4">
+            <form onSubmit={handleSubmit} className="p-5 space-y-4 text-xs">
               {modal.type === 'categories' && (
                 <>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Name *</label>
-                    <input type="text" value={form.name || ''} onChange={(e) => setForm({ ...form, name: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#0f766e] focus:border-transparent" required />
+                    <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">Category Name *</label>
+                    <input type="text" value={form.name || ''} onChange={(e) => setForm({ ...form, name: e.target.value })} className="w-full bg-slate-950/60 border border-white/10 rounded-xl px-4 py-2 text-xs text-slate-200 focus:outline-none" required />
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Description</label>
-                    <input type="text" value={form.description || ''} onChange={(e) => setForm({ ...form, description: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#0f766e] focus:border-transparent" placeholder="Optional" />
+                    <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">Description</label>
+                    <input type="text" value={form.description || ''} onChange={(e) => setForm({ ...form, description: e.target.value })} className="w-full bg-slate-950/60 border border-white/10 rounded-xl px-4 py-2 text-xs text-slate-200 focus:outline-none" placeholder="Description summary token" />
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Homepage wheel image</label>
-                    <p className="text-xs text-gray-500 mb-2">Drag and drop an image here or click to browse. Used on the rotating category cards (JPEG, PNG, WebP, GIF — max 5MB).</p>
+                    <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">Homepage Wheel Thumbnail</label>
+                    <p className="text-[10px] text-slate-500 mb-2 font-medium">Upload png/webp artwork. Appears in the storefront carousel catalog circles.</p>
                     <div
                       role="button"
                       tabIndex={0}
@@ -1014,9 +1032,9 @@ export default function CatalogPage() {
                           if (!categoryImageBusy) categoryImageInputRef.current?.click();
                         }
                       }}
-                      className={`rounded-xl border-2 border-dashed p-6 text-center transition-colors cursor-pointer outline-none focus-visible:ring-2 focus-visible:ring-[#0f766e] ${
-                        categoryImageDragging ? 'border-[#0f766e] bg-teal-50' : 'border-gray-300 bg-gray-50/80 hover:border-gray-400'
-                      } ${categoryImageBusy ? 'pointer-events-none opacity-70' : ''}`}
+                      className={`rounded-2xl border-2 border-dashed p-6 text-center transition-all bg-slate-955/40 outline-none focus-visible:ring-1 focus-visible:ring-teal-500 ${
+                        categoryImageDragging ? 'border-teal-500 bg-teal-500/5' : 'border-white/10 hover:border-teal-500/40 hover:bg-slate-950/10'
+                      } ${categoryImageBusy ? 'pointer-events-none opacity-50' : ''}`}
                       onDragOver={(e) => {
                         e.preventDefault();
                         e.stopPropagation();
@@ -1050,123 +1068,125 @@ export default function CatalogPage() {
                         }}
                       />
                       {categoryImageBusy ? (
-                        <Loader2 className="w-8 h-8 mx-auto animate-spin text-[#0f766e]" aria-hidden />
+                        <Loader2 className="w-8 h-8 mx-auto animate-spin text-teal-400" aria-hidden />
                       ) : (
                         <>
-                          <ImagePlus className="w-9 h-9 mx-auto text-gray-400 mb-2" aria-hidden />
-                          <p className="text-sm text-gray-600 font-medium">Drop image here or click to upload</p>
-                          <p className="text-xs text-gray-400 mt-1">Replaces the letter placeholder on the wheel</p>
+                          <ImagePlus className="w-8 h-8 mx-auto text-slate-500 mb-2" aria-hidden />
+                          <p className="text-xs text-slate-350 font-bold">Drop artwork file here or click to browse</p>
+                          <p className="text-[10px] text-slate-500 mt-1 font-medium">Replaces alphabet circle placeholder on landing</p>
                         </>
                       )}
                     </div>
                     {form.image_url ? (
-                      <div className="mt-3 flex flex-wrap items-start gap-3">
-                        <img src={form.image_url} alt="Category wheel preview" className="h-28 w-28 object-cover rounded-lg border border-gray-200 shadow-sm" />
-                        <div className="flex flex-col gap-2 min-w-0">
+                      <div className="mt-3.5 flex items-start gap-3.5">
+                        <img src={form.image_url} alt="Category preview" className="h-24 w-24 object-cover rounded-xl border border-white/10 shadow-sm bg-slate-950/40" />
+                        <div className="flex-1 space-y-2">
                           <button
                             type="button"
-                            className="text-sm text-red-600 hover:text-red-800 font-medium w-fit"
+                            className="text-xs text-rose-450 hover:text-rose-405 font-bold transition-colors"
                             onClick={() => setForm((f) => ({ ...f, image_url: '' }))}
                           >
-                            Remove image
+                            Remove Artwork
                           </button>
-                          <label className="text-xs font-medium text-gray-600">Or paste image URL</label>
-                          <input
-                            type="url"
-                            value={form.image_url || ''}
-                            onChange={(e) => setForm((f) => ({ ...f, image_url: e.target.value }))}
-                            className="w-full max-w-md px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#0f766e] focus:border-transparent"
-                            placeholder="https://..."
-                          />
+                          <div>
+                            <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Paste Direct Image URL</label>
+                            <input
+                              type="url"
+                              value={form.image_url || ''}
+                              onChange={(e) => setForm((f) => ({ ...f, image_url: e.target.value }))}
+                              className="w-full bg-slate-950/60 border border-white/10 rounded-xl px-3 py-1.5 text-xs text-slate-200 focus:outline-none"
+                              placeholder="https://..."
+                            />
+                          </div>
                         </div>
                       </div>
                     ) : (
-                      <div className="mt-2">
-                        <label className="text-xs font-medium text-gray-600">Image URL (optional)</label>
+                      <div className="mt-2.5">
+                        <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Public Image URL (Optional)</label>
                         <input
                           type="url"
                           value={form.image_url || ''}
                           onChange={(e) => setForm((f) => ({ ...f, image_url: e.target.value }))}
-                          className="mt-1 w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#0f766e] focus:border-transparent"
-                          placeholder="https://… if you host the image elsewhere"
+                          className="mt-1.5 w-full bg-slate-950/60 border border-white/10 rounded-xl px-4 py-2 text-xs text-slate-205 focus:outline-none"
+                          placeholder="https://host/wheel-category.png"
                         />
                       </div>
                     )}
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Display order</label>
-                    <input type="number" min={0} value={form.display_order ?? 0} onChange={(e) => setForm({ ...form, display_order: parseInt(e.target.value, 10) || 0 })} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#0f766e] focus:border-transparent" />
+                    <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">Display order</label>
+                    <input type="number" min={0} value={form.display_order ?? 0} onChange={(e) => setForm({ ...form, display_order: parseInt(e.target.value, 10) || 0 })} className="w-full bg-slate-955/60 border border-white/10 rounded-xl px-4 py-2 text-xs text-slate-200 focus:outline-none font-mono font-bold" />
                   </div>
                 </>
               )}
               {modal.type === 'subcategories' && (
                 <>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Name *</label>
-                    <input type="text" value={form.name || ''} onChange={(e) => setForm({ ...form, name: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#0f766e] focus:border-transparent" required />
+                    <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">Subcategory Name *</label>
+                    <input type="text" value={form.name || ''} onChange={(e) => setForm({ ...form, name: e.target.value })} className="w-full bg-slate-950/60 border border-white/10 rounded-xl px-4 py-2 text-xs text-slate-200 focus:outline-none" required />
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Category *</label>
-                    <select value={form.category_id || ''} onChange={(e) => setForm({ ...form, category_id: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#0f766e] focus:border-transparent" required>
+                    <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">Parent Category *</label>
+                    <select value={form.category_id || ''} onChange={(e) => setForm({ ...form, category_id: e.target.value })} className="w-full bg-slate-955/60 border border-white/10 rounded-xl px-4 py-2 text-xs text-slate-250 focus:outline-none font-semibold" required>
                       <option value="">Select category</option>
                       {categories.map((c) => (
                         <option key={c.id} value={c.id}>{c.name}</option>
                       ))}
                     </select>
-                    {categories.length === 0 && <p className="text-xs text-amber-600 mt-1">Create a category first.</p>}
+                    {categories.length === 0 && <p className="text-xs text-amber-400 mt-1 font-semibold">Please register a parent category first.</p>}
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Display order</label>
-                    <input type="number" min={0} value={form.display_order ?? 0} onChange={(e) => setForm({ ...form, display_order: parseInt(e.target.value, 10) || 0 })} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#0f766e] focus:border-transparent" />
+                    <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">Display order</label>
+                    <input type="number" min={0} value={form.display_order ?? 0} onChange={(e) => setForm({ ...form, display_order: parseInt(e.target.value, 10) || 0 })} className="w-full bg-slate-950/60 border border-white/10 rounded-xl px-4 py-2 text-xs text-slate-200 focus:outline-none font-mono font-bold" />
                   </div>
                 </>
               )}
               {modal.type === 'tax' && (
                 <>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Name *</label>
-                    <input type="text" value={form.name || ''} onChange={(e) => setForm({ ...form, name: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#0f766e] focus:border-transparent" placeholder="e.g. GST, VAT" required />
+                    <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">Tax Type Name *</label>
+                    <input type="text" value={form.name || ''} onChange={(e) => setForm({ ...form, name: e.target.value })} className="w-full bg-slate-955/60 border border-white/10 rounded-xl px-4 py-2 text-xs text-slate-200 focus:outline-none" placeholder="e.g. VAT, GST" required />
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Rate type</label>
-                    <select value={form.rate_type || 'percent'} onChange={(e) => setForm({ ...form, rate_type: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#0f766e] focus:border-transparent">
+                    <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">Tax Ratio Type</label>
+                    <select value={form.rate_type || 'percent'} onChange={(e) => setForm({ ...form, rate_type: e.target.value })} className="w-full bg-slate-955/60 border border-white/10 rounded-xl px-4 py-2 text-xs text-slate-250 focus:outline-none font-semibold">
                       <option value="percent">Percentage (%)</option>
-                      <option value="amount">Fixed amount (USD)</option>
+                      <option value="amount">Fixed Flat Surcharge (USD)</option>
                     </select>
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">{form.rate_type === 'amount' ? 'Amount (USD) *' : 'Rate % *'}</label>
-                    <input type="number" min={0} step={0.01} value={form.rate ?? ''} onChange={(e) => setForm({ ...form, rate: parseFloat(e.target.value) || 0 })} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#0f766e] focus:border-transparent" required />
+                    <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">{form.rate_type === 'amount' ? 'Flat Dollar Surcharge *' : 'Tax Bracket Percentage *'}</label>
+                    <input type="number" min={0} step={0.01} value={form.rate ?? ''} onChange={(e) => setForm({ ...form, rate: parseFloat(e.target.value) || 0 })} className="w-full bg-slate-950/60 border border-white/10 rounded-xl px-4 py-2 text-xs text-slate-200 focus:outline-none font-mono font-bold" required />
                   </div>
                 </>
               )}
               {modal.type === 'payment' && (
                 <>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Name *</label>
-                    <input type="text" value={form.name || ''} onChange={(e) => setForm({ ...form, name: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#0f766e] focus:border-transparent" placeholder="e.g. Cash, Card, Bank Transfer" required />
+                    <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">Tender Method Name *</label>
+                    <input type="text" value={form.name || ''} onChange={(e) => setForm({ ...form, name: e.target.value })} className="w-full bg-slate-955/60 border border-white/10 rounded-xl px-4 py-2 text-xs text-slate-200 focus:outline-none" placeholder="e.g. Cheque, Card, Swift Bank Transfer" required />
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Display order</label>
-                    <input type="number" min={0} value={form.display_order ?? 0} onChange={(e) => setForm({ ...form, display_order: parseInt(e.target.value, 10) || 0 })} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#0f766e] focus:border-transparent" />
+                    <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">Display order</label>
+                    <input type="number" min={0} value={form.display_order ?? 0} onChange={(e) => setForm({ ...form, display_order: parseInt(e.target.value, 10) || 0 })} className="w-full bg-slate-950/60 border border-white/10 rounded-xl px-4 py-2 text-xs text-slate-200 focus:outline-none font-mono font-bold" />
                   </div>
                 </>
               )}
               {modal.type === 'bank' && (
                 <>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Bank account name *</label>
-                    <input type="text" value={form.name || ''} onChange={(e) => setForm({ ...form, name: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#0f766e] focus:border-transparent" placeholder="e.g. Main Checking, Savings" required />
+                    <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">Bank Account Name *</label>
+                    <input type="text" value={form.name || ''} onChange={(e) => setForm({ ...form, name: e.target.value })} className="w-full bg-slate-955/60 border border-white/10 rounded-xl px-4 py-2 text-xs text-slate-200 focus:outline-none" placeholder="e.g. Vault Savings, Checking" required />
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Account number</label>
-                    <input type="text" value={form.account_number || ''} onChange={(e) => setForm({ ...form, account_number: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#0f766e] focus:border-transparent" placeholder="Optional" />
+                    <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">Account Number</label>
+                    <input type="text" value={form.account_number || ''} onChange={(e) => setForm({ ...form, account_number: e.target.value })} className="w-full bg-slate-950/60 border border-white/10 rounded-xl px-4 py-2 text-xs text-slate-200 focus:outline-none font-mono" placeholder="Account designation number" />
                   </div>
                 </>
               )}
-              <div className="flex gap-2 pt-2">
-                <button type="submit" className="flex-1 bg-[#0f766e] text-white py-2.5 rounded-lg font-medium hover:bg-[#0d5d57]">Save</button>
-                <button type="button" onClick={() => setModal(null)} className="px-4 py-2.5 border border-gray-300 rounded-lg hover:bg-gray-50">Cancel</button>
+              <div className="flex gap-2.5 pt-4 border-t border-white/5">
+                <button type="submit" className="flex-1 bg-gradient-to-tr from-teal-600 to-teal-500 border border-white/10 hover:from-teal-500 hover:to-teal-400 text-white py-2.5 rounded-xl font-bold text-xs transition-colors shadow-sm">Save Parameters</button>
+                <button type="button" onClick={() => setModal(null)} className="px-4 py-2.5 bg-slate-800 border border-white/5 text-slate-400 hover:text-white rounded-xl text-xs font-semibold">Cancel</button>
               </div>
             </form>
           </div>

@@ -262,32 +262,38 @@ export default function CreditMemosPage() {
   };
 
   return (
-    <div>
-      <h1 className="text-2xl font-bold text-gray-900">Credit Memos</h1>
-      <div className="bg-white rounded-xl shadow-md p-4 mt-4 mb-6 flex flex-wrap items-center gap-4">
-        <div className="relative flex-1 min-w-[220px]">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
+    <div className="space-y-6">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        <div>
+          <h1 className="text-3xl font-extrabold text-white tracking-tight">Credit Memos</h1>
+          <p className="text-xs text-slate-400 mt-1">Issue customer return credits, vendor rebates, scheme adjustments, and rate corrections.</p>
+        </div>
+      </div>
+
+      <div className="bg-slate-900/40 backdrop-blur-lg border border-white/[0.06] border-t-white/[0.18] shadow-[0_12px_40px_rgba(0,0,0,0.25)] rounded-2xl p-4 flex flex-wrap items-center gap-4">
+        <div className="relative flex-1 min-w-[240px]">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
           <input
             type="text"
-            placeholder="Search credit memos by number, vendor, customer..."
+            placeholder="Search memo number, vendor, customer..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#0f766e] focus:border-[#0f766e]"
+            className="w-full pl-10 pr-4 py-2 bg-slate-950/60 border border-white/10 rounded-xl text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-teal-500 focus:border-teal-500 focus:bg-slate-950/80 transition-all font-semibold"
           />
         </div>
-        <div className="flex items-center gap-3 flex-wrap">
+        <div className="flex items-center gap-2.5 flex-wrap">
           <button
             type="button"
             onClick={openNew}
-            className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-white font-medium bg-[#0f766e] hover:bg-[#0d5d57]"
+            className="inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-gradient-to-tr from-teal-600 to-teal-500 hover:from-teal-500 hover:to-teal-400 border border-white/10 text-white rounded-xl text-xs font-bold shadow-sm transition-all"
           >
-            <Plus className="w-4 h-4" />
+            <Plus className="w-3.5 h-3.5" />
             New Credit Memo
           </button>
           <select
             value={typeFilter}
             onChange={(e) => setTypeFilter(e.target.value)}
-            className="border border-gray-300 rounded-lg px-3 py-2 text-sm"
+            className="bg-slate-950/60 border border-white/10 rounded-xl px-3 py-2.5 text-xs text-slate-200 font-semibold focus:outline-none focus:ring-1 focus:ring-teal-500"
           >
             <option value="">All types</option>
             <option value="VENDOR">Vendor</option>
@@ -296,7 +302,7 @@ export default function CreditMemosPage() {
           <select
             value={statusFilter}
             onChange={(e) => setStatusFilter(e.target.value)}
-            className="border border-gray-300 rounded-lg px-3 py-2 text-sm"
+            className="bg-slate-950/60 border border-white/10 rounded-xl px-3 py-2.5 text-xs text-slate-200 font-semibold focus:outline-none focus:ring-1 focus:ring-teal-500"
           >
             <option value="">All statuses</option>
             {STATUS_OPTIONS.filter(Boolean).map((s) => (
@@ -308,71 +314,75 @@ export default function CreditMemosPage() {
           <button
             type="button"
             onClick={() => fetchList()}
-            className="inline-flex items-center gap-1 px-3 py-2 rounded-lg text-white text-sm font-medium bg-[#0f766e]"
+            className="inline-flex items-center justify-center gap-1.5 px-4 py-2.5 bg-slate-900 border border-white/5 text-slate-300 hover:text-white rounded-xl text-xs font-semibold shadow-sm transition-all"
           >
-            <Search className="w-4 h-4" />
+            <Search className="w-3.5 h-3.5" />
             Refresh
           </button>
         </div>
       </div>
 
-      <div className="mt-6 bg-white rounded-xl shadow overflow-hidden border border-gray-200">
+      <div className="bg-slate-900/40 backdrop-blur-lg border border-white/[0.06] border-t-white/[0.18] shadow-[0_12px_40px_rgba(0,0,0,0.25)] rounded-2xl overflow-hidden">
         {loading ? (
           <div className="flex items-center justify-center py-16">
-            <div className="animate-spin rounded-full h-10 w-10 border-2 border-[#0f766e] border-t-transparent" />
+            <div className="animate-spin rounded-full h-8 w-8 border-2 border-teal-500 border-t-transparent" />
           </div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead>
-                <tr className="bg-[#0f766e] text-white">
-                  <th className="text-left py-3 px-4 text-sm font-medium">Number</th>
-                  <th className="text-left py-3 px-4 text-sm font-medium">Type</th>
-                  <th className="text-left py-3 px-4 text-sm font-medium">Vendor / Customer</th>
-                  <th className="text-left py-3 px-4 text-sm font-medium">Reason</th>
-                  <th className="text-right py-3 px-4 text-sm font-medium">Total</th>
-                  <th className="text-left py-3 px-4 text-sm font-medium">Status</th>
-                  <th className="text-left py-3 px-4 text-sm font-medium">Created</th>
-                  <th className="text-right py-3 px-4 text-sm font-medium">Actions</th>
+            <table className="w-full border-collapse">
+              <thead className="bg-slate-950/60 text-slate-400 border-b border-white/5">
+                <tr>
+                  <th className="text-left py-3.5 px-4 text-[10px] font-bold uppercase tracking-wider">Number</th>
+                  <th className="text-left py-3.5 px-4 text-[10px] font-bold uppercase tracking-wider">Type</th>
+                  <th className="text-left py-3.5 px-4 text-[10px] font-bold uppercase tracking-wider">Vendor / Customer</th>
+                  <th className="text-left py-3.5 px-4 text-[10px] font-bold uppercase tracking-wider">Reason</th>
+                  <th className="text-right py-3.5 px-4 text-[10px] font-bold uppercase tracking-wider">Total</th>
+                  <th className="text-left py-3.5 px-4 text-[10px] font-bold uppercase tracking-wider">Status</th>
+                  <th className="text-left py-3.5 px-4 text-[10px] font-bold uppercase tracking-wider">Created</th>
+                  <th className="text-right py-3.5 px-4 text-[10px] font-bold uppercase tracking-wider">Actions</th>
                 </tr>
               </thead>
               <tbody>
                 {filteredList.length === 0 ? (
                   <tr>
-                    <td colSpan={8} className="py-8 text-center text-gray-500">
-                      No credit memos. Click &quot;New Credit Memo&quot; to add one.
+                    <td colSpan={8} className="py-16 text-center text-slate-500 text-xs font-semibold">
+                      No credit memos found. Create a credit memo to get started.
                     </td>
                   </tr>
                 ) : (
-                  filteredList.map((cm, i) => (
-                    <tr key={cm.id} className={i % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
-                      <td className="py-2 px-4 text-sm font-medium">{cm.credit_memo_number}</td>
-                      <td className="py-2 px-4 text-sm">{cm.type}</td>
-                      <td className="py-2 px-4 text-sm">{cm.type === 'VENDOR' ? cm.vendor_name : cm.customer_name}</td>
-                      <td className="py-2 px-4 text-sm">{cm.reason}</td>
-                      <td className="py-2 px-4 text-sm text-right">{Number(cm.total_amount).toLocaleString()}</td>
-                      <td className="py-2 px-4 text-sm">
+                  filteredList.map((cm) => (
+                    <tr key={cm.id} className="border-b border-white/5 hover:bg-white/[0.02] transition-colors">
+                      <td className="py-3 px-4 text-xs font-mono font-bold text-teal-400">{cm.credit_memo_number}</td>
+                      <td className="py-3 px-4 text-xs text-slate-350">
+                        <span className={`inline-flex px-2 py-0.5 rounded text-[10px] font-bold border ${cm.type === 'VENDOR' ? 'bg-amber-500/10 text-amber-400 border-amber-500/20' : 'bg-blue-500/10 text-blue-400 border-blue-500/20'}`}>{cm.type}</span>
+                      </td>
+                      <td className="py-3 px-4 text-xs font-semibold text-slate-200">{cm.type === 'VENDOR' ? cm.vendor_name : cm.customer_name}</td>
+                      <td className="py-3 px-4 text-xs text-slate-300">
+                        <span className="inline-flex px-2 py-0.5 rounded text-[10px] border border-white/10 bg-slate-950/40">{cm.reason}</span>
+                      </td>
+                      <td className="py-3 px-4 text-xs text-right font-extrabold text-slate-100 font-mono">${Number(cm.total_amount).toLocaleString('en-US', { minimumFractionDigits: 2 })}</td>
+                      <td className="py-3 px-4 text-xs">
                         <span
-                          className={`inline-flex px-2 py-0.5 rounded text-xs font-medium ${
+                          className={`inline-flex px-2 py-0.5 rounded text-[10px] font-bold border ${
                             cm.status === 'APPROVED'
-                              ? 'bg-green-100 text-green-800'
+                              ? 'bg-teal-500/10 text-teal-450 border-teal-500/20'
                               : cm.status === 'DRAFT'
-                                ? 'bg-gray-100 text-gray-800'
+                                ? 'bg-slate-800/80 text-slate-400 border border-white/10'
                                 : cm.status === 'CANCELLED'
-                                  ? 'bg-red-100 text-red-800'
-                                  : 'bg-blue-100 text-blue-800'
+                                  ? 'bg-rose-500/10 text-rose-400 border-rose-500/20'
+                                  : 'bg-blue-500/10 text-blue-40 border-blue-500/20'
                           }`}
                         >
                           {cm.status}
                         </span>
                       </td>
-                      <td className="py-2 px-4 text-sm">{formatDate(cm.created_at)}</td>
-                      <td className="py-2 px-4 text-right">
+                      <td className="py-3 px-4 text-xs text-slate-450 font-mono">{formatDate(cm.created_at)}</td>
+                      <td className="py-3 px-4 text-right text-xs">
                         <div className="flex items-center justify-end gap-2 flex-wrap">
                           <button
                             type="button"
                             onClick={() => setDetailId(detailId === cm.id ? null : cm.id)}
-                            className="text-[#0f766e] hover:underline text-sm font-medium"
+                            className="text-teal-450 hover:text-teal-350 hover:underline text-xs font-bold"
                           >
                             {detailId === cm.id ? 'Hide' : 'View'}
                           </button>
@@ -388,17 +398,17 @@ export default function CreditMemosPage() {
                                 toast.error('Failed to download PDF');
                               }
                             }}
-                            className="inline-flex items-center gap-1 text-[#0f766e] hover:underline text-sm font-medium"
+                            className="inline-flex items-center gap-1 text-slate-400 hover:text-white hover:underline text-xs font-medium"
                             title="Download PDF"
                           >
-                            <Download className="w-4 h-4" />
-                            Download
+                            <Download className="w-3.5 h-3.5" />
+                            PDF
                           </button>
                           {cm.status === 'DRAFT' && (
                             <button
                               type="button"
                               onClick={() => handleApprove(cm.id)}
-                              className="text-green-600 hover:underline text-sm font-medium"
+                              className="text-emerald-450 hover:text-emerald-350 hover:underline text-xs font-bold"
                             >
                               Approve
                             </button>
@@ -407,7 +417,7 @@ export default function CreditMemosPage() {
                             <button
                               type="button"
                               onClick={() => handleCancel(cm.id)}
-                              className="text-red-600 hover:underline text-sm"
+                              className="text-rose-400 hover:text-rose-350 hover:underline text-xs font-medium"
                             >
                               Cancel
                             </button>
@@ -424,84 +434,117 @@ export default function CreditMemosPage() {
       </div>
 
       {detailId && detail && (
-        <div className="mt-6 bg-white rounded-xl shadow border border-gray-200 p-6">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-lg font-semibold text-gray-900">
-              <FileText className="w-5 h-5 inline mr-2" />
-              {detail.credit_memo_number} — {detail.status}
+        <div className="bg-slate-900/40 backdrop-blur-lg border border-white/[0.06] border-t-white/[0.18] shadow-[0_12px_40px_rgba(0,0,0,0.25)] rounded-2xl p-6 space-y-6">
+          <div className="flex items-center justify-between border-b border-white/5 pb-4">
+            <h2 className="text-lg font-bold text-white flex items-center gap-2">
+              <FileText className="w-5 h-5 text-teal-400" />
+              {detail.credit_memo_number} <span className="text-xs text-slate-500 font-medium font-mono">({detail.status})</span>
             </h2>
-            <button type="button" onClick={() => setDetailId(null)} className="p-1 hover:bg-gray-100 rounded">
+            <button type="button" onClick={() => setDetailId(null)} className="p-1 hover:bg-white/5 rounded-lg text-slate-400 hover:text-white transition-all">
               <X className="w-5 h-5" />
             </button>
           </div>
-          <div className="grid grid-cols-2 gap-4 text-sm">
-            <div><span className="text-gray-500">Type:</span> {detail.type}</div>
-            <div><span className="text-gray-500">Party:</span> {detail.type === 'VENDOR' ? detail.vendor_name : detail.customer_name}</div>
-            <div><span className="text-gray-500">Reason:</span> {detail.reason}</div>
-            <div><span className="text-gray-500">Affects inventory:</span> {detail.affects_inventory ? 'Yes' : 'No'}</div>
-            <div><span className="text-gray-500">Subtotal:</span> {Number(detail.subtotal).toLocaleString()}</div>
-            <div><span className="text-gray-500">Tax:</span> {Number(detail.tax_amount).toLocaleString()}</div>
-            <div><span className="text-gray-500">Total:</span> {Number(detail.total_amount).toLocaleString()}</div>
-            <div><span className="text-gray-500">Created:</span> {formatDate(detail.created_at)}</div>
-            {detail.notes && <div className="col-span-2"><span className="text-gray-500">Notes:</span> {detail.notes}</div>}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 text-xs text-slate-300">
+            <div className="bg-slate-950/40 border border-white/5 p-3 rounded-xl">
+              <span className="text-slate-500 block uppercase font-bold text-[9px] tracking-wider mb-1">Type</span> 
+              <span className="font-bold text-slate-205">{detail.type}</span>
+            </div>
+            <div className="bg-slate-950/40 border border-white/5 p-3 rounded-xl">
+              <span className="text-slate-500 block uppercase font-bold text-[9px] tracking-wider mb-1">Party Name</span> 
+              <span className="font-bold text-slate-205">{detail.type === 'VENDOR' ? detail.vendor_name : detail.customer_name}</span>
+            </div>
+            <div className="bg-slate-950/40 border border-white/5 p-3 rounded-xl">
+              <span className="text-slate-500 block uppercase font-bold text-[9px] tracking-wider mb-1">Adjustment Reason</span> 
+              <span className="font-bold text-slate-205">{detail.reason}</span>
+            </div>
+            <div className="bg-slate-950/40 border border-white/5 p-3 rounded-xl">
+              <span className="text-slate-500 block uppercase font-bold text-[9px] tracking-wider mb-1">Affects Inventory</span> 
+              <span className="font-bold text-slate-205">{detail.affects_inventory ? 'Yes' : 'No'}</span>
+            </div>
+          </div>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 text-xs text-slate-300">
+            <div className="bg-slate-950/40 border border-white/5 p-3 rounded-xl">
+              <span className="text-slate-500 block uppercase font-bold text-[9px] tracking-wider mb-1">Subtotal</span> 
+              <span className="font-bold text-slate-205 font-mono">${Number(detail.subtotal).toLocaleString(undefined, {minimumFractionDigits: 2})}</span>
+            </div>
+            <div className="bg-slate-950/40 border border-white/5 p-3 rounded-xl">
+              <span className="text-slate-500 block uppercase font-bold text-[9px] tracking-wider mb-1">VAT/Sales Tax</span> 
+              <span className="font-bold text-slate-205 font-mono">${Number(detail.tax_amount).toLocaleString(undefined, {minimumFractionDigits: 2})}</span>
+            </div>
+            <div className="bg-slate-950/40 border border-white/5 p-3 rounded-xl">
+              <span className="text-slate-500 block uppercase font-bold text-[9px] tracking-wider mb-1">Grand Total Adjustment</span> 
+              <span className="font-bold text-teal-400 font-mono">${Number(detail.total_amount).toLocaleString(undefined, {minimumFractionDigits: 2})}</span>
+            </div>
+            <div className="bg-slate-950/40 border border-white/5 p-3 rounded-xl">
+              <span className="text-slate-500 block uppercase font-bold text-[9px] tracking-wider mb-1">Created Date</span> 
+              <span className="font-bold text-slate-205 font-mono">{formatDate(detail.created_at)}</span>
+            </div>
+            {detail.notes && (
+              <div className="col-span-2 sm:col-span-4 bg-slate-950/40 border border-white/5 p-3 rounded-xl">
+                <span className="text-slate-500 block uppercase font-bold text-[9px] tracking-wider mb-1">Audit Notes / Reason description</span> 
+                <span className="text-slate-300">{detail.notes}</span>
+              </div>
+            )}
           </div>
           {detail.items && detail.items.length > 0 && (
-            <div className="mt-4">
-              <h3 className="text-sm font-medium text-gray-700 mb-2">Line items</h3>
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b">
-                    <th className="text-left py-2">Product</th>
-                    <th className="text-right py-2">Qty</th>
-                    <th className="text-right py-2">Unit price</th>
-                    <th className="text-right py-2">Tax %</th>
-                    <th className="text-right py-2">Total</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {detail.items.map((item, idx) => (
-                    <tr key={idx} className="border-b border-gray-100">
-                      <td className="py-1">{item.product_name || item.product_id}</td>
-                      <td className="text-right">{item.quantity}</td>
-                      <td className="text-right">{Number(item.unit_price).toLocaleString()}</td>
-                      <td className="text-right">{item.tax_percent ?? 0}%</td>
-                      <td className="text-right">{Number(item.total ?? 0).toLocaleString()}</td>
+            <div className="space-y-2">
+              <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Adjusted Line Items</h3>
+              <div className="bg-slate-950/60 rounded-xl overflow-hidden border border-white/5">
+                <table className="w-full text-xs">
+                  <thead className="bg-slate-950/60 text-slate-400 border-b border-white/5">
+                    <tr>
+                      <th className="text-left py-3 px-4 font-bold uppercase tracking-wider text-[10px]">Product Description</th>
+                      <th className="text-right py-3 px-4 font-bold uppercase tracking-wider text-[10px]">Quantity</th>
+                      <th className="text-right py-3 px-4 font-bold uppercase tracking-wider text-[10px]">Unit Price</th>
+                      <th className="text-right py-3 px-4 font-bold uppercase tracking-wider text-[10px]">Tax Rate</th>
+                      <th className="text-right py-3 px-4 font-bold uppercase tracking-wider text-[10px]">Adjusted Subtotal</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody>
+                    {detail.items.map((item, idx) => (
+                      <tr key={idx} className="border-b border-white/5 hover:bg-white/[0.01]">
+                        <td className="py-2.5 px-4 text-slate-205 font-medium">{item.product_name || item.product_id}</td>
+                        <td className="text-right py-2.5 px-4 text-slate-350">{item.quantity}</td>
+                        <td className="text-right py-2.5 px-4 text-slate-350 font-mono">${Number(item.unit_price).toLocaleString(undefined, {minimumFractionDigits: 2})}</td>
+                        <td className="text-right py-2.5 px-4 text-slate-350 font-mono">{item.tax_percent ?? 0}%</td>
+                        <td className="text-right py-2.5 px-4 font-bold text-slate-200 font-mono">${Number(item.total ?? 0).toLocaleString(undefined, {minimumFractionDigits: 2})}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             </div>
           )}
         </div>
       )}
 
       {showModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 overflow-y-auto">
-          <div className="bg-white rounded-xl shadow-xl max-w-5xl w-full my-8 max-h-[90vh] overflow-y-auto">
-            <div className="flex items-center justify-between p-4 border-b">
-              <h2 className="text-xl font-bold text-gray-900">New Credit Memo</h2>
-              <button type="button" onClick={() => setShowModal(false)} className="p-2 hover:bg-gray-100 rounded-lg text-gray-600" aria-label="Close">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-sm p-4 overflow-y-auto">
+          <div className="bg-slate-900 border border-white/10 shadow-[0_24px_50px_rgba(0,0,0,0.4)] rounded-2xl max-w-5xl w-full my-8 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between p-5 border-b border-white/5">
+              <h2 className="text-lg font-bold text-white">Create Adjustment Credit Memo</h2>
+              <button type="button" onClick={() => setShowModal(false)} className="p-2 hover:bg-white/5 rounded-lg text-slate-400 hover:text-white transition-all" aria-label="Close">
                 <X className="w-5 h-5" />
               </button>
             </div>
             <form onSubmit={handleCreate} className="p-6 space-y-4">
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Type *</label>
-                  <select value={form.type} onChange={(e) => setForm((f) => ({ ...f, type: e.target.value as 'VENDOR' | 'CUSTOMER', vendor_id: '', customer_id: '' }))} className="w-full border border-gray-300 rounded-lg px-3 py-2">
-                    <option value="VENDOR">Vendor</option>
-                    <option value="CUSTOMER">Customer</option>
+                  <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">Debit / Credit Type *</label>
+                  <select value={form.type} onChange={(e) => setForm((f) => ({ ...f, type: e.target.value as 'VENDOR' | 'CUSTOMER', vendor_id: '', customer_id: '' }))} className="w-full bg-slate-950/60 border border-white/10 rounded-xl px-4 py-2 text-xs text-slate-250 focus:outline-none">
+                    <option value="VENDOR">Vendor (Procurement Rebate)</option>
+                    <option value="CUSTOMER">Customer (Sales Return Claims)</option>
                   </select>
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">{form.type === 'VENDOR' ? 'Vendor *' : 'Customer *'}</label>
+                  <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">{form.type === 'VENDOR' ? 'Select Vendor *' : 'Select Customer *'}</label>
                   {form.type === 'VENDOR' ? (
-                    <select value={form.vendor_id} onChange={(e) => setForm((f) => ({ ...f, vendor_id: e.target.value }))} className="w-full border border-gray-300 rounded-lg px-3 py-2" required>
+                    <select value={form.vendor_id} onChange={(e) => setForm((f) => ({ ...f, vendor_id: e.target.value }))} className="w-full bg-slate-950/60 border border-white/10 rounded-xl px-4 py-2 text-xs text-slate-200 focus:outline-none focus:ring-1 focus:ring-teal-500" required>
                       <option value="">Select vendor</option>
                       {vendors.map((v) => (<option key={v.id} value={v.id}>{v.name}</option>))}
                     </select>
                   ) : (
-                    <select value={form.customer_id} onChange={(e) => setForm((f) => ({ ...f, customer_id: e.target.value }))} className="w-full border border-gray-300 rounded-lg px-3 py-2" required>
+                    <select value={form.customer_id} onChange={(e) => setForm((f) => ({ ...f, customer_id: e.target.value }))} className="w-full bg-slate-950/60 border border-white/10 rounded-xl px-4 py-2 text-xs text-slate-200 focus:outline-none focus:ring-1 focus:ring-teal-500" required>
                       <option value="">Select customer</option>
                       {customers.map((c) => (<option key={c.id} value={c.id}>{c.name}</option>))}
                     </select>
@@ -510,43 +553,43 @@ export default function CreditMemosPage() {
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Reason *</label>
-                  <select value={form.reason} onChange={(e) => setForm((f) => ({ ...f, reason: e.target.value as (typeof REASONS)[number] }))} className="w-full border border-gray-300 rounded-lg px-3 py-2">
+                  <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">Reason Code *</label>
+                  <select value={form.reason} onChange={(e) => setForm((f) => ({ ...f, reason: e.target.value as (typeof REASONS)[number] }))} className="w-full bg-slate-950/60 border border-white/10 rounded-xl px-4 py-2 text-xs text-slate-250 focus:outline-none">
                     {REASONS.map((r) => (<option key={r} value={r}>{r}</option>))}
                   </select>
                 </div>
-                <div className="flex items-end gap-2">
-                  <label className="flex items-center gap-2">
-                    <input type="checkbox" checked={form.affects_inventory} onChange={(e) => setForm((f) => ({ ...f, affects_inventory: e.target.checked }))} className="rounded border-gray-300 text-[#0f766e]" />
-                    <span className="text-sm">Affects inventory</span>
+                <div className="flex items-end pb-2">
+                  <label className="flex items-center gap-2.5 cursor-pointer select-none">
+                    <input type="checkbox" checked={form.affects_inventory} onChange={(e) => setForm((f) => ({ ...f, affects_inventory: e.target.checked }))} className="rounded border-white/10 bg-slate-950/60 text-teal-600 focus:ring-0 w-4 h-4" />
+                    <span className="text-xs text-slate-300 font-semibold">Perform Warehouse Inventory Adjustment</span>
                   </label>
                 </div>
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Reference invoice ID</label>
-                  <input type="text" value={form.reference_invoice_id} onChange={(e) => setForm((f) => ({ ...f, reference_invoice_id: e.target.value }))} className="w-full border border-gray-300 rounded-lg px-3 py-2" placeholder="Optional" />
+                  <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">Reference Sales/PO ID</label>
+                  <input type="text" value={form.reference_invoice_id} onChange={(e) => setForm((f) => ({ ...f, reference_invoice_id: e.target.value }))} className="w-full bg-slate-950/60 border border-white/10 rounded-xl px-4 py-2 text-xs text-slate-200 focus:outline-none placeholder-slate-500" placeholder="e.g. INV-1002" />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Notes</label>
-                  <input type="text" value={form.notes} onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))} className="w-full border border-gray-300 rounded-lg px-3 py-2" />
+                  <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">Audit Notes</label>
+                  <input type="text" value={form.notes} onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))} className="w-full bg-slate-950/60 border border-white/10 rounded-xl px-4 py-2 text-xs text-slate-200 focus:outline-none" />
                 </div>
               </div>
 
               <div>
                 <div className="flex items-center justify-between mb-2">
-                  <label className="block text-sm font-medium text-gray-700">Line items *</label>
+                  <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider">Line Items (Up to 15 entries) *</label>
                 </div>
-                <div className="border border-gray-200 rounded-lg overflow-x-auto">
-                  <table className="w-full text-sm min-w-[500px]">
-                    <thead className="bg-gray-50">
+                <div className="border border-white/5 rounded-xl overflow-hidden bg-slate-950/20">
+                  <table className="w-full text-xs min-w-[700px] border-collapse">
+                    <thead className="bg-slate-950/60 text-slate-400 border-b border-white/5">
                       <tr>
-                        <th className="text-left py-3 px-3 w-10">#</th>
-                        <th className="text-left py-3 px-3 min-w-[200px]">Product</th>
-                        <th className="text-right py-3 px-3 w-20">Qty</th>
-                        <th className="text-right py-3 px-3 w-28">Unit price</th>
-                        <th className="text-right py-3 px-3 w-28">Amount</th>
-                        <th className="w-12" />
+                        <th className="text-left py-2.5 px-3 w-10 font-bold uppercase tracking-wider text-[9px]">#</th>
+                        <th className="text-left py-2.5 px-3 min-w-[240px] font-bold uppercase tracking-wider text-[9px]">Product Item</th>
+                        <th className="text-right py-2.5 px-3 w-24 font-bold uppercase tracking-wider text-[9px]">Return Qty</th>
+                        <th className="text-right py-2.5 px-3 w-32 font-bold uppercase tracking-wider text-[9px]">Unit Rate</th>
+                        <th className="text-right py-2.5 px-3 w-32 font-bold uppercase tracking-wider text-[9px]">Total Amount</th>
+                        <th className="w-12 text-center font-bold uppercase tracking-wider text-[9px]" />
                       </tr>
                     </thead>
                     <tbody>
@@ -556,35 +599,35 @@ export default function CreditMemosPage() {
                         const lineTotal = qty * price;
                         const hasProduct = !!(line.product_id || line.product_name);
                         return (
-                          <tr key={idx} className="border-t border-gray-100 hover:bg-gray-50/60">
-                            <td className="py-2 px-3 text-xs text-gray-500">{idx + 1}</td>
+                          <tr key={idx} className="border-t border-white/5 hover:bg-white/[0.01]">
+                            <td className="py-2.5 px-3 text-xs text-slate-500 font-mono">{idx + 1}</td>
                             <td className="py-2 px-3">
                               <SearchableProductDropdown
                                 products={products}
                                 value={line.product_id}
                                 displayName={line.product_name || undefined}
                                 onSelect={(p) => updateLine(idx, 'product_id', p.id)}
-                                placeholder="Search product or scan barcode…"
+                                placeholder="Search products or scan barcode..."
                               />
                             </td>
                             <td className="py-2 px-3 text-right">
                               {hasProduct ? (
-                                <input type="number" min={1} value={line.quantity} onChange={(e) => updateLine(idx, 'quantity', e.target.value)} className="w-20 border border-gray-300 rounded px-2 py-1 text-sm text-right" />
+                                <input type="number" min={1} value={line.quantity} onChange={(e) => updateLine(idx, 'quantity', e.target.value)} className="w-20 bg-slate-950/60 border border-white/10 rounded px-2 py-1 text-xs text-right text-slate-200" />
                               ) : (
-                                <span className="text-gray-400">{line.quantity || ''}</span>
+                                <span className="text-slate-600 font-mono">—</span>
                               )}
                             </td>
                             <td className="py-2 px-3 text-right">
                               {hasProduct ? (
-                                <input type="number" min={0} step={0.01} value={line.unit_price} onChange={(e) => updateLine(idx, 'unit_price', e.target.value)} className="w-24 border border-gray-300 rounded px-2 py-1 text-sm text-right" />
+                                <input type="number" min={0} step={0.01} value={line.unit_price} onChange={(e) => updateLine(idx, 'unit_price', e.target.value)} className="w-24 bg-slate-950/60 border border-white/10 rounded px-2 py-1 text-xs text-right text-slate-200 font-mono font-semibold" />
                               ) : (
-                                <span className="text-gray-400" />
+                                <span className="text-slate-600 font-mono">—</span>
                               )}
                             </td>
-                            <td className="py-2 px-3 text-right font-medium">{hasProduct ? `$${lineTotal.toFixed(2)}` : ''}</td>
-                            <td className="py-2 px-3">
+                            <td className="py-2 px-3 text-right font-bold text-slate-300 font-mono">{hasProduct ? `$${lineTotal.toFixed(2)}` : ''}</td>
+                            <td className="py-2 px-3 text-center">
                               {hasProduct && (
-                                <button type="button" onClick={() => removeLine(idx)} className="p-1 text-red-600 hover:bg-red-50 rounded">
+                                <button type="button" onClick={() => removeLine(idx)} className="p-1 text-rose-455 hover:bg-rose-500/10 rounded-lg transition-colors">
                                   <Trash2 className="w-4 h-4" />
                                 </button>
                               )}
@@ -596,9 +639,9 @@ export default function CreditMemosPage() {
                   </table>
                 </div>
 
-                <div className="mt-3 flex items-start justify-between">
-                  <button type="button" onClick={addLine} className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg border border-gray-300 text-xs font-medium text-gray-700 hover:bg-gray-50">
-                    + Add line
+                <div className="mt-4 flex flex-col sm:flex-row items-start justify-between gap-4">
+                  <button type="button" onClick={addLine} className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg border border-white/10 text-xs font-semibold text-slate-300 hover:text-white bg-slate-800 transition-colors">
+                    + Add row
                   </button>
                   {(() => {
                     const subtotal = form.items.reduce((s, i) => s + (Number(i.quantity) || 0) * (Number(i.unit_price) || 0), 0);
@@ -606,13 +649,13 @@ export default function CreditMemosPage() {
                     const taxAmount = Math.round(subtotal * (taxRate / 100) * 100) / 100;
                     const total = subtotal + taxAmount;
                     return (
-                      <div className="w-72 space-y-2 text-sm">
+                      <div className="w-80 bg-slate-950/40 border border-white/5 rounded-xl p-4 space-y-2 text-xs text-slate-350">
                         <div className="flex justify-between">
-                          <span className="text-gray-600">Subtotal</span>
-                          <span className="font-medium">${subtotal.toFixed(2)}</span>
+                          <span className="text-slate-500 font-bold uppercase text-[9px] tracking-wider">Subtotal</span>
+                          <span className="font-bold text-slate-205 font-mono">${subtotal.toFixed(2)}</span>
                         </div>
                         <div className="flex justify-between items-center">
-                          <span className="text-gray-600">Tax (%)</span>
+                          <span className="text-slate-500 font-bold uppercase text-[9px] tracking-wider">Tax Rate (%)</span>
                           <input
                             type="number"
                             min={0}
@@ -620,17 +663,17 @@ export default function CreditMemosPage() {
                             step={0.5}
                             value={form.tax_percent || ''}
                             onChange={(e) => setForm((f) => ({ ...f, tax_percent: Number(e.target.value) || 0 }))}
-                            className="w-20 border border-gray-300 rounded px-2 py-1 text-sm text-right"
+                            className="w-20 bg-slate-950/60 border border-white/10 rounded px-2 py-1 text-xs text-right text-slate-200"
                             placeholder="0"
                           />
                         </div>
                         <div className="flex justify-between">
-                          <span className="text-gray-600">Tax amount</span>
-                          <span className="font-medium">${taxAmount.toFixed(2)}</span>
+                          <span className="text-slate-500 font-bold uppercase text-[9px] tracking-wider">VAT / Taxes amount</span>
+                          <span className="font-bold text-slate-205 font-mono">${taxAmount.toFixed(2)}</span>
                         </div>
-                        <div className="flex justify-between border-t pt-2 font-semibold text-gray-900">
-                          <span>Total</span>
-                          <span>${total.toFixed(2)}</span>
+                        <div className="flex justify-between border-t border-dashed border-white/10 pt-2 font-bold text-slate-200">
+                          <span className="text-[10px] uppercase font-bold tracking-wider">Total Adjustment</span>
+                          <span className="text-teal-400 font-mono text-sm">${total.toFixed(2)}</span>
                         </div>
                       </div>
                     );
@@ -638,9 +681,9 @@ export default function CreditMemosPage() {
                 </div>
               </div>
 
-              <div className="flex justify-end gap-2 pt-4 border-t">
-                <button type="button" onClick={() => setShowModal(false)} className="px-4 py-2 rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50">Close</button>
-                <button type="submit" disabled={submitting} className="px-4 py-2 rounded-lg text-white font-medium bg-[#0f766e] hover:bg-[#0d5d57] disabled:opacity-50">Create</button>
+              <div className="flex justify-end gap-2.5 pt-4 border-t border-white/5">
+                <button type="button" onClick={() => setShowModal(false)} className="px-4 py-2.5 bg-slate-800 border border-white/5 text-slate-400 hover:text-white rounded-xl text-xs font-semibold">Close</button>
+                <button type="submit" disabled={submitting} className="px-4 py-2.5 bg-gradient-to-tr from-teal-600 to-teal-500 hover:from-teal-500 hover:to-teal-400 border border-white/10 text-white rounded-xl text-xs font-bold transition-all shadow-sm disabled:opacity-40">Create Memo</button>
               </div>
             </form>
           </div>
@@ -648,10 +691,10 @@ export default function CreditMemosPage() {
       )}
 
       {showPdfModal && savedCreditMemoId && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-          <div className="bg-white rounded-xl shadow-xl p-6 max-w-sm w-full" onClick={(e) => e.stopPropagation()}>
-            <h3 className="text-lg font-semibold text-gray-900 mb-2">Credit memo saved</h3>
-            <p className="text-gray-600 text-sm mb-4">Download or print the PDF.</p>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-sm p-4">
+          <div className="bg-slate-900 border border-white/10 shadow-[0_24px_50px_rgba(0,0,0,0.4)] rounded-2xl p-6 max-w-sm w-full" onClick={(e) => e.stopPropagation()}>
+            <h3 className="text-lg font-bold text-white mb-2">Credit Memo Saved</h3>
+            <p className="text-slate-400 text-xs mb-5">Workflow complete, PDF generated and ledger accounts synchronized.</p>
             <div className="flex flex-col gap-2">
               <button
                 type="button"
@@ -665,7 +708,7 @@ export default function CreditMemosPage() {
                     toast.error('Failed to download PDF');
                   }
                 }}
-                className="w-full px-4 py-2.5 rounded-lg font-medium bg-[#0f766e] text-white hover:bg-[#0d6b63]"
+                className="w-full px-4 py-2.5 bg-gradient-to-tr from-teal-600 to-teal-500 hover:from-teal-500 border border-white/10 text-white rounded-xl text-xs font-bold transition-all shadow-sm font-bold"
               >
                 Download PDF
               </button>
@@ -681,7 +724,7 @@ export default function CreditMemosPage() {
                     toast.error('Failed to open PDF for printing');
                   }
                 }}
-                className="w-full px-4 py-2.5 rounded-lg font-medium border border-gray-300 text-gray-700 hover:bg-gray-50"
+                className="w-full px-4 py-2.5 bg-slate-800 border border-white/5 text-slate-350 hover:text-white rounded-xl text-xs font-semibold transition-all"
               >
                 Print PDF
               </button>
@@ -691,9 +734,9 @@ export default function CreditMemosPage() {
                   setShowPdfModal(false);
                   setSavedCreditMemoId(null);
                 }}
-                className="w-full px-4 py-2.5 rounded-lg font-medium text-gray-600 hover:bg-gray-100"
+                className="w-full px-4 py-2.5 bg-slate-900 border border-white/5 text-slate-500 hover:text-slate-400 rounded-xl text-xs font-semibold transition-all"
               >
-                Done
+                Finish
               </button>
             </div>
           </div>

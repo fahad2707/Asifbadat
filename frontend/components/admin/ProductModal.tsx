@@ -102,9 +102,9 @@ function AddCategoryModal({ onClose, onSaved }: { onClose: () => void; onSaved: 
     }
   };
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60] p-4">
-      <div className="bg-white rounded-xl shadow-lg max-w-sm w-full p-6">
-        <h3 className="text-lg font-semibold text-gray-900 mb-4">+ Add new category</h3>
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[60] p-4">
+      <div className="bg-slate-950 border border-white/10 text-white rounded-xl shadow-2xl max-w-sm w-full p-6">
+        <h3 className="text-sm font-black text-white mb-4">+ Add new category</h3>
         <form onSubmit={handleSubmit}>
           <input
             type="text"
@@ -173,8 +173,8 @@ function AddCategoryModal({ onClose, onSaved }: { onClose: () => void; onSaved: 
             )}
           </div>
           <div className="flex justify-end gap-2">
-            <button type="button" onClick={onClose} className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg">Cancel</button>
-            <button type="submit" disabled={loading} className="px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 disabled:opacity-50">Add</button>
+            <button type="button" onClick={onClose} className="px-4 py-2 bg-slate-900 border border-white/5 text-slate-400 hover:text-white rounded-xl text-xs font-semibold">Cancel</button>
+            <button type="submit" disabled={loading} className="px-4 py-2 bg-gradient-to-tr from-teal-600 to-teal-500 hover:from-teal-500 hover:to-teal-400 border border-white/10 text-white rounded-xl text-xs font-bold disabled:opacity-[0.40]">Add Category</button>
           </div>
         </form>
       </div>
@@ -201,10 +201,10 @@ function AddSubCategoryModal({ categoryId, categoryName, onClose, onSaved }: { c
     }
   };
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60] p-4">
-      <div className="bg-white rounded-xl shadow-lg max-w-sm w-full p-6">
-        <h3 className="text-lg font-semibold text-gray-900 mb-1">+ Add new sub-category</h3>
-        <p className="text-sm text-gray-500 mb-4">Under: {categoryName}</p>
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[60] p-4">
+      <div className="bg-slate-950 border border-white/10 text-white rounded-xl shadow-2xl max-w-sm w-full p-6">
+        <h3 className="text-sm font-black text-white mb-1">+ Add new sub-category</h3>
+        <p className="text-xs text-slate-400 mb-4">Under: {categoryName}</p>
         <form onSubmit={handleSubmit}>
           <input
             type="text"
@@ -215,8 +215,8 @@ function AddSubCategoryModal({ categoryId, categoryName, onClose, onSaved }: { c
             autoFocus
           />
           <div className="flex justify-end gap-2">
-            <button type="button" onClick={onClose} className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg">Cancel</button>
-            <button type="submit" disabled={loading} className="px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 disabled:opacity-50">Add</button>
+            <button type="button" onClick={onClose} className="px-4 py-2 bg-slate-900 border border-white/5 text-slate-400 hover:text-white rounded-xl text-xs font-semibold">Cancel</button>
+            <button type="submit" disabled={loading} className="px-4 py-2 bg-gradient-to-tr from-teal-600 to-teal-500 hover:from-teal-500 hover:to-teal-400 border border-white/10 text-white rounded-xl text-xs font-bold disabled:opacity-[0.40]">Add Sub-category</button>
           </div>
         </form>
       </div>
@@ -247,9 +247,9 @@ function AddTaxTypeModal({ onClose, onSaved }: { onClose: () => void; onSaved: (
     }
   };
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60] p-4">
-      <div className="bg-white rounded-xl shadow-lg max-w-sm w-full p-6">
-        <h3 className="text-lg font-semibold text-gray-900 mb-4">+ Add tax type</h3>
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[60] p-4">
+      <div className="bg-slate-950 border border-white/10 text-white rounded-xl shadow-2xl max-w-sm w-full p-6">
+        <h3 className="text-sm font-black text-white mb-4">+ Add tax type</h3>
         <form onSubmit={handleSubmit}>
           <input
             type="text"
@@ -273,8 +273,8 @@ function AddTaxTypeModal({ onClose, onSaved }: { onClose: () => void; onSaved: (
             className="w-full px-3 py-2 border border-gray-300 rounded-lg mb-4"
           />
           <div className="flex justify-end gap-2">
-            <button type="button" onClick={onClose} className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg">Cancel</button>
-            <button type="submit" disabled={loading} className="px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 disabled:opacity-50">Add</button>
+            <button type="button" onClick={onClose} className="px-4 py-2 bg-slate-900 border border-white/5 text-slate-400 hover:text-white rounded-xl text-xs font-semibold">Cancel</button>
+            <button type="submit" disabled={loading} className="px-4 py-2 bg-gradient-to-tr from-teal-600 to-teal-500 hover:from-teal-500 hover:to-teal-400 border border-white/10 text-white rounded-xl text-xs font-bold disabled:opacity-[0.40]">Add Tax Type</button>
           </div>
         </form>
       </div>
@@ -301,9 +301,9 @@ function AddVendorModal({ onClose, onSaved }: { onClose: () => void; onSaved: (i
     }
   };
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60] p-4">
-      <div className="bg-white rounded-xl shadow-lg max-w-sm w-full p-6">
-        <h3 className="text-lg font-semibold text-gray-900 mb-4">+ Add new supplier</h3>
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[60] p-4">
+      <div className="bg-slate-950 border border-white/10 text-white rounded-xl shadow-2xl max-w-sm w-full p-6">
+        <h3 className="text-sm font-black text-white mb-4">+ Add new supplier</h3>
         <form onSubmit={handleSubmit}>
           <input
             type="text"
@@ -314,8 +314,8 @@ function AddVendorModal({ onClose, onSaved }: { onClose: () => void; onSaved: (i
             autoFocus
           />
           <div className="flex justify-end gap-2">
-            <button type="button" onClick={onClose} className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg">Cancel</button>
-            <button type="submit" disabled={loading} className="px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 disabled:opacity-50">Add</button>
+            <button type="button" onClick={onClose} className="px-4 py-2 bg-slate-900 border border-white/5 text-slate-400 hover:text-white rounded-xl text-xs font-semibold">Cancel</button>
+            <button type="submit" disabled={loading} className="px-4 py-2 bg-gradient-to-tr from-teal-600 to-teal-500 hover:from-teal-500 hover:to-teal-400 border border-white/10 text-white rounded-xl text-xs font-bold disabled:opacity-[0.40]">Add Supplier</button>
           </div>
         </form>
       </div>
@@ -542,12 +542,12 @@ export default function ProductModal({ product, onClose, onSuccess }: ProductMod
   };
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-xl shadow-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
-        <div className="flex items-center justify-between p-6 border-b">
-          <h2 className="text-2xl font-bold text-gray-900">{product?.id ? 'Edit Product' : 'Add Product'}</h2>
-          <button type="button" onClick={onClose} className="p-2 hover:bg-gray-100 rounded-lg">
-            <X className="w-5 h-5" />
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+      <div className="bg-slate-950 border border-white/10 text-white rounded-2xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+        <div className="flex items-center justify-between p-6 border-b border-white/10">
+          <h2 className="text-lg font-black text-white">{product?.id ? 'Edit Product Specification' : 'Create Catalog Product'}</h2>
+          <button type="button" onClick={onClose} className="p-2 rounded-xl bg-slate-900 border border-white/5 text-slate-400 hover:text-white transition-colors">
+            <X className="w-4 h-4" />
           </button>
         </div>
 
@@ -794,9 +794,9 @@ export default function ProductModal({ product, onClose, onSuccess }: ProductMod
           </div>
 
           <div className="flex justify-end gap-4 pt-4">
-            <button type="button" onClick={onClose} className="px-6 py-2 border border-gray-300 rounded-lg hover:bg-gray-50">Cancel</button>
-            <button type="submit" disabled={loading || uploading} className="px-6 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 disabled:opacity-50">
-              {loading ? 'Saving...' : product?.id ? 'Update' : 'Create'}
+            <button type="button" onClick={onClose} className="px-6 py-2 bg-slate-900 border border-white/5 text-slate-400 hover:text-white rounded-xl text-xs font-semibold">Cancel</button>
+            <button type="submit" disabled={loading || uploading} className="px-6 py-2 bg-gradient-to-tr from-teal-600 to-teal-500 hover:from-teal-500 hover:to-teal-400 border border-white/10 text-white rounded-xl text-xs font-bold disabled:opacity-[0.40]">
+              {loading ? 'Saving specs…' : product?.id ? 'Update specification' : 'Create product'}
             </button>
           </div>
         </form>

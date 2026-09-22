@@ -120,37 +120,40 @@ export default function InvoicesPage() {
   };
 
   return (
-    <div>
-      <div className="flex items-center justify-between mb-6">
-        <h1 className="text-2xl font-bold text-gray-900">Invoices & Quotations</h1>
-        <div className="flex gap-2">
+    <div className="space-y-6">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        <div>
+          <h1 className="text-3xl font-extrabold text-white tracking-tight">Invoices & Quotations</h1>
+          <p className="text-xs text-slate-400 mt-1">Manage wholesale sales documents, print invoices, and record payments.</p>
+        </div>
+        <div className="flex items-center gap-2">
           <button
             type="button"
             onClick={() => { setCreateMode('invoice'); setEditId(null); setCreateOpen(true); }}
-            className="inline-flex items-center gap-2 px-4 py-2 bg-[#0f766e] text-white rounded-lg font-medium hover:bg-[#0d6b63]"
+            className="inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-gradient-to-tr from-teal-600 to-teal-500 hover:from-teal-500 hover:to-teal-400 border border-white/10 text-white rounded-xl text-xs font-bold shadow-sm transition-all"
           >
-            <Plus className="w-4 h-4" />
-            Create invoice
+            <Plus className="w-3.5 h-3.5" />
+            Create Invoice
           </button>
           <button
             type="button"
             onClick={() => { setCreateMode('quotation'); setEditId(null); setCreateOpen(true); }}
-            className="inline-flex items-center gap-2 px-4 py-2 border border-[#0f766e] text-[#0f766e] rounded-lg font-medium hover:bg-teal-50"
+            className="inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-slate-900 border border-white/5 text-slate-300 hover:text-white rounded-xl text-xs font-semibold shadow-sm transition-all"
           >
-            <Plus className="w-4 h-4" />
-            Create quotation
+            <Plus className="w-3.5 h-3.5" />
+            Create Quotation
           </button>
         </div>
       </div>
 
-      <div className="flex border-b border-gray-200 mb-6">
+      <div className="flex border-b border-white/10">
         <button
           type="button"
           onClick={() => setDocTypeFilter('invoice')}
-          className={`py-3 px-6 font-semibold text-sm border-b-2 transition-all ${
+          className={`py-3 px-6 font-bold text-xs uppercase tracking-wider border-b-2 transition-all ${
             docTypeFilter === 'invoice'
-              ? 'border-[#0f766e] text-[#0f766e]'
-              : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+              ? 'border-teal-500 text-teal-450'
+              : 'border-transparent text-slate-500 hover:text-slate-300'
           }`}
         >
           Invoices
@@ -158,10 +161,10 @@ export default function InvoicesPage() {
         <button
           type="button"
           onClick={() => setDocTypeFilter('quotation')}
-          className={`py-3 px-6 font-semibold text-sm border-b-2 transition-all ${
+          className={`py-3 px-6 font-bold text-xs uppercase tracking-wider border-b-2 transition-all ${
             docTypeFilter === 'quotation'
-              ? 'border-[#0f766e] text-[#0f766e]'
-              : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+              ? 'border-teal-500 text-teal-450'
+              : 'border-transparent text-slate-500 hover:text-slate-300'
           }`}
         >
           Quotations
@@ -169,46 +172,43 @@ export default function InvoicesPage() {
       </div>
 
       {summary !== null && (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
-          <div className="bg-white rounded-xl shadow-md overflow-hidden">
-            <div className="p-5">
-              <p className="text-sm text-gray-500 mb-1">Unpaid</p>
-              <p className="text-2xl font-bold text-amber-700">${Number(summary.totalUnpaid).toFixed(2)}</p>
-              <div className="mt-3 h-3 bg-gray-100 rounded-full overflow-hidden">
-                <div
-                  className="h-full bg-amber-500 rounded-full transition-all"
-                  style={{ width: summary.totalUnpaid + summary.totalPaid > 0 ? `${(summary.totalUnpaid / (summary.totalUnpaid + summary.totalPaid)) * 100}%` : '0%' }}
-                />
-              </div>
-              <p className="text-xs text-gray-500 mt-2">Total outstanding</p>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <div className="bg-slate-900/40 backdrop-blur-lg border border-white/[0.06] border-t-white/[0.18] shadow-[0_12px_40px_rgba(0,0,0,0.25)] rounded-2xl p-5">
+            <p className="text-[10px] text-slate-500 font-bold uppercase tracking-wider mb-1">Total Outstanding (Unpaid)</p>
+            <p className="text-3xl font-extrabold text-amber-500 font-mono">${Number(summary.totalUnpaid).toFixed(2)}</p>
+            <div className="mt-4 h-1.5 bg-slate-950/60 rounded-full overflow-hidden">
+              <div
+                className="h-full bg-amber-500 rounded-full transition-all"
+                style={{ width: summary.totalUnpaid + summary.totalPaid > 0 ? `${(summary.totalUnpaid / (summary.totalUnpaid + summary.totalPaid)) * 100}%` : '0%' }}
+              />
             </div>
+            <p className="text-[10px] text-slate-500 mt-2 font-medium">Pending collection pipeline</p>
           </div>
-          <div className="bg-white rounded-xl shadow-md overflow-hidden">
-            <div className="p-5">
-              <p className="text-sm text-gray-500 mb-1">Paid</p>
-              <p className="text-2xl font-bold text-green-700">${Number(summary.totalPaid).toFixed(2)}</p>
-              <div className="mt-3 h-3 bg-gray-100 rounded-full overflow-hidden">
-                <div
-                  className="h-full bg-green-500 rounded-full transition-all"
-                  style={{ width: summary.totalUnpaid + summary.totalPaid > 0 ? `${(summary.totalPaid / (summary.totalUnpaid + summary.totalPaid)) * 100}%` : '0%' }}
-                />
-              </div>
-              <p className="text-xs text-gray-500 mt-2">Total received</p>
+          <div className="bg-slate-900/40 backdrop-blur-lg border border-white/[0.06] border-t-white/[0.18] shadow-[0_12px_40px_rgba(0,0,0,0.25)] rounded-2xl p-5">
+            <p className="text-[10px] text-slate-500 font-bold uppercase tracking-wider mb-1">Total Collected (Paid)</p>
+            <p className="text-3xl font-extrabold text-teal-400 font-mono">${Number(summary.totalPaid).toFixed(2)}</p>
+            <div className="mt-4 h-1.5 bg-slate-950/60 rounded-full overflow-hidden">
+              <div
+                className="h-full bg-teal-500 rounded-full transition-all"
+                style={{ width: summary.totalUnpaid + summary.totalPaid > 0 ? `${(summary.totalPaid / (summary.totalUnpaid + summary.totalPaid)) * 100}%` : '0%' }}
+              />
             </div>
+            <p className="text-[10px] text-slate-500 mt-2 font-medium">Collections finalized</p>
           </div>
         </div>
       )}
-      <div className="bg-white rounded-xl shadow-md p-4 mb-6 flex flex-wrap items-end gap-4">
-        <div className="flex-1 min-w-[200px]">
-          <label className="block text-sm font-medium text-gray-700 mb-2">Search</label>
+
+      <div className="bg-slate-900/40 backdrop-blur-lg border border-white/[0.06] border-t-white/[0.18] shadow-[0_12px_40px_rgba(0,0,0,0.25)] rounded-2xl p-4 flex flex-wrap items-end gap-4">
+        <div className="flex-1 min-w-[240px]">
+          <label className="block text-[10px] font-bold text-slate-400 mb-2 uppercase tracking-wider">Search Documents</label>
           <div className="relative">
-            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400" />
+            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-slate-500" />
             <input
               type="text"
-              placeholder="Search by number, customer name, or phone..."
+              placeholder="Search by invoice number, customer name, or phone..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#0f766e] focus:border-[#0f766e]"
+              className="w-full pl-10 pr-4 py-2.5 bg-slate-950/60 border border-white/10 rounded-xl text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-teal-500 focus:border-teal-500 focus:bg-slate-950/80 transition-all font-semibold"
             />
           </div>
         </div>
@@ -216,107 +216,111 @@ export default function InvoicesPage() {
 
       {loading ? (
         <div className="flex items-center justify-center h-64">
-          <div className="animate-spin rounded-full h-12 w-12 border-2 border-[#0f766e] border-t-transparent" />
+          <div className="animate-spin rounded-full h-8 w-8 border-2 border-teal-500 border-t-transparent" />
         </div>
       ) : (
-        <div className="bg-white rounded-xl shadow-md overflow-hidden">
-          <table className="w-full">
-            <thead className="bg-[#0f766e] text-white">
-              <tr>
-                <th className="text-left py-3 px-4 text-sm font-medium">Date</th>
-                <th className="text-left py-3 px-4 text-sm font-medium">Type</th>
-                <th className="text-left py-3 px-4 text-sm font-medium">Number</th>
-                <th className="text-left py-3 px-4 text-sm font-medium">Customer</th>
-                <th className="text-right py-3 px-4 text-sm font-medium">Amount</th>
-                <th className="text-right py-3 px-4 text-sm font-medium">Paid</th>
-                <th className="text-right py-3 px-4 text-sm font-medium">Balance</th>
-                <th className="text-left py-3 px-4 text-sm font-medium">Status</th>
-                <th className="text-right py-3 px-4 text-sm font-medium">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {invoices.map((invoice) => (
-                <tr key={invoice.id} className="border-b border-gray-100 hover:bg-gray-50">
-                  <td className="py-3 px-4 text-sm text-gray-700">
-                    {invoice.invoice_date ? new Date(invoice.invoice_date).toLocaleDateString() : new Date(invoice.created_at).toLocaleDateString()}
-                  </td>
-                  <td className="py-3 px-4">
-                    <span className={`inline-flex px-2 py-0.5 rounded text-xs font-medium ${(invoice.invoice_type || 'invoice') === 'quotation' ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-700'}`}>
-                      {(invoice.invoice_type || 'invoice') === 'quotation' ? 'Quotation' : 'Invoice'}
-                    </span>
-                  </td>
-                  <td className="py-3 px-4 font-mono text-sm text-gray-900">{invoice.invoice_number}</td>
-                  <td className="py-3 px-4">
-                    <div>
-                      {invoice.customer_name && <p className="font-medium text-gray-900">{invoice.customer_name}</p>}
-                      {invoice.customer_phone && <p className="text-xs text-gray-600">{invoice.customer_phone}</p>}
-                    </div>
-                  </td>
-                  <td className="py-3 px-4 text-right font-semibold text-gray-900">
-                    ${parseFloat(String(invoice.total_amount)).toFixed(2)}
-                  </td>
-                  <td className="py-3 px-4 text-right text-gray-700">
-                    ${parseFloat(String(invoice.amount_paid ?? 0)).toFixed(2)}
-                  </td>
-                  <td className="py-3 px-4 text-right">
-                    {(() => {
-                      const bl = balanceLabel(invoice);
-                      return (
-                        <span className={`text-sm font-medium ${bl.className}`} title={bl.value === 0 ? 'Fully paid' : bl.text}>
-                          {bl.value === 0 ? '—' : `${bl.text}: $${bl.value.toFixed(2)}`}
-                        </span>
-                      );
-                    })()}
-                  </td>
-                  <td className="py-3 px-4">
-                    <span
-                      className={`inline-flex px-2 py-1 rounded text-xs font-semibold ${
-                        statusDisplay(invoice) === 'Paid' ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'
-                      }`}
-                    >
-                      {statusDisplay(invoice)}
-                    </span>
-                  </td>
-                  <td className="py-3 px-4">
-                    <div className="flex items-center justify-end gap-1">
-                      <button
-                        onClick={() => handleDownloadPDF(invoice.id)}
-                        className="p-2 text-gray-600 hover:bg-gray-100 rounded-lg"
-                        title="Download PDF"
-                      >
-                        <Download className="w-4 h-4" />
-                      </button>
-                      {invoice.customer_email && (
-                        <button
-                          onClick={() => handleSendEmail(invoice.id)}
-                          className="p-2 text-gray-600 hover:bg-gray-100 rounded-lg"
-                          title="Send Email"
-                        >
-                          <Mail className="w-4 h-4" />
-                        </button>
-                      )}
-                      <button
-                        onClick={() => { setEditId(invoice.id); setCreateOpen(true); }}
-                        className="p-2 text-[#0f766e] hover:bg-teal-50 rounded-lg"
-                        title="Edit"
-                      >
-                        <Edit2 className="w-4 h-4" />
-                      </button>
-                      <button
-                        onClick={() => openReceivePayment(invoice)}
-                        className="p-2 text-green-600 hover:bg-green-50 rounded-lg"
-                        title="Receive payment"
-                      >
-                        <DollarSign className="w-4 h-4" />
-                      </button>
-                    </div>
-                  </td>
+        <div className="bg-slate-900/40 backdrop-blur-lg border border-white/[0.06] border-t-white/[0.18] shadow-[0_12px_40px_rgba(0,0,0,0.25)] rounded-2xl overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="w-full border-collapse">
+              <thead className="bg-slate-950/60 text-slate-400 border-b border-white/5">
+                <tr>
+                  <th className="text-left py-3 px-4 text-[10px] font-bold uppercase tracking-wider">Date</th>
+                  <th className="text-left py-3 px-4 text-[10px] font-bold uppercase tracking-wider">Type</th>
+                  <th className="text-left py-3 px-4 text-[10px] font-bold uppercase tracking-wider">Number</th>
+                  <th className="text-left py-3 px-4 text-[10px] font-bold uppercase tracking-wider">Customer</th>
+                  <th className="text-right py-3 px-4 text-[10px] font-bold uppercase tracking-wider">Amount</th>
+                  <th className="text-right py-3 px-4 text-[10px] font-bold uppercase tracking-wider">Paid</th>
+                  <th className="text-right py-3 px-4 text-[10px] font-bold uppercase tracking-wider">Balance</th>
+                  <th className="text-left py-3 px-4 text-[10px] font-bold uppercase tracking-wider">Status</th>
+                  <th className="text-right py-3 px-4 text-[10px] font-bold uppercase tracking-wider">Actions</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {invoices.map((invoice) => (
+                  <tr key={invoice.id} className="border-b border-white/5 hover:bg-white/[0.02] transition-all">
+                    <td className="py-3.5 px-4 text-xs text-slate-300">
+                      {invoice.invoice_date ? new Date(invoice.invoice_date).toLocaleDateString() : new Date(invoice.created_at).toLocaleDateString()}
+                    </td>
+                    <td className="py-3.5 px-4">
+                      <span className={`inline-flex px-2 py-0.5 rounded text-[10px] font-bold border ${(invoice.invoice_type || 'invoice') === 'quotation' ? 'bg-blue-500/10 text-blue-400 border-blue-500/20' : 'bg-slate-500/10 text-slate-400 border-white/10'}`}>
+                        {(invoice.invoice_type || 'invoice') === 'quotation' ? 'Quotation' : 'Invoice'}
+                      </span>
+                    </td>
+                    <td className="py-3.5 px-4 font-mono text-xs text-teal-400 font-bold">{invoice.invoice_number}</td>
+                    <td className="py-3.5 px-4">
+                      <div>
+                        {invoice.customer_name && <p className="font-semibold text-slate-200 text-xs">{invoice.customer_name}</p>}
+                        {invoice.customer_phone && <p className="text-[10px] text-slate-500 font-medium mt-0.5">{invoice.customer_phone}</p>}
+                      </div>
+                    </td>
+                    <td className="py-3.5 px-4 text-right font-bold text-slate-200 font-mono text-xs">
+                      ${parseFloat(String(invoice.total_amount)).toFixed(2)}
+                    </td>
+                    <td className="py-3.5 px-4 text-right text-slate-350 font-mono text-xs">
+                      ${parseFloat(String(invoice.amount_paid ?? 0)).toFixed(2)}
+                    </td>
+                    <td className="py-3.5 px-4 text-right">
+                      {(() => {
+                        const bl = balanceLabel(invoice);
+                        return (
+                          <span className={`text-xs font-bold font-mono ${bl.className === 'text-blue-600' ? 'text-blue-400' : 'text-amber-500'}`} title={bl.value === 0 ? 'Fully paid' : bl.text}>
+                            {bl.value === 0 ? '—' : `${bl.text === 'Due' ? 'Due' : 'Over'}: $${bl.value.toFixed(2)}`}
+                          </span>
+                        );
+                      })()}
+                    </td>
+                    <td className="py-3.5 px-4">
+                      <span
+                        className={`inline-flex px-2 py-0.5 rounded text-[10px] font-bold border ${
+                          statusDisplay(invoice) === 'Paid'
+                            ? 'bg-teal-500/10 text-teal-400 border-teal-500/20'
+                            : 'bg-amber-500/10 text-amber-450 border-amber-500/20'
+                        }`}
+                      >
+                        {statusDisplay(invoice)}
+                      </span>
+                    </td>
+                    <td className="py-3.5 px-4">
+                      <div className="flex items-center justify-end gap-1">
+                        <button
+                          onClick={() => handleDownloadPDF(invoice.id)}
+                          className="p-1.5 text-slate-400 hover:text-white hover:bg-white/5 rounded-lg transition-all"
+                          title="Download PDF"
+                        >
+                          <Download className="w-3.5 h-3.5" />
+                        </button>
+                        {invoice.customer_email && (
+                          <button
+                            onClick={() => handleSendEmail(invoice.id)}
+                            className="p-1.5 text-slate-400 hover:text-white hover:bg-white/5 rounded-lg transition-all"
+                            title="Send Email"
+                          >
+                            <Mail className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                        <button
+                          onClick={() => { setEditId(invoice.id); setCreateOpen(true); }}
+                          className="p-1.5 text-teal-450 hover:text-teal-350 hover:bg-white/5 rounded-lg transition-all"
+                          title="Edit"
+                        >
+                          <Edit2 className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          onClick={() => openReceivePayment(invoice)}
+                          className="p-1.5 text-emerald-450 hover:text-emerald-350 hover:bg-white/5 rounded-lg transition-all"
+                          title="Receive payment"
+                        >
+                          <DollarSign className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
           {invoices.length === 0 && (
-            <div className="py-12 text-center text-gray-500">No invoices or quotations yet. Create one to get started.</div>
+            <div className="py-16 text-center text-slate-500 text-xs font-semibold">No invoices or quotations yet. Create one to get started.</div>
           )}
         </div>
       )}

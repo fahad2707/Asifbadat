@@ -80,7 +80,6 @@ export default function SupplierDetailPage() {
 
   useEffect(() => {
     if (id) fetchData();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
   const handleUploadDocuments = async (files: FileList | null) => {
@@ -106,8 +105,8 @@ export default function SupplierDetailPage() {
 
   if (loading || !supplier) {
     return (
-      <div className="flex justify-center py-12">
-        <div className="animate-spin rounded-full h-10 w-10 border-2 border-[#0f766e] border-t-transparent" />
+      <div className="flex justify-center py-16">
+        <div className="animate-spin rounded-full h-8 w-8 border-2 border-teal-500 border-t-transparent" />
       </div>
     );
   }
@@ -115,107 +114,105 @@ export default function SupplierDetailPage() {
   const openBalance = balance ?? 0;
 
   return (
-    <div>
-      <div className="mb-4">
-        <Link href="/admin/vendors" className="inline-flex items-center gap-2 text-[#0f766e] hover:underline text-sm">
+    <div className="space-y-6">
+      <div>
+        <Link href="/admin/vendors" className="inline-flex items-center gap-2 text-teal-450 hover:text-teal-350 hover:underline text-xs font-bold transition-all">
           <ArrowLeft className="w-4 h-4" />
-          Back to suppliers
+          Back to Suppliers Directory
         </Link>
       </div>
 
       <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-6">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">{supplier.name}</h1>
-          <p className="text-sm text-gray-600 mt-1">
-            Supplier ID: <span className="font-mono">{supplier.supplier_id || '—'}</span>
-          </p>
-          {supplier.contact_name && (
-            <p className="text-sm text-gray-600">
-              Contact: {supplier.contact_name} {supplier.phone ? `• ${supplier.phone}` : ''}
-            </p>
-          )}
-          {supplier.email && (
-            <p className="text-sm text-gray-600">
-              Email: <a href={`mailto:${supplier.email}`} className="text-[#0f766e] hover:underline">{supplier.email}</a>
-            </p>
-          )}
+          <h1 className="text-3xl font-extrabold text-white tracking-tight">{supplier.name}</h1>
+          <div className="text-xs text-slate-400 mt-1.5 space-y-1">
+            <p>Supplier Unique ID: <span className="font-mono text-slate-350">{supplier.supplier_id || '—'}</span></p>
+            {supplier.contact_name && (
+              <p>Contact Liaison: <span className="text-slate-300 font-semibold">{supplier.contact_name}</span> {supplier.phone ? `• ${supplier.phone}` : ''}</p>
+            )}
+            {supplier.email && (
+              <p>Email: <a href={`mailto:${supplier.email}`} className="text-teal-450 hover:text-teal-350 hover:underline transition-colors">{supplier.email}</a></p>
+            )}
+          </div>
         </div>
-        <div className="bg-white rounded-xl shadow border border-gray-200 px-4 py-3 min-w-[220px]">
-          <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Open balance</p>
-          <p className="text-2xl font-bold text-amber-700 mt-1">${openBalance.toFixed(2)}</p>
+        <div className="bg-slate-900/40 backdrop-blur-lg border border-white/[0.06] border-t-white/[0.18] px-4 py-3 min-w-[220px] shadow-[0_12px_40px_rgba(0,0,0,0.25)] rounded-2xl">
+          <p className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">Outstanding Dues Payable</p>
+          <p className="text-2xl font-extrabold text-amber-400 mt-1 font-mono">${openBalance.toFixed(2)}</p>
           {supplier.credit_limit != null && (
-            <p className="text-xs text-gray-500 mt-1">
-              Credit limit: ${supplier.credit_limit.toFixed(2)}
+            <p className="text-[9px] text-slate-500 font-mono font-bold mt-1.5 uppercase tracking-wider">
+              Approved Line Limit: ${supplier.credit_limit.toFixed(2)}
             </p>
           )}
         </div>
       </div>
 
-      <div className="border-b border-gray-200 mb-4">
+      <div className="border-b border-white/5 mb-6">
         <nav className="-mb-px flex gap-4">
           <button
             type="button"
             onClick={() => setActiveTab('transactions')}
-            className={`pb-2 text-sm font-medium border-b-2 ${
-              activeTab === 'transactions' ? 'border-[#0f766e] text-[#0f766e]' : 'border-transparent text-gray-500 hover:text-gray-700'
+            className={`pb-2 text-xs font-bold uppercase tracking-wider transition-all border-b-2 ${
+              activeTab === 'transactions' ? 'border-teal-500 text-teal-400' : 'border-transparent text-slate-500 hover:text-slate-350'
             }`}
           >
-            Transactions
+            Transactions Ledger
           </button>
           <button
             type="button"
             onClick={() => setActiveTab('details')}
-            className={`pb-2 text-sm font-medium border-b-2 ${
-              activeTab === 'details' ? 'border-[#0f766e] text-[#0f766e]' : 'border-transparent text-gray-500 hover:text-gray-700'
+            className={`pb-2 text-xs font-bold uppercase tracking-wider transition-all border-b-2 ${
+              activeTab === 'details' ? 'border-teal-500 text-teal-400' : 'border-transparent text-slate-500 hover:text-slate-350'
             }`}
           >
-            Supplier details
+            Supplier Profile Details
           </button>
           <button
             type="button"
             onClick={() => setActiveTab('documents')}
-            className={`pb-2 text-sm font-medium border-b-2 ${
-              activeTab === 'documents' ? 'border-[#0f766e] text-[#0f766e]' : 'border-transparent text-gray-500 hover:text-gray-700'
+            className={`pb-2 text-xs font-bold uppercase tracking-wider transition-all border-b-2 ${
+              activeTab === 'documents' ? 'border-teal-500 text-teal-400' : 'border-transparent text-slate-500 hover:text-slate-350'
             }`}
           >
-            Documents
+            Documents Archive
           </button>
         </nav>
       </div>
 
       {activeTab === 'transactions' && (
-        <div className="bg-white rounded-xl shadow border border-gray-200 overflow-hidden">
-          <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100">
+        <div className="bg-slate-900/40 backdrop-blur-lg border border-white/[0.06] border-t-white/[0.18] shadow-[0_12px_40px_rgba(0,0,0,0.25)] rounded-2xl overflow-hidden">
+          <div className="flex items-center justify-between px-4 py-3 border-b border-white/5 bg-slate-950/60">
             <div className="flex items-center gap-2">
-              <FileText className="w-4 h-4 text-gray-500" />
-              <span className="text-sm font-medium text-gray-800">Transaction list</span>
+              <FileText className="w-4 h-4 text-slate-400" />
+              <span className="text-xs font-bold uppercase tracking-wider text-slate-300">Transaction log entries</span>
             </div>
-            <span className="text-xs text-gray-500">Last {ledger.length} entries</span>
+            <span className="text-[10px] font-mono text-slate-500 font-bold uppercase tracking-wider">Recent {ledger.length} lines</span>
           </div>
           {ledger.length === 0 ? (
-            <div className="py-8 text-center text-gray-500 text-sm">No activity yet for this supplier.</div>
+            <div className="py-16 text-center text-slate-500 text-xs font-semibold">No transactions occurred on this account list.</div>
           ) : (
             <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead className="bg-gray-50">
+              <table className="w-full border-collapse">
+                <thead className="bg-slate-950/60 text-slate-400 border-b border-white/5">
                   <tr>
-                    <th className="text-left py-2 px-3">Date</th>
-                    <th className="text-left py-2 px-3">Type</th>
-                    <th className="text-left py-2 px-3">Description</th>
-                    <th className="text-right py-2 px-3">Debit</th>
-                    <th className="text-right py-2 px-3">Credit</th>
-                    <th className="text-right py-2 px-3">Balance</th>
+                    <th className="text-left py-3 px-3 text-[10px] font-bold uppercase tracking-wider">Posting Date</th>
+                    <th className="text-left py-3 px-3 text-[10px] font-bold uppercase tracking-wider">Type</th>
+                    <th className="text-left py-3 px-3 text-[10px] font-bold uppercase tracking-wider">Reference Memo</th>
+                    <th className="text-right py-3 px-3 text-[10px] font-bold uppercase tracking-wider">Debit (Cleared)</th>
+                    <th className="text-right py-3 px-3 text-[10px] font-bold uppercase tracking-wider">Credit (Add Dues)</th>
+                    <th className="text-right py-3 px-3 text-[10px] font-bold uppercase tracking-wider">Account Balance</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {ledger.map((e, idx) => (
-                    <tr key={e.id} className={idx % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
-                      <td className="py-2 px-3">{e.date ? new Date(e.date).toLocaleDateString() : '—'}</td>
-                      <td className="py-2 px-3 text-xs font-medium text-gray-700">{e.reference_type || 'Entry'}</td>
-                      <td className="py-2 px-3 text-gray-700">{e.description || '—'}</td>
-                      <td className="py-2 px-3 text-right">${Number(e.debit || 0).toFixed(2)}</td>
-                      <td className="py-2 px-3 text-right">${Number(e.credit || 0).toFixed(2)}</td>
-                      <td className="py-2 px-3 text-right font-mono">${Number(e.balance || 0).toFixed(2)}</td>
+                  {ledger.map((e) => (
+                    <tr key={e.id} className="border-b border-white/5 hover:bg-white/[0.02] transition-colors">
+                      <td className="py-3 px-3 text-xs text-slate-400 font-mono">{e.date ? new Date(e.date).toLocaleDateString() : '—'}</td>
+                      <td className="py-3 px-3 text-xs">
+                        <span className="inline-flex px-2 py-0.5 rounded text-[10px] font-bold border border-white/10 bg-slate-800/80 text-slate-350">{e.reference_type || 'Entry'}</span>
+                      </td>
+                      <td className="py-3 px-3 text-xs text-slate-200 font-semibold">{e.description || '—'}</td>
+                      <td className="py-3 px-3 text-right text-xs font-mono font-bold text-teal-400">${Number(e.debit || 0).toFixed(2)}</td>
+                      <td className="py-3 px-3 text-right text-xs font-mono font-bold text-rose-400">${Number(e.credit || 0).toFixed(2)}</td>
+                      <td className="py-3 px-3 text-right text-xs font-mono font-extrabold text-slate-100">${Number(e.balance || 0).toFixed(2)}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -226,17 +223,17 @@ export default function SupplierDetailPage() {
       )}
 
       {activeTab === 'details' && (
-        <div className="bg-white rounded-xl shadow border border-gray-200 p-4 space-y-4">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <h3 className="text-sm font-semibold text-gray-700 mb-2">Contact</h3>
-              <p className="text-sm text-gray-700">{supplier.contact_name || '—'}</p>
-              <p className="text-sm text-gray-700">{supplier.phone || '—'}</p>
-              <p className="text-sm text-gray-700">{supplier.email || '—'}</p>
+        <div className="bg-slate-900/40 backdrop-blur-lg border border-white/[0.06] border-t-white/[0.18] p-5 shadow-[0_12px_40px_rgba(0,0,0,0.25)] rounded-2xl space-y-5 text-xs text-slate-300">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div className="bg-slate-950/40 border border-white/5 rounded-xl p-4">
+              <h3 className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-3">Company Channels</h3>
+              <p className="mb-2"><span className="text-slate-500 font-bold uppercase tracking-wider text-[9px] mr-2">Contact Name:</span> <span className="text-slate-200 font-semibold">{supplier.contact_name || '—'}</span></p>
+              <p className="mb-2"><span className="text-slate-500 font-bold uppercase tracking-wider text-[9px] mr-2">Phone Lines:</span> <span className="text-slate-200 font-mono font-semibold">{supplier.phone || '—'}</span></p>
+              <p className="mb-1"><span className="text-slate-500 font-bold uppercase tracking-wider text-[9px] mr-2">Email Inquiries:</span> <span className="text-slate-200 font-semibold">{supplier.email || '—'}</span></p>
             </div>
-            <div>
-              <h3 className="text-sm font-semibold text-gray-700 mb-2">Address</h3>
-              <p className="text-sm text-gray-700">
+            <div className="bg-slate-950/40 border border-white/5 rounded-xl p-4">
+              <h3 className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-3">Cargo Mailing Address</h3>
+              <p className="text-slate-202 leading-relaxed font-semibold">
                 {supplier.address || '—'}
                 {supplier.city ? `, ${supplier.city}` : ''}
                 {supplier.state ? `, ${supplier.state}` : ''}
@@ -244,41 +241,37 @@ export default function SupplierDetailPage() {
               </p>
             </div>
           </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <h3 className="text-sm font-semibold text-gray-700 mb-2">Terms & rating</h3>
-              <p className="text-sm text-gray-700">
-                Payment terms: {supplier.payment_terms || (supplier.payment_terms_days ? `Net ${supplier.payment_terms_days}` : '—')}
-              </p>
-              <p className="text-sm text-gray-700">
-                Rating: {supplier.rating != null ? `${supplier.rating}/100` : '—'}
-              </p>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div className="bg-slate-950/40 border border-white/5 rounded-xl p-4">
+              <h3 className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-2 font-mono">Contractual Payment Dues</h3>
+              <p className="mb-1.5"><span className="text-slate-500 font-bold uppercase tracking-wider text-[9px] mr-2">Terms:</span> <span className="text-slate-200 font-semibold">{supplier.payment_terms || (supplier.payment_terms_days ? `Net ${supplier.payment_terms_days} days` : '—')}</span></p>
+              <p><span className="text-slate-500 font-bold uppercase tracking-wider text-[9px] mr-2">Lead Rating:</span> <span className="text-teal-400 font-bold font-mono">{supplier.rating != null ? `${supplier.rating}/100` : '—'}</span></p>
             </div>
-            <div>
-              <h3 className="text-sm font-semibold text-gray-700 mb-2">Tax IDs</h3>
-              <p className="text-sm text-gray-700">Tax ID: {supplier.tax_id || '—'}</p>
-              <p className="text-sm text-gray-700">GST: {supplier.gst_number || '—'}</p>
+            <div className="bg-slate-950/40 border border-white/5 rounded-xl p-4 font-mono">
+              <h3 className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-2">Corporate Registry IDs</h3>
+              <p className="mb-1.5"><span className="text-slate-500 font-bold uppercase tracking-wider text-[9px] mr-2">Tax ID:</span> <span className="text-slate-200 font-semibold">{supplier.tax_id || '—'}</span></p>
+              <p><span className="text-slate-500 font-bold uppercase tracking-wider text-[9px] mr-2">GST ID:</span> <span className="text-slate-200 font-semibold">{supplier.gst_number || '—'}</span></p>
             </div>
           </div>
           {supplier.notes && (
-            <div>
-              <h3 className="text-sm font-semibold text-gray-700 mb-2">Notes</h3>
-              <p className="text-sm text-gray-700 whitespace-pre-line">{supplier.notes}</p>
+            <div className="bg-slate-955/40 border border-white/5 p-4 rounded-xl">
+              <h3 className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-2">Supplier Registry Executive Notes</h3>
+              <p className="text-slate-300 leading-relaxed whitespace-pre-line">{supplier.notes}</p>
             </div>
           )}
         </div>
       )}
 
       {activeTab === 'documents' && (
-        <div className="bg-white rounded-xl shadow border border-gray-200 p-4 space-y-4">
+        <div className="bg-slate-900/40 backdrop-blur-lg border border-white/[0.06] border-t-white/[0.18] p-5 shadow-[0_12px_40px_rgba(0,0,0,0.25)] rounded-2xl space-y-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
-              <UploadCloud className="w-4 h-4 text-gray-500" />
-              <span className="text-sm font-medium text-gray-800">Supplier documents</span>
+              <UploadCloud className="w-4 h-4 text-slate-400" />
+              <span className="text-xs font-bold uppercase tracking-wider text-slate-350">Supplier documents</span>
             </div>
-            <label className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg border border-gray-300 text-sm font-medium text-gray-700 hover:bg-gray-50 cursor-pointer">
+            <label className="inline-flex items-center justify-center gap-1.5 px-3.5 py-2 bg-slate-800 border border-white/5 text-slate-300 hover:text-white rounded-xl text-xs font-semibold hover:bg-slate-800/80 transition-colors cursor-pointerSelect">
               <UploadCloud className="w-4 h-4" />
-              <span>{uploading ? 'Uploading…' : 'Upload files'}</span>
+              <span>{uploading ? 'Uploading Files...' : 'Upload Document Files'}</span>
               <input
                 type="file"
                 multiple
@@ -288,14 +281,14 @@ export default function SupplierDetailPage() {
             </label>
           </div>
           {(!supplier.documents || supplier.documents.length === 0) ? (
-            <p className="text-sm text-gray-500">No documents yet. Upload PDFs, images, or other files related to this supplier.</p>
+            <p className="text-xs text-slate-500 font-semibold py-8 text-center bg-slate-950/20 border border-dashed border-white/5 rounded-xl">No documents archived. Upload procurement agreement PDFs or invoices related to this supplier list.</p>
           ) : (
-            <ul className="divide-y divide-gray-200 text-sm">
+            <ul className="divide-y divide-white/5 text-xs bg-slate-955/20 border border-white/5 rounded-xl overflow-hidden px-4">
               {supplier.documents.map((d, idx) => (
-                <li key={`${d.url}-${idx}`} className="py-2 flex items-center justify-between">
+                <li key={`${d.url}-${idx}`} className="py-3 flex items-center justify-between">
                   <div>
-                    <p className="text-gray-800">{d.name}</p>
-                    <p className="text-xs text-gray-500">
+                    <p className="text-slate-202 font-semibold">{d.name}</p>
+                    <p className="text-[10px] text-slate-500 font-mono mt-1 font-semibold">
                       {d.uploaded_at ? new Date(d.uploaded_at).toLocaleString() : ''}
                     </p>
                   </div>
@@ -303,9 +296,9 @@ export default function SupplierDetailPage() {
                     href={d.url}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="text-[#0f766e] hover:underline text-xs font-medium"
+                    className="text-teal-450 hover:text-teal-300 hover:underline text-xs font-bold"
                   >
-                    View
+                    View File
                   </a>
                 </li>
               ))}
@@ -316,4 +309,3 @@ export default function SupplierDetailPage() {
     </div>
   );
 }
-

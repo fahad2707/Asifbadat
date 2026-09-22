@@ -44,7 +44,7 @@ interface FinancialOverview {
   profit_margin_percent: number;
 }
 
-const CHART_COLORS = ['#0f766e', '#14b8a6', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#06b6d4', '#84cc16'];
+const CHART_COLORS = ['#14b8a6', '#10b981', '#f59e0b', '#f43f5e', '#8b5cf6', '#d946ef', '#06b6d4', '#84cc16'];
 
 function downloadCSV(filename: string, rows: string[][]) {
   const csv = rows.map((row) => row.map((cell) => `"${String(cell).replace(/"/g, '""')}"`).join(',')).join('\n');
@@ -161,181 +161,232 @@ export default function AnalyticsPage() {
     window.print();
   };
 
+  // Custom Chart Style configurations
+  const glassPanelClass = `bg-slate-900/40 backdrop-blur-lg border border-white/[0.06] border-t-white/[0.18] shadow-[0_12px_40px_rgba(0,0,0,0.25)] rounded-2xl p-5`;
+  const customTooltip = {
+    contentStyle: {
+      backgroundColor: 'rgba(15, 23, 42, 0.95)',
+      borderColor: 'rgba(255,255,255,0.08)',
+      borderRadius: '12px',
+      fontSize: '11px',
+      color: '#fff',
+      boxShadow: '0 8px 30px rgba(0,0,0,0.3)',
+    },
+    itemStyle: { color: '#fff' },
+  };
+
   return (
-    <div>
-      <div className="flex items-center justify-between mb-6 flex-wrap gap-4">
-        <h1 className="text-3xl font-bold text-gray-900">Reports</h1>
-        <div className="flex items-center gap-2 flex-wrap">
+    <div className="space-y-6">
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between mb-2">
+        <div>
+          <h1 className="text-3xl font-extrabold text-white tracking-tight">Ledger Reports &amp; Analytics</h1>
+          <p className="text-slate-400 text-xs mt-1">B2B Financial Overview, Gross Profit Margins, &amp; Operating Cost Trends.</p>
+        </div>
+        <div className="flex items-center gap-2.5 flex-wrap">
           <select
             value={reportPeriod}
             onChange={(e) => setReportPeriod(e.target.value)}
-            className="px-3 py-2 border border-gray-300 rounded-lg text-sm"
+            className="px-3.5 py-2.5 bg-slate-950/60 border border-white/10 rounded-xl text-xs font-bold text-white focus:outline-none focus:ring-1 focus:ring-teal-500 cursor-pointer"
           >
             <option value="this_month">This Month</option>
             <option value="last_month">Last Month</option>
-            <option value="90">Last 90 days</option>
+            <option value="90">Last 90 Days</option>
             <option value="365">Last Year</option>
             <option value="custom">Custom Range</option>
           </select>
           {reportPeriod === 'custom' && (
-            <>
-              <input type="date" value={customStart} onChange={(e) => setCustomStart(e.target.value)} className="px-3 py-2 border rounded-lg text-sm" />
-              <input type="date" value={customEnd} onChange={(e) => setCustomEnd(e.target.value)} className="px-3 py-2 border rounded-lg text-sm" />
-            </>
+            <div className="flex items-center gap-1.5">
+              <input type="date" value={customStart} onChange={(e) => setCustomStart(e.target.value)} className="px-3.5 py-2 bg-slate-950/60 border border-white/10 rounded-xl text-xs text-white focus:outline-none" />
+              <span className="text-slate-500 text-xs">—</span>
+              <input type="date" value={customEnd} onChange={(e) => setCustomEnd(e.target.value)} className="px-3.5 py-2 bg-slate-950/60 border border-white/10 rounded-xl text-xs text-white focus:outline-none" />
+            </div>
           )}
-          <button onClick={handleExportCSV} className="inline-flex items-center gap-1 px-3 py-2 rounded-lg border border-gray-300 text-sm hover:bg-gray-50">
-            <FileDown className="w-4 h-4" /> Export CSV
+          <button
+            onClick={handleExportCSV}
+            className="inline-flex items-center gap-2 px-3.5 py-2.5 bg-gradient-to-b from-white/[0.10] to-white/[0.02] border border-white/[0.08] hover:bg-white/[0.06] active:scale-[0.98] rounded-xl text-xs font-semibold text-white transition-all cursor-pointer"
+          >
+            <FileDown className="w-4 h-4 text-teal-400" /> Export CSV
           </button>
-          <button onClick={handleExportPDF} className="inline-flex items-center gap-1 px-3 py-2 rounded-lg border border-gray-300 text-sm hover:bg-gray-50">
-            <FileText className="w-4 h-4" /> Print / PDF
+          <button
+            onClick={handleExportPDF}
+            className="inline-flex items-center gap-2 px-3.5 py-2.5 bg-gradient-to-b from-white/[0.10] to-white/[0.02] border border-white/[0.08] hover:bg-white/[0.06] active:scale-[0.98] rounded-xl text-xs font-semibold text-white transition-all cursor-pointer"
+          >
+            <FileText className="w-4 h-4 text-emerald-400" /> Print / PDF
           </button>
         </div>
       </div>
 
       {/* Financial Overview Cards */}
-      <div className="mb-8">
-        <h2 className="text-xl font-bold text-gray-900 mb-4">Financial Overview</h2>
+      <div className="space-y-3">
+        <h2 className="text-xs font-bold text-slate-400 uppercase tracking-widest">Financial Overview</h2>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
-          <div className="bg-white rounded-xl shadow border border-gray-200 p-5">
+          
+          <div className={glassPanelClass}>
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-lg bg-emerald-100 flex items-center justify-center">
-                <DollarSign className="w-5 h-5 text-emerald-600" />
+              <div className="w-10 h-10 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center shrink-0">
+                <DollarSign className="w-5 h-5 text-emerald-450" />
               </div>
               <div>
-                <p className="text-sm text-gray-500">Total Revenue</p>
-                <p className="text-lg font-bold text-gray-900">{financialOverview ? Number(financialOverview.total_revenue).toLocaleString() : '—'}</p>
+                <span className="text-[10px] font-bold text-slate-500 tracking-wider block uppercase">Total Revenue</span>
+                <span className="text-lg font-black text-white block mt-1">
+                  ${financialOverview ? Number(financialOverview.total_revenue).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '—'}
+                </span>
               </div>
             </div>
           </div>
-          <div className="bg-white rounded-xl shadow border border-gray-200 p-5">
+
+          <div className={glassPanelClass}>
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-lg bg-amber-100 flex items-center justify-center">
-                <TrendingDown className="w-5 h-5 text-amber-600" />
+              <div className="w-10 h-10 rounded-xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center shrink-0">
+                <TrendingDown className="w-5 h-5 text-amber-450" />
               </div>
               <div>
-                <p className="text-sm text-gray-500">Total COGS</p>
-                <p className="text-lg font-bold text-gray-900">{financialOverview ? Number(financialOverview.total_cogs).toLocaleString() : '—'}</p>
+                <span className="text-[10px] font-bold text-slate-500 tracking-wider block uppercase">Total COGS</span>
+                <span className="text-lg font-black text-white block mt-1">
+                  ${financialOverview ? Number(financialOverview.total_cogs).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '—'}
+                </span>
               </div>
             </div>
           </div>
-          <div className="bg-white rounded-xl shadow border border-gray-200 p-5">
+
+          <div className={glassPanelClass}>
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-lg bg-blue-100 flex items-center justify-center">
-                <TrendingUp className="w-5 h-5 text-blue-600" />
+              <div className="w-10 h-10 rounded-xl bg-blue-500/10 border border-blue-500/20 flex items-center justify-center shrink-0">
+                <TrendingUp className="w-5 h-5 text-blue-450" />
               </div>
               <div>
-                <p className="text-sm text-gray-500">Gross Profit</p>
-                <p className="text-lg font-bold text-gray-900">{financialOverview ? Number(financialOverview.gross_profit).toLocaleString() : '—'}</p>
+                <span className="text-[10px] font-bold text-slate-500 tracking-wider block uppercase">Gross Profit</span>
+                <span className="text-lg font-black text-white block mt-1">
+                  ${financialOverview ? Number(financialOverview.gross_profit).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '—'}
+                </span>
               </div>
             </div>
           </div>
-          <div className="bg-white rounded-xl shadow border border-gray-200 p-5">
+
+          <div className={glassPanelClass}>
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-lg bg-red-100 flex items-center justify-center">
-                <Wallet className="w-5 h-5 text-red-600" />
+              <div className="w-10 h-10 rounded-xl bg-rose-500/10 border border-rose-500/20 flex items-center justify-center shrink-0">
+                <Wallet className="w-5 h-5 text-rose-455" />
               </div>
               <div>
-                <p className="text-sm text-gray-500">Total Expenses</p>
-                <p className="text-lg font-bold text-gray-900">{financialOverview ? Number(financialOverview.total_expenses).toLocaleString() : '—'}</p>
+                <span className="text-[10px] font-bold text-slate-500 tracking-wider block uppercase">Total Expenses</span>
+                <span className="text-lg font-black text-white block mt-1">
+                  ${financialOverview ? Number(financialOverview.total_expenses).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '—'}
+                </span>
               </div>
             </div>
           </div>
-          <div className="bg-white rounded-xl shadow border border-gray-200 p-5">
+
+          <div className={glassPanelClass}>
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-lg bg-[#0f766e]/10 flex items-center justify-center">
-                <Percent className="w-5 h-5 text-[#0f766e]" />
+              <div className="w-10 h-10 rounded-xl bg-teal-500/10 border border-teal-500/20 flex items-center justify-center shrink-0">
+                <Percent className="w-5 h-5 text-teal-400" />
               </div>
               <div>
-                <p className="text-sm text-gray-500">Net Profit</p>
-                <p className={`text-lg font-bold ${financialOverview && financialOverview.net_profit < 0 ? 'text-red-600' : 'text-gray-900'}`}>
-                  {financialOverview ? Number(financialOverview.net_profit).toLocaleString() : '—'}
-                </p>
+                <span className="text-[10px] font-bold text-slate-500 tracking-wider block uppercase">Net Profit</span>
+                <span className={`text-lg font-black block mt-1 ${financialOverview && financialOverview.net_profit < 0 ? 'text-rose-400' : 'text-white'}`}>
+                  ${financialOverview ? Number(financialOverview.net_profit).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '—'}
+                </span>
                 {financialOverview && (
-                  <p className="text-xs text-gray-500">
-                    Margin: {financialOverview.profit_margin_percent}% · Expense % of revenue: {financialOverview.expense_percent_of_revenue}%
+                  <p className="text-[10px] text-slate-450 mt-1 font-semibold leading-relaxed">
+                    Margin: {financialOverview.profit_margin_percent}% <br /> Expense ratio: {financialOverview.expense_percent_of_revenue}%
                   </p>
                 )}
               </div>
             </div>
           </div>
+
         </div>
       </div>
 
       {/* Charts row */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
-        <div className="bg-white rounded-xl shadow border border-gray-200 p-6">
-          <h3 className="text-lg font-bold text-gray-900 mb-4">Revenue vs Expenses (Bar)</h3>
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        
+        <div className={glassPanelClass}>
+          <h3 className="text-sm font-bold text-white mb-4">Revenue vs Expenses (Bar)</h3>
           <ResponsiveContainer width="100%" height={280}>
             <BarChart data={revenueVsExpenses}>
-              <CartesianGrid strokeDasharray="3 3" />
-              <XAxis dataKey="month" />
-              <YAxis />
-              <Tooltip />
-              <Legend />
-              <Bar dataKey="revenue" fill="#0f766e" name="Revenue" />
-              <Bar dataKey="expenses" fill="#ef4444" name="Expenses" />
+              <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.04)" />
+              <XAxis dataKey="month" stroke="rgba(255,255,255,0.4)" fontSize={10} fontFamily="monospace" />
+              <YAxis stroke="rgba(255,255,255,0.4)" fontSize={10} fontFamily="monospace" />
+              <Tooltip {...customTooltip} />
+              <Legend wrapperStyle={{ fontSize: '11px', paddingTop: '10px' }} />
+              <Bar dataKey="revenue" fill="#14b8a6" name="Revenue" radius={[4, 4, 0, 0]} />
+              <Bar dataKey="expenses" fill="#f43f5e" name="Expenses" radius={[4, 4, 0, 0]} />
             </BarChart>
           </ResponsiveContainer>
         </div>
-        <div className="bg-white rounded-xl shadow border border-gray-200 p-6">
-          <h3 className="text-lg font-bold text-gray-900 mb-4">Monthly Net Profit (Line)</h3>
+
+        <div className={glassPanelClass}>
+          <h3 className="text-sm font-bold text-white mb-4">Monthly Net Profit (Line)</h3>
           <ResponsiveContainer width="100%" height={280}>
             <LineChart data={monthlyNetProfit}>
-              <CartesianGrid strokeDasharray="3 3" />
-              <XAxis dataKey="month" />
-              <YAxis />
-              <Tooltip />
-              <Legend />
-              <Line type="monotone" dataKey="net_profit" stroke="#0f766e" strokeWidth={2} name="Net Profit" />
+              <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.04)" />
+              <XAxis dataKey="month" stroke="rgba(255,255,255,0.4)" fontSize={10} fontFamily="monospace" />
+              <YAxis stroke="rgba(255,255,255,0.4)" fontSize={10} fontFamily="monospace" />
+              <Tooltip {...customTooltip} />
+              <Legend wrapperStyle={{ fontSize: '11px', paddingTop: '10px' }} />
+              <Line type="monotone" dataKey="net_profit" stroke="#10b981" strokeWidth={2.5} name="Net Profit" activeDot={{ r: 6 }} />
             </LineChart>
           </ResponsiveContainer>
         </div>
-        <div className="bg-white rounded-xl shadow border border-gray-200 p-6">
-          <h3 className="text-lg font-bold text-gray-900 mb-4">Expense Breakdown by Category (Donut)</h3>
+
+        <div className={glassPanelClass}>
+          <h3 className="text-sm font-bold text-white mb-4">Expense Breakdown by Category (Donut)</h3>
           <ResponsiveContainer width="100%" height={280}>
             <PieChart>
               <Pie
                 data={expenseBreakdown}
                 dataKey="value"
                 nameKey="name"
-                cx="50%"
+                cx="55%"
                 cy="50%"
                 innerRadius={60}
-                outerRadius={100}
-                paddingAngle={2}
+                outerRadius={95}
+                paddingAngle={3}
                 label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
               >
                 {expenseBreakdown.map((_, i) => (
-                  <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />
+                  <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} className="focus:outline-none" />
                 ))}
               </Pie>
-              <Tooltip formatter={(v: number) => [Number(v).toLocaleString(), 'Amount']} />
+              <Legend layout="vertical" verticalAlign="middle" align="left" wrapperStyle={{ fontSize: '10px', color: '#94a3b8' }} />
+              <Tooltip formatter={(v: number) => [`$${Number(v).toLocaleString()}`, 'Amount']} {...customTooltip} />
             </PieChart>
           </ResponsiveContainer>
         </div>
-        <div className="bg-white rounded-xl shadow border border-gray-200 p-6">
-          <h3 className="text-lg font-bold text-gray-900 mb-4">Fixed vs Variable Expenses</h3>
+
+        <div className={glassPanelClass}>
+          <h3 className="text-sm font-bold text-white mb-4">Fixed vs Variable Expenses</h3>
           <ResponsiveContainer width="100%" height={280}>
             <BarChart
               data={[
-                { name: 'Fixed', amount: fixedVsVariable.fixed, fill: '#3b82f6' },
-                { name: 'Variable', amount: fixedVsVariable.variable, fill: '#f59e0b' },
+                { name: 'Fixed cost', amount: fixedVsVariable.fixed },
+                { name: 'Variable cost', amount: fixedVsVariable.variable },
               ]}
             >
-              <CartesianGrid strokeDasharray="3 3" />
-              <XAxis dataKey="name" />
-              <YAxis />
-              <Tooltip />
-              <Bar dataKey="amount" name="Amount" />
+              <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.04)" />
+              <XAxis dataKey="name" stroke="rgba(255,255,255,0.4)" fontSize={10} fontFamily="monospace" />
+              <YAxis stroke="rgba(255,255,255,0.4)" fontSize={10} fontFamily="monospace" />
+              <Tooltip {...customTooltip} />
+              <Bar dataKey="amount" name="Cost Amount" radius={[4, 4, 0, 0]}>
+                <Cell fill="#06b6d4" />
+                <Cell fill="#f59e0b" />
+              </Bar>
             </BarChart>
           </ResponsiveContainer>
         </div>
+
       </div>
 
       {/* Original Revenue & Category Sales */}
-      <div className="flex items-center justify-between mb-4">
-        <h2 className="text-xl font-bold text-gray-900">Sales Analytics</h2>
-        <select value={period} onChange={(e) => setPeriod(e.target.value)} className="px-4 py-2 border border-gray-300 rounded-lg text-sm">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between pt-4 border-t border-white/5">
+        <h2 className="text-sm font-bold text-white uppercase tracking-widest">Store Sales Analytics</h2>
+        <select
+          value={period}
+          onChange={(e) => setPeriod(e.target.value)}
+          className="px-3.5 py-2 bg-slate-950/60 border border-white/10 rounded-xl text-xs font-bold text-white focus:outline-none focus:ring-1 focus:ring-teal-500 cursor-pointer w-full sm:w-auto"
+        >
           <option value="7">Last 7 days</option>
           <option value="30">Last 30 days</option>
           <option value="90">Last 90 days</option>
@@ -345,55 +396,57 @@ export default function AnalyticsPage() {
 
       {loading ? (
         <div className="flex justify-center h-64 items-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-2 border-[#0f766e] border-t-transparent" />
+          <div className="animate-spin rounded-full h-10 w-10 border-2 border-teal-500 border-t-transparent" />
         </div>
       ) : (
-        <div className="space-y-8">
-          <div className="bg-white rounded-xl shadow border border-gray-200 p-6">
-            <h2 className="text-lg font-bold mb-4 text-gray-900">Revenue Trend</h2>
+        <div className="space-y-6">
+          <div className={glassPanelClass}>
+            <h2 className="text-sm font-bold mb-4 text-white">Revenue Trend</h2>
             <ResponsiveContainer width="100%" height={300}>
               <LineChart data={salesData}>
-                <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="date" />
-                <YAxis />
-                <Tooltip />
-                <Legend />
-                <Line type="monotone" dataKey="revenue" stroke="#0ea5e9" strokeWidth={2} />
+                <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.04)" />
+                <XAxis dataKey="date" stroke="rgba(255,255,255,0.4)" fontSize={10} fontFamily="monospace" />
+                <YAxis stroke="rgba(255,255,255,0.4)" fontSize={10} fontFamily="monospace" />
+                <Tooltip {...customTooltip} />
+                <Legend wrapperStyle={{ fontSize: '11px', paddingTop: '10px' }} />
+                <Line type="monotone" dataKey="revenue" stroke="#0ea5e9" strokeWidth={2} name="Total Daily Revenue" activeDot={{ r: 6 }} />
               </LineChart>
             </ResponsiveContainer>
           </div>
-          <div className="bg-white rounded-xl shadow border border-gray-200 p-6">
-            <h2 className="text-lg font-bold mb-4 text-gray-900">Sales by Category</h2>
+
+          <div className={glassPanelClass}>
+            <h2 className="text-sm font-bold mb-4 text-white">Daily Category Sales Map</h2>
             <ResponsiveContainer width="100%" height={300}>
               <BarChart data={categorySales}>
-                <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="category" />
-                <YAxis />
-                <Tooltip />
-                <Legend />
-                <Bar dataKey="revenue" fill="#0ea5e9" />
+                <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.04)" />
+                <XAxis dataKey="category" stroke="rgba(255,255,255,0.4)" fontSize={10} fontFamily="monospace" />
+                <YAxis stroke="rgba(255,255,255,0.4)" fontSize={10} fontFamily="monospace" />
+                <Tooltip {...customTooltip} />
+                <Legend wrapperStyle={{ fontSize: '11px', paddingTop: '10px' }} />
+                <Bar dataKey="revenue" fill="#14b8a6" name="Revenue Category Map" radius={[4, 4, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
           </div>
-          <div className="bg-white rounded-xl shadow border border-gray-200 p-6">
-            <h2 className="text-lg font-bold mb-4 text-gray-900">Category Performance</h2>
+
+          <div className="bg-slate-900/40 backdrop-blur-lg border border-white/[0.06] rounded-2xl shadow-xl overflow-hidden p-5">
+            <h2 className="text-sm font-bold mb-4 text-white uppercase tracking-wider">Category Revenue Listings</h2>
             <div className="overflow-x-auto">
-              <table className="w-full">
+              <table className="w-full text-xs font-semibold">
                 <thead>
-                  <tr className="border-b">
-                    <th className="text-left py-3 px-4 text-gray-700">Category</th>
-                    <th className="text-right py-3 px-4 text-gray-700">Revenue</th>
-                    <th className="text-right py-3 px-4 text-gray-700">Quantity Sold</th>
+                  <tr className="border-b border-white/5 text-slate-400">
+                    <th className="text-left py-2.5 px-4 font-bold tracking-wider uppercase text-[10px]">Category taxonomy</th>
+                    <th className="text-right py-2.5 px-4 font-bold tracking-wider uppercase text-[10px]">Generated Revenue</th>
+                    <th className="text-right py-2.5 px-4 font-bold tracking-wider uppercase text-[10px]">Contract Quantity Sold</th>
                   </tr>
                 </thead>
                 <tbody>
                   {categorySales.map((cat, idx) => (
-                    <tr key={idx} className="border-b hover:bg-gray-50">
-                      <td className="py-3 px-4 font-medium text-gray-900">{cat.category || 'Uncategorized'}</td>
-                      <td className="py-3 px-4 text-right font-semibold text-gray-900">
-                        {parseFloat(cat.revenue.toString()).toLocaleString()}
+                    <tr key={idx} className="border-b border-white/5 hover:bg-white/[0.02]">
+                      <td className="py-3 px-4 text-white font-bold">{cat.category || 'Uncategorized items'}</td>
+                      <td className="py-3 px-4 text-right font-bold text-slate-200">
+                        ${parseFloat(cat.revenue.toString()).toLocaleString('en-US', { minimumFractionDigits: 2 })}
                       </td>
-                      <td className="py-3 px-4 text-right text-gray-700">{cat.quantity}</td>
+                      <td className="py-3 px-4 text-right text-slate-350">{cat.quantity.toLocaleString()} units</td>
                     </tr>
                   ))}
                 </tbody>

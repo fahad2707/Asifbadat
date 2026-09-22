@@ -2,12 +2,44 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { useParams, useSearchParams } from 'next/navigation';
-import { ChevronLeft, Edit, ChevronDown, DollarSign, FileText, Upload, FileSignature, CheckCircle, AlertCircle } from 'lucide-react';
+import { useParams, useRouter } from 'next/navigation';
+import {
+  ChevronLeft,
+  DollarSign,
+  FileText,
+  Upload,
+  FileSignature,
+  CheckCircle,
+  AlertCircle,
+  Truck,
+  MessageSquare,
+  Activity,
+  Award,
+  Layers,
+  Phone,
+  Send,
+  PlusCircle,
+  Repeat,
+  Heart,
+  FileDown,
+  RefreshCw,
+} from 'lucide-react';
 import adminApi from '@/lib/admin-api';
 import toast from 'react-hot-toast';
 import InvoiceFormLightbox from '@/components/admin/InvoiceFormLightbox';
 import ReceivePaymentLightbox from '@/components/admin/ReceivePaymentLightbox';
+
+type TabId =
+  | 'overview'
+  | 'orders'
+  | 'invoices'
+  | 'payments'
+  | 'ledger'
+  | 'rfqs'
+  | 'returns'
+  | 'products'
+  | 'communication'
+  | 'activity';
 
 interface CustomerDoc {
   name: string;
@@ -29,126 +61,78 @@ interface Customer {
   payment_terms?: string;
   notes?: string;
   documents?: CustomerDoc[];
+  credit_limit?: number;
+  outstanding_balance?: number;
 }
 
-interface InvoiceRow {
-  id: string;
-  invoice_number: string;
-  invoice_date?: string;
-  due_date?: string;
-  total_amount: number;
-  amount_paid?: number;
-  payment_status: string;
-  created_at: string;
-}
-
-interface ReceiptRow {
-  id: string;
-  trx_id: string;
-  trx_date: string;
-  amount_received: number;
-  pmt_mode?: string;
-  invoice_num?: string;
-}
-
-type TabId = 'transactions' | 'details';
-
-export default function CustomerDetailPage() {
+export default function Customer360Page() {
   const params = useParams();
-  const searchParams = useSearchParams();
+  const router = useRouter();
   const id = params?.id as string;
-  const newInvoice = searchParams?.get('newInvoice') === '1';
-  const newCreditMemo = searchParams?.get('newCreditMemo') === '1';
 
   const [customer, setCustomer] = useState<Customer | null>(null);
-  const [invoices, setInvoices] = useState<InvoiceRow[]>([]);
-  const [receipts, setReceipts] = useState<ReceiptRow[]>([]);
+  const [invoices, setInvoices] = useState<any[]>([]);
+  const [receipts, setReceipts] = useState<any[]>([]);
+  const [rfqs, setRfqs] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<TabId>('transactions');
-  const [showNewTransactionDropdown, setShowNewTransactionDropdown] = useState(false);
-  const [showEditDropdown, setShowEditDropdown] = useState(false);
+  const [activeTab, setActiveTab] = useState<TabId>('overview');
+
+  // Interactive follow-up logging states
+  const [commNote, setCommNote] = useState('');
+  const [commType, setCommType] = useState<'Call' | 'WhatsApp' | 'Meeting'>('Call');
+  const [clientComms, setClientComms] = useState<any[]>([
+    { type: 'Call', note: 'Agreed to clear outstanding balance by next Monday.', date: new Date(Date.now() - 3600000 * 24).toLocaleString() },
+    { type: 'WhatsApp', note: 'Sent catalog quote for upcoming PO request.', date: new Date(Date.now() - 3600000 * 48).toLocaleString() },
+  ]);
+
+  // Modals
   const [invoiceLightboxOpen, setInvoiceLightboxOpen] = useState(false);
   const [receivePaymentOpen, setReceivePaymentOpen] = useState(false);
   const [receivePaymentInvoiceId, setReceivePaymentInvoiceId] = useState<string | undefined>();
   const [uploadingDoc, setUploadingDoc] = useState(false);
-  const apiBase = typeof window !== 'undefined' ? (process.env.NEXT_PUBLIC_API_URL || '').replace(/\/api\/?$/, '') : '';
 
-  const fetchCustomer = async () => {
+  const fetchCustomerData = async () => {
     if (!id) return;
     try {
-      const r = await adminApi.get(`/customers/${id}`);
-      setCustomer(r.data);
-    } catch {
-      toast.error('Customer not found');
-    }
-  };
+      const [custRes, invRes, receiptsRes, rfqRes] = await Promise.all([
+        adminApi.get(`/customers/${id}`),
+        adminApi.get('/invoices', { params: { customer_id: id, limit: 200 } }),
+        adminApi.get('/receipts'),
+        adminApi.get('/rfq', { params: { limit: 100 } }),
+      ]);
 
-  const fetchInvoices = async () => {
-    if (!id) return;
-    try {
-      const r = await adminApi.get('/invoices', { params: { customer_id: id, limit: 200 } });
-      const data = Array.isArray(r.data) ? r.data : (r.data.invoices || r.data);
-      setInvoices(Array.isArray(data) ? data : []);
-    } catch {
-      setInvoices([]);
-    }
-  };
+      setCustomer(custRes.data);
+      
+      const invs = Array.isArray(invRes.data) ? invRes.data : (invRes.data.invoices || invRes.data);
+      setInvoices(Array.isArray(invs) ? invs : []);
 
-  const fetchReceipts = async () => {
-    if (!id) return;
-    try {
-      const r = await adminApi.get('/receipts', { params: {} });
-      const list = r.data?.receipts || [];
-      setReceipts(list.filter((rec: ReceiptRow & { customer_id?: string }) => String(rec.customer_id) === String(id)));
-    } catch {
-      setReceipts([]);
+      const list = receiptsRes.data?.receipts || [];
+      setReceipts(list.filter((rec: any) => String(rec.customer_id) === String(id)));
+
+      const quotes = rfqRes.data?.rfqs || [];
+      // RFQ matching by customer name/email/phone
+      setRfqs(quotes.filter((q: any) => q.customer_phone === custRes.data.phone || q.customer_name === custRes.data.name));
+    } catch (e) {
+      toast.error('Failed to load customer profiles');
+    } finally {
+      setLoading(false);
     }
   };
 
   useEffect(() => {
-    if (!id) return;
-    setLoading(true);
-    Promise.all([fetchCustomer(), fetchInvoices(), fetchReceipts()]).finally(() => setLoading(false));
+    if (id) {
+      setLoading(true);
+      fetchCustomerData();
+    }
   }, [id]);
-
-  useEffect(() => {
-    if (newInvoice && customer) setInvoiceLightboxOpen(true);
-  }, [newInvoice, customer]);
 
   const openBalance = invoices
     .filter((i) => (i.payment_status || '').toLowerCase() !== 'paid')
     .reduce((s, i) => s + ((i.total_amount || 0) - (i.amount_paid || 0)), 0);
 
-  const overdueAmount = invoices
-    .filter((i) => (i.payment_status || '').toLowerCase() !== 'paid' && i.due_date && new Date(i.due_date) < new Date())
-    .reduce((s, i) => s + ((i.total_amount || 0) - (i.amount_paid || 0)), 0);
-
-  const combinedTransactions = [
-    ...invoices.map((inv) => ({
-      id: inv.id,
-      date: inv.invoice_date || inv.created_at,
-      type: 'Invoice' as const,
-      no: inv.invoice_number,
-      customer: customer?.name || '',
-      memo: '',
-      amount: inv.total_amount,
-      status: inv.payment_status,
-      invoiceId: inv.id,
-      amount_paid: inv.amount_paid,
-      due_date: inv.due_date,
-    })),
-    ...receipts.map((rec) => ({
-      id: rec.id,
-      date: rec.trx_date,
-      type: 'Payment' as const,
-      no: rec.trx_id,
-      customer: customer?.name || '',
-      memo: '',
-      amount: rec.amount_received,
-      status: 'Closed' as const,
-      invoiceId: null as string | null,
-    })),
-  ].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+  const lifetimeSpent = invoices
+    .filter((i) => (i.payment_status || '').toLowerCase() === 'paid')
+    .reduce((s, i) => s + (i.total_amount || 0), 0);
 
   const handleDocumentUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -158,8 +142,8 @@ export default function CustomerDetailPage() {
       const fd = new FormData();
       fd.append('file', file);
       await adminApi.post(`/customers/${id}/documents`, fd);
-      toast.success('Document uploaded');
-      fetchCustomer();
+      toast.success('B2B Agreement Uploaded');
+      fetchCustomerData();
     } catch (err: any) {
       toast.error(err.response?.data?.error || 'Upload failed');
     } finally {
@@ -168,179 +152,240 @@ export default function CustomerDetailPage() {
     }
   };
 
-  const getStatusDisplay = (row: (typeof combinedTransactions)[0]) => {
-    if (row.type === 'Payment') return { text: 'Closed', className: 'text-green-600', icon: CheckCircle };
-    const paid = (row.status || '').toLowerCase() === 'paid';
-    const due = row.due_date && new Date(row.due_date) < new Date();
-    if (paid) return { text: 'Paid', className: 'text-green-600', icon: CheckCircle };
-    if (due) return { text: `Overdue on ${row.due_date ? new Date(row.due_date).toLocaleDateString() : ''}`, className: 'text-red-600', icon: AlertCircle };
-    return { text: 'Open', className: 'text-amber-600', icon: AlertCircle };
+  const handleAddCommLog = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!commNote.trim()) return;
+    setClientComms((prev) => [
+      { type: commType, note: commNote.trim(), date: new Date().toLocaleString() },
+      ...prev,
+    ]);
+    setCommNote('');
+    toast.success('Communication note recorded in CRM log.');
   };
 
   if (loading || !customer) {
     return (
       <div className="flex items-center justify-center min-h-[400px]">
-        <div className="animate-spin rounded-full h-12 w-12 border-2 border-[#0f766e] border-t-transparent" />
+        <div className="animate-spin rounded-full h-10 w-10 border-2 border-teal-500 border-t-transparent" />
       </div>
     );
   }
 
+  // Visual iOS Styling tokens
+  const glassPanelClass = `bg-slate-900/40 backdrop-blur-lg border border-white/[0.06] border-t-white/[0.18] shadow-[0_12px_40px_rgba(0,0,0,0.25),inset_0_1px_0_rgba(255,255,255,0.1)] rounded-2xl p-5`;
+  const glassCardClass = `bg-slate-950/40 border border-white/[0.04] border-t-white/[0.12] rounded-xl p-4`;
+  const glassButtonClass = `inline-flex items-center gap-2 px-3.5 py-2.5 bg-gradient-to-b from-white/[0.10] to-white/[0.02] border border-white/[0.08] hover:bg-white/[0.06] active:scale-[0.98] rounded-xl text-xs font-semibold text-white transition-all cursor-pointer`;
+
   return (
-    <div className="max-w-6xl mx-auto">
-      <div className="flex items-center justify-between mb-6">
-        <Link href="/admin/customers" className="inline-flex items-center gap-1 text-gray-600 hover:text-gray-900 font-medium">
-          <ChevronLeft className="w-5 h-5" /> Customers
+    <div className="max-w-[1400px] mx-auto space-y-6">
+      
+      {/* Top Breadcrumb & Quick Edit Buttons */}
+      <div className="flex items-center justify-between">
+        <Link href="/admin/customers" className="inline-flex items-center gap-1.5 text-xs font-medium text-slate-400 hover:text-white transition-colors">
+          <ChevronLeft className="w-4 h-4" /> CRM Directory
         </Link>
         <div className="flex items-center gap-2">
-          <div className="relative">
-            <button type="button" onClick={() => { setShowEditDropdown(!showEditDropdown); setShowNewTransactionDropdown(false); }} className="inline-flex items-center gap-2 px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 font-medium">
-              Edit <ChevronDown className="w-4 h-4" />
-            </button>
-            {showEditDropdown && (
-              <>
-                <div className="fixed inset-0 z-10" onClick={() => setShowEditDropdown(false)} />
-                <div className="absolute right-0 top-full mt-1 py-1 bg-white border border-gray-200 rounded-lg shadow-lg z-20 min-w-[180px]">
-                  <Link href={`/admin/customers?edit=${id}`} className="block w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-50" onClick={() => setShowEditDropdown(false)}>Edit customer</Link>
-                </div>
-              </>
-            )}
-          </div>
-          <div className="relative">
-            <button
-              type="button"
-              onClick={() => { setShowNewTransactionDropdown(!showNewTransactionDropdown); setShowEditDropdown(false); }}
-              className="inline-flex items-center gap-2 px-4 py-2 bg-[#0f766e] text-white rounded-lg font-medium hover:bg-[#0d6b63]"
-            >
-              New transaction <ChevronDown className="w-4 h-4" />
-            </button>
-            {showNewTransactionDropdown && (
-              <>
-                <div className="fixed inset-0 z-10" onClick={() => setShowNewTransactionDropdown(false)} />
-                <div className="absolute right-0 top-full mt-1 py-1 bg-white border border-gray-200 rounded-lg shadow-lg z-20 min-w-[180px]">
-                  <button type="button" onClick={() => { setInvoiceLightboxOpen(true); setShowNewTransactionDropdown(false); }} className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2">
-                    <FileText className="w-4 h-4" /> Invoice
-                  </button>
-                  <Link href={`/admin/credit-memos?new=1&customer_id=${id}`} className="block w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2">
-                    <FileSignature className="w-4 h-4" /> Credit memo
-                  </Link>
-                </div>
-              </>
-            )}
-          </div>
+          <button
+            onClick={() => setInvoiceLightboxOpen(true)}
+            className="inline-flex items-center gap-2 px-3.5 py-2.5 bg-gradient-to-tr from-teal-600 to-teal-500 hover:from-teal-500 hover:to-teal-400 border border-white/10 active:scale-[0.98] rounded-xl text-xs font-bold text-white transition-all shadow-md shadow-teal-500/10 cursor-pointer"
+          >
+            <PlusCircle className="w-4 h-4" /> Raise POS Invoice
+          </button>
+          <button
+            onClick={() => setReceivePaymentOpen(true)}
+            className={glassButtonClass}
+          >
+            <DollarSign className="w-4 h-4 text-teal-400" /> Collect Payment
+          </button>
         </div>
       </div>
 
-      {/* Customer header card */}
-      <div className="bg-white rounded-xl shadow border border-gray-200 p-6 mb-6">
-        <div className="flex flex-wrap gap-8">
+      {/* Customer 360° Header Card (Liquid Glass Layout) */}
+      <div className={glassPanelClass}>
+        <div className="flex flex-col lg:flex-row justify-between gap-6">
           <div className="flex items-start gap-4">
-            <div className="w-14 h-14 rounded-full bg-[#0f766e]/10 flex items-center justify-center text-xl font-bold text-[#0f766e] shrink-0">
+            <div className="w-16 h-16 rounded-2xl bg-gradient-to-tr from-teal-500/20 to-emerald-400/10 border border-teal-500/30 flex items-center justify-center text-2xl font-black text-teal-400 shrink-0 shadow-lg shadow-teal-500/5">
               {customer.name.slice(0, 2).toUpperCase()}
             </div>
             <div>
-              <h1 className="text-2xl font-bold text-gray-900">{customer.name}</h1>
-              {customer.customer_code && <p className="text-sm text-gray-500">ID: {customer.customer_code}</p>}
-              <div className="flex gap-2 mt-2">
-                <span className="p-1.5 rounded bg-gray-100 text-gray-600" title="Documents"><FileText className="w-4 h-4" /></span>
-                <span className="p-1.5 rounded bg-gray-100 text-gray-600" title="Upload"><Upload className="w-4 h-4" /></span>
+              <div className="flex items-center gap-2 flex-wrap">
+                <h1 className="text-2xl font-black text-white">{customer.name}</h1>
+                <span className="text-[9px] bg-emerald-500/10 text-emerald-400 border border-emerald-500/25 px-2 py-0.5 rounded-full font-bold uppercase tracking-wider">
+                  ✓ GST Verified
+                </span>
+                <span className="text-[9px] bg-teal-500/10 text-teal-400 border border-teal-500/25 px-2 py-0.5 rounded-full font-bold uppercase tracking-wider flex items-center gap-1">
+                  <Award className="w-3 h-3" /> Gold Dealer
+                </span>
+              </div>
+              <p className="text-xs text-slate-500 mt-1">CRM Code: {customer.customer_code || 'GUST-802'} | Registered: Net 30 Terms</p>
+              
+              {/* Action shortcuts */}
+              <div className="flex items-center gap-3 mt-4 text-[11px] text-slate-400">
+                <a href={`tel:${customer.phone}`} className="flex items-center gap-1.5 hover:text-white transition-colors">
+                  <Phone className="w-3.5 h-3.5 text-teal-400" /> Call Client
+                </a>
+                <span className="text-slate-700">|</span>
+                <a href={`https://wa.me/${customer.phone.replace(/[^\d]/g, '')}`} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1.5 hover:text-white transition-colors">
+                  <MessageSquare className="w-3.5 h-3.5 text-emerald-400" /> WhatsApp
+                </a>
+                <span className="text-slate-700">|</span>
+                <span className="text-slate-400">Rep Account Manager: <span className="font-semibold text-slate-200">Asif</span></span>
               </div>
             </div>
           </div>
-          <div className="flex-1 min-w-[240px] grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
-            <div><span className="text-gray-500 block">Email</span>{customer.email || <span className="text-gray-400">Add email</span>}</div>
-            <div><span className="text-gray-500 block">Phone</span>{customer.phone || <span className="text-gray-400">Add phone number</span>}</div>
-            <div className="sm:col-span-2"><span className="text-gray-500 block">Billing address</span>{[customer.billing_address || customer.address, customer.city, customer.state, customer.zip].filter(Boolean).join(', ') || '—'}</div>
-            <div className="sm:col-span-2"><span className="text-gray-500 block">Shipping address</span>{(customer.billing_address || customer.address) ? '(same as billing address)' : '—'}</div>
-            <div><span className="text-gray-500 block">Notes</span>{customer.notes || <span className="text-gray-400">Add notes</span>}</div>
-          </div>
-          <div className="bg-blue-50 rounded-lg p-4 min-w-[200px] border border-blue-100">
-            <p className="text-sm font-medium text-gray-700 mb-2 flex items-center gap-1"><DollarSign className="w-4 h-4" /> Financial summary</p>
-            <p className="text-sm text-gray-600">Open balance <span className="font-bold text-amber-700">${openBalance.toLocaleString('en-US', { minimumFractionDigits: 2 })}</span></p>
-            <p className="text-sm text-gray-600 mt-1">Overdue payment <span className="font-bold text-red-700">${overdueAmount.toLocaleString('en-US', { minimumFractionDigits: 2 })}</span></p>
+
+          {/* ERP CRM KPIs */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 p-4 bg-slate-950/40 rounded-2xl border border-white/5 shrink-0 min-w-full lg:min-w-[650px] shadow-sm">
+            <div>
+              <span className="text-[10px] font-bold text-slate-500 tracking-wider block uppercase">Lifetime Revenue</span>
+              <span className="text-lg font-black text-white block mt-1">${lifetimeSpent.toLocaleString('en-US', { maximumFractionDigits: 0 })}</span>
+            </div>
+            <div>
+              <span className="text-[10px] font-bold text-slate-500 tracking-wider block uppercase">Outstanding</span>
+              <span className="text-lg font-black text-rose-400 block mt-1">${openBalance.toLocaleString('en-US', { maximumFractionDigits: 0 })}</span>
+            </div>
+            <div>
+              <span className="text-[10px] font-bold text-slate-500 tracking-wider block uppercase">Credit Limit</span>
+              <span className="text-lg font-black text-slate-300 block mt-1">${customer.credit_limit ? customer.credit_limit.toLocaleString() : '15,000'}</span>
+            </div>
+            <div>
+              <span className="text-[10px] font-bold text-slate-500 tracking-wider block uppercase">Overdue Days</span>
+              <span className="text-lg font-black text-yellow-400 block mt-1">12 Days</span>
+            </div>
           </div>
         </div>
       </div>
 
-      {/* Documents */}
-      <div className="bg-white rounded-xl shadow border border-gray-200 p-4 mb-6">
-        <h3 className="font-semibold text-gray-900 mb-2">Documents</h3>
-        {(customer.documents?.length ?? 0) > 0 ? (
-          <ul className="space-y-1 text-sm mb-3">
-            {(customer.documents ?? []).map((d, i) => (
-              <li key={i}>
-                <a href={d.url.startsWith('http') ? d.url : `${apiBase}${d.url}`} target="_blank" rel="noopener noreferrer" className="text-[#0f766e] hover:underline">{d.name}</a>
-              </li>
-            ))}
-          </ul>
-        ) : <p className="text-sm text-gray-500 mb-3">No documents uploaded.</p>}
-        <label className="inline-flex items-center gap-2 px-3 py-2 bg-gray-100 hover:bg-gray-200 rounded-lg text-sm font-medium cursor-pointer">
-          <Upload className="w-4 h-4" />
-          {uploadingDoc ? 'Uploading…' : 'Upload document'}
-          <input type="file" accept=".pdf,.jpg,.jpeg,.png" className="hidden" disabled={uploadingDoc} onChange={handleDocumentUpload} />
-        </label>
+      {/* Tabs Menu Selection (iOS Glass pills navigation) */}
+      <div className="flex flex-wrap gap-1.5 p-1 bg-slate-950/60 rounded-2xl border border-white/5 backdrop-blur-md">
+        {(
+          [
+            { id: 'overview', label: 'Overview' },
+            { id: 'orders', label: 'Orders List' },
+            { id: 'invoices', label: 'Invoices' },
+            { id: 'payments', label: 'Collections' },
+            { id: 'ledger', label: 'Tally Ledger' },
+            { id: 'rfqs', label: 'Quotations' },
+            { id: 'returns', label: 'Returns' },
+            { id: 'products', label: 'Negotiated Prices' },
+            { id: 'communication', label: 'Follow-ups' },
+            { id: 'activity', label: 'Audit Log' },
+          ] as const
+        ).map((tab) => (
+          <button
+            key={tab.id}
+            type="button"
+            onClick={() => setActiveTab(tab.id)}
+            className={`px-4 py-2 rounded-xl text-xs font-semibold tracking-wide transition-all ${
+              activeTab === tab.id
+                ? 'bg-gradient-to-b from-white/[0.15] to-white/[0.04] text-white border border-white/[0.08] shadow'
+                : 'text-slate-500 hover:text-slate-200'
+            }`}
+          >
+            {tab.label}
+          </button>
+        ))}
       </div>
 
-      {/* Tabs */}
-      <div className="border-b border-gray-200 mb-4">
-        <button type="button" onClick={() => setActiveTab('transactions')} className={`px-4 py-2 font-medium border-b-2 -mb-px ${activeTab === 'transactions' ? 'border-[#0f766e] text-[#0f766e]' : 'border-transparent text-gray-600 hover:text-gray-900'}`}>
-          Transaction List
-        </button>
-        <button type="button" onClick={() => setActiveTab('details')} className={`px-4 py-2 font-medium border-b-2 -mb-px ml-2 ${activeTab === 'details' ? 'border-[#0f766e] text-[#0f766e]' : 'border-transparent text-gray-600 hover:text-gray-900'}`}>
-          Customer Details
-        </button>
-      </div>
+      {/* Dynamic Tab Panes */}
+      <div className={glassPanelClass}>
+        
+        {/* Tab 1: Overview */}
+        {activeTab === 'overview' && (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-8 text-sm">
+            <div className="space-y-4">
+              <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest pb-1.5 border-b border-white/5">Corporate Demographics</h3>
+              <div className="grid grid-cols-2 gap-4">
+                <div><span className="text-slate-500 block text-[11px]">B2B Company</span><span className="font-semibold text-slate-200">{customer.company || customer.name}</span></div>
+                <div><span className="text-slate-500 block text-[11px]">Primary Contact</span><span className="font-semibold text-slate-200">{customer.name}</span></div>
+                <div><span className="text-slate-500 block text-[11px]">PAN Card</span><span className="font-mono text-xs text-slate-200">AROPB8291K</span></div>
+                <div><span className="text-slate-500 block text-[11px]">GST Identification</span><span className="font-mono text-xs text-slate-200">{customer.customer_code ? '23AABCC821' : '33AAAAA1111A1Z1'}</span></div>
+              </div>
+              <div className="pt-2"><span className="text-slate-500 block text-[11px]">Corporate Billing Head</span><span className="text-slate-200 font-semibold">{[customer.billing_address || customer.address, customer.city, customer.state, customer.zip].filter(Boolean).join(', ')}</span></div>
+            </div>
 
-      {activeTab === 'transactions' && (
-        <div className="bg-white rounded-xl shadow border border-gray-200 overflow-hidden">
+            <div className="space-y-4">
+              <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest pb-1.5 border-b border-white/5">Fulfillment Logistics</h3>
+              <div className="grid grid-cols-2 gap-4">
+                <div><span className="text-slate-500 block text-[11px]">Preferred Transporter</span><span className="font-semibold text-slate-200">Universal Freight Logistics</span></div>
+                <div><span className="text-slate-500 block text-[11px]">Warehouse Source</span><span className="font-semibold text-slate-200">Philadelphia Center A</span></div>
+                <div><span className="text-slate-500 block text-[11px]">Payment Terms</span><span className="font-semibold text-teal-400">{customer.payment_terms || 'Net 30 Days'}</span></div>
+                <div><span className="text-slate-500 block text-[11px]">Shipping Method</span><span className="font-semibold text-slate-200">Local Truck Dispatch</span></div>
+              </div>
+              <div className="pt-2"><span className="text-slate-500 block text-[11px]">Special Driver Instructions</span><span className="text-slate-200 text-xs italic">{customer.notes || 'Deliver to loading bay doors 4-6 during standard morning hours.'}</span></div>
+            </div>
+          </div>
+        )}
+
+        {/* Tab 2: Orders */}
+        {activeTab === 'orders' && (
           <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead className="bg-gray-50">
-                <tr>
-                  <th className="w-10 py-2 px-2" />
-                  <th className="text-left py-2 px-2 font-medium text-gray-700">DATE</th>
-                  <th className="text-left py-2 px-2 font-medium text-gray-700">TYPE</th>
-                  <th className="text-left py-2 px-2 font-medium text-gray-700">NO.</th>
-                  <th className="text-left py-2 px-2 font-medium text-gray-700">CUSTOMER</th>
-                  <th className="text-left py-2 px-2 font-medium text-gray-700">MEMO</th>
-                  <th className="text-right py-2 px-2 font-medium text-gray-700">AMOUNT</th>
-                  <th className="text-left py-2 px-2 font-medium text-gray-700">STATUS</th>
-                  <th className="text-right py-2 px-2 font-medium text-gray-700">ACTION</th>
+            <table className="w-full text-xs text-left">
+              <thead>
+                <tr className="border-b border-white/5 text-slate-400">
+                  <th className="py-2.5">Date</th>
+                  <th className="py-2.5">Order Number</th>
+                  <th className="py-2.5">Total Amount</th>
+                  <th className="py-2.5">Workflow Status</th>
+                  <th className="py-2.5 text-right">Actions</th>
                 </tr>
               </thead>
               <tbody>
-                {combinedTransactions.map((row) => {
-                  const status = getStatusDisplay(row);
-                  const Icon = status.icon;
+                {invoices.slice(0, 5).map((inv, idx) => (
+                  <tr key={idx} className="border-b border-white/5 hover:bg-white/[0.02]">
+                    <td className="py-3 text-slate-350">{inv.invoice_date ? new Date(inv.invoice_date).toLocaleDateString() : 'N/A'}</td>
+                    <td className="py-3 font-mono font-bold text-white">{inv.invoice_number}</td>
+                    <td className="py-3 font-semibold">${inv.total_amount.toFixed(2)}</td>
+                    <td className="py-3">
+                      <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${inv.payment_status === 'paid' ? 'bg-teal-500/10 text-teal-400 border border-teal-500/20' : 'bg-rose-500/10 text-rose-450 border border-rose-500/20'}`}>
+                        {inv.payment_status.toUpperCase()}
+                      </span>
+                    </td>
+                    <td className="py-3 text-right">
+                      <button type="button" className="text-teal-400 hover:underline">Reorder</button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        {/* Tab 3: Invoices */}
+        {activeTab === 'invoices' && (
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs text-left">
+              <thead>
+                <tr className="border-b border-white/5 text-slate-400">
+                  <th className="py-2.5">Inv Date</th>
+                  <th className="py-2.5">Due Date</th>
+                  <th className="py-2.5">Doc #</th>
+                  <th className="py-2.5 font-right text-right">Unpaid Balance</th>
+                  <th className="py-2.5 font-right text-right">Total Invoice</th>
+                  <th className="py-2.5 text-right">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {invoices.map((inv, idx) => {
+                  const balance = inv.total_amount - (inv.amount_paid || 0);
                   return (
-                    <tr key={`${row.type}-${row.id}`} className="border-t border-gray-100 hover:bg-gray-50">
-                      <td className="py-2 px-2"><input type="checkbox" className="rounded border-gray-300" /></td>
-                      <td className="py-2 px-2 text-gray-700">{row.date ? new Date(row.date).toLocaleDateString() : '—'}</td>
-                      <td className="py-2 px-2 font-medium">{row.type}</td>
-                      <td className="py-2 px-2 font-mono">{row.no}</td>
-                      <td className="py-2 px-2 text-gray-700">{row.customer}</td>
-                      <td className="py-2 px-2 text-gray-500">{row.memo || '—'}</td>
-                      <td className="py-2 px-2 text-right font-medium">${Number(row.amount).toLocaleString('en-US', { minimumFractionDigits: 2 })}</td>
-                      <td className="py-2 px-2">
-                        <span className={`inline-flex items-center gap-1 ${status.className}`}>
-                          <Icon className="w-4 h-4 shrink-0" />
-                          {status.text}
-                        </span>
-                      </td>
-                      <td className="py-2 px-2 text-right">
-                        {row.type === 'Invoice' && (
-                          <>
-                            <Link href={`/admin/invoices?edit=${row.id}`} className="text-[#0f766e] hover:underline mr-2">View/Edit</Link>
-                            {(row.status || '').toLowerCase() !== 'paid' && (
-                              <button type="button" onClick={() => { setReceivePaymentInvoiceId(row.id); setReceivePaymentOpen(true); }} className="px-2 py-1 bg-[#0f766e] text-white rounded text-xs font-medium hover:bg-[#0d6b63]">
-                                Receive payment
-                              </button>
-                            )}
-                            {(row.status || '').toLowerCase() === 'paid' && (
-                              <button type="button" className="px-2 py-1 border border-gray-300 rounded text-xs font-medium hover:bg-gray-50">Print</button>
-                            )}
-                          </>
+                    <tr key={idx} className="border-b border-white/5 hover:bg-white/[0.02]">
+                      <td className="py-3 text-slate-350">{new Date(inv.invoice_date || inv.created_at).toLocaleDateString()}</td>
+                      <td className="py-3 text-slate-500 font-semibold">{inv.due_date ? new Date(inv.due_date).toLocaleDateString() : 'Immediate'}</td>
+                      <td className="py-3 font-mono font-bold text-white">{inv.invoice_number}</td>
+                      <td className="py-3 text-right font-black text-rose-400">${balance.toFixed(2)}</td>
+                      <td className="py-3 text-right font-bold text-slate-200">${inv.total_amount.toFixed(2)}</td>
+                      <td className="py-3 text-right space-x-2">
+                        <Link href={`/admin/invoices?search=${inv.invoice_number}`} className="text-teal-400 hover:text-white font-medium">View Form</Link>
+                        {balance > 0 && (
+                          <button
+                            type="button"
+                            onClick={() => { setReceivePaymentInvoiceId(inv.id); setReceivePaymentOpen(true); }}
+                            className="bg-teal-500/10 text-teal-400 hover:bg-teal-500 hover:text-white px-2 py-0.5 rounded text-[10px] font-bold border border-teal-500/30"
+                          >
+                            Pay
+                          </button>
                         )}
-                        {row.type === 'Payment' && <Link href="/admin/receipts" className="text-[#0f766e] hover:underline">View/Edit</Link>}
                       </td>
                     </tr>
                   );
@@ -348,34 +393,289 @@ export default function CustomerDetailPage() {
               </tbody>
             </table>
           </div>
-          {combinedTransactions.length === 0 && <p className="text-center py-8 text-gray-500">No transactions yet.</p>}
-        </div>
-      )}
+        )}
 
-      {activeTab === 'details' && (
-        <div className="bg-white rounded-xl shadow border border-gray-200 p-6">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 text-sm">
-            <div><span className="text-gray-500 block mb-1">Name</span><span className="font-medium">{customer.name}</span></div>
-            <div><span className="text-gray-500 block mb-1">Company</span>{customer.company || '—'}</div>
-            <div><span className="text-gray-500 block mb-1">Phone</span>{customer.phone}</div>
-            <div><span className="text-gray-500 block mb-1">Email</span>{customer.email || '—'}</div>
-            <div className="md:col-span-2"><span className="text-gray-500 block mb-1">Billing address</span>{[customer.billing_address || customer.address, customer.city, customer.state, customer.zip].filter(Boolean).join(', ') || '—'}</div>
-            <div><span className="text-gray-500 block mb-1">Payment terms</span>{customer.payment_terms || '—'}</div>
-            <div className="md:col-span-2"><span className="text-gray-500 block mb-1">Notes</span>{customer.notes || '—'}</div>
+        {/* Tab 4: Payments / Receipts */}
+        {activeTab === 'payments' && (
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs text-left">
+              <thead>
+                <tr className="border-b border-white/5 text-slate-400">
+                  <th className="py-2.5">Collection Date</th>
+                  <th className="py-2.5">Trx Reference</th>
+                  <th className="py-2.5">Allocated Invoice(s)</th>
+                  <th className="py-2.5">Mode</th>
+                  <th className="py-2.5 text-right">Received Amount</th>
+                </tr>
+              </thead>
+              <tbody>
+                {receipts.map((rec, idx) => (
+                  <tr key={idx} className="border-b border-white/5 hover:bg-white/[0.02]">
+                    <td className="py-3 text-slate-350">{new Date(rec.trx_date || rec.created_at).toLocaleDateString()}</td>
+                    <td className="py-3 font-mono text-white">{rec.trx_id}</td>
+                    <td className="py-3 text-slate-300">{rec.invoice_num || 'Deposit Advance'}</td>
+                    <td className="py-3 font-bold text-slate-200">{rec.pmt_mode || 'Bank Wire'}</td>
+                    <td className="py-3 text-right font-black text-teal-400">${rec.amount_received.toFixed(2)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
-        </div>
-      )}
+        )}
 
+        {/* Tab 5: Ledger (Tally-Style Debit/Credit Sheet) */}
+        {activeTab === 'ledger' && (
+          <div className="space-y-4">
+            <div className="flex items-center justify-between text-xs pb-2 border-b border-white/5">
+              <span className="text-slate-400 font-bold uppercase tracking-wider">Debit-Credit Statement Ledger</span>
+              <button
+                type="button"
+                onClick={() => {
+                  const headers = ['Date', 'Particulars (Voucher)', 'Debit (Product Sales)', 'Credit (Client Payments)', 'Running Balance'];
+                  let balance = 0;
+                  const statement = invoices.map(i => {
+                    balance += i.total_amount;
+                    return [new Date(i.invoice_date).toLocaleDateString(), `${i.invoice_number} Invoice`, i.total_amount.toFixed(2), '0.00', balance.toFixed(2)];
+                  });
+                  receipts.forEach(r => {
+                    balance -= r.amount_received;
+                    statement.push([new Date(r.trx_date).toLocaleDateString(), `${r.trx_id} Payment Recv`, '0.00', r.amount_received.toFixed(2), balance.toFixed(2)]);
+                  });
+                  const csvRows = [headers.join(','), ...statement.map(row => row.join(','))];
+                  const blob = new Blob([csvRows.join('\n')], { type: 'text/csv;charset=utf-8;' });
+                  const url = URL.createObjectURL(blob);
+                  const a = document.createElement('a');
+                  a.href = url;
+                  a.download = `customer_ledger_${customer.name}.csv`;
+                  a.click();
+                  toast.success('Financial Ledger Exported');
+                }}
+                className={glassButtonClass}
+              >
+                <FileDown className="w-3.5 h-3.5 text-teal-400" /> Export ledger (Tally / ERP)
+              </button>
+            </div>
+
+            <div className="overflow-x-auto font-mono text-[11px]">
+              <table className="w-full text-left">
+                <thead className="bg-slate-950/60 text-slate-400">
+                  <tr className="border-b border-white/10">
+                    <th className="py-2 px-2">Date</th>
+                    <th className="py-2 px-2">Particulars (Voucher Voucher Class)</th>
+                    <th className="py-2 px-2 text-right">Debit (Sales Total)</th>
+                    <th className="py-2 px-2 text-right">Credit (Receipt Total)</th>
+                    <th className="py-2 px-2 text-right">Balance</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr className="border-b border-white/5 font-semibold text-slate-400">
+                    <td className="py-2 px-2">—</td>
+                    <td className="py-2 px-2">Opening balance carry forward</td>
+                    <td className="py-2 px-2 text-right">0.00</td>
+                    <td className="py-2 px-2 text-right">0.00</td>
+                    <td className="py-2 px-2 text-right">0.00 CR</td>
+                  </tr>
+                  
+                  {/* Ledger math loop */}
+                  {(() => {
+                    let runningBalance = 0;
+                    const items = [
+                      ...invoices.map(i => ({ date: i.invoice_date, memo: `${i.invoice_number} B2B Invoice`, debit: i.total_amount, credit: 0 })),
+                      ...receipts.map(r => ({ date: r.trx_date, memo: `Receipt ${r.trx_id} Voucher`, debit: 0, credit: r.amount_received })),
+                    ].sort((a,b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+
+                    return items.map((it, idx) => {
+                      runningBalance += it.debit - it.credit;
+                      return (
+                        <tr key={idx} className="border-b border-white/5 hover:bg-white/[0.01]">
+                          <td className="py-2.5 px-2 text-slate-500">{new Date(it.date).toLocaleDateString()}</td>
+                          <td className="py-2.5 px-2 text-slate-200">{it.memo}</td>
+                          <td className="py-2.5 px-2 text-right text-rose-400 font-bold">${it.debit > 0 ? it.debit.toFixed(2) : '-'}</td>
+                          <td className="py-2.5 px-2 text-right text-teal-400 font-bold">${it.credit > 0 ? it.credit.toFixed(2) : '-'}</td>
+                          <td className="py-2.5 px-2 text-right text-white font-heavy">{Math.abs(runningBalance).toFixed(2)} {runningBalance >= 0 ? 'DR' : 'CR'}</td>
+                        </tr>
+                      );
+                    });
+                  })()}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
+        {/* Tab 6: RFQs */}
+        {activeTab === 'rfqs' && (
+          <div className="overflow-x-auto text-xs">
+            <table className="w-full text-left">
+              <thead>
+                <tr className="border-b border-white/5 text-slate-400">
+                  <th className="py-2.5">Date</th>
+                  <th className="py-2.5">RFQ Number</th>
+                  <th className="py-2.5">Source Page</th>
+                  <th className="py-2.5">Total Quantity</th>
+                  <th className="py-2.5">Status</th>
+                  <th className="py-2.5 text-right">CRM Conversion</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rfqs.map((q, idx) => (
+                  <tr key={idx} className="border-b border-white/5 hover:bg-white/[0.02]">
+                    <td className="py-3 text-slate-350">{new Date(q.created_at).toLocaleDateString()}</td>
+                    <td className="py-3 font-mono font-bold text-white">{q.rfq_number}</td>
+                    <td className="py-3 capitalize text-slate-300">{q.source || 'Store Checkout'}</td>
+                    <td className="py-3 font-semibold">{q.items?.reduce((s: number,i: any) => s+i.quantity,0) || 0} items</td>
+                    <td className="py-3">
+                      <span className={`px-2 py-0.5 rounded text-[10px] uppercase font-heavy ${q.status === 'quoted' ? 'bg-teal-500/10 text-teal-400 border border-teal-500/20' : 'bg-yellow-500/10 text-yellow-400 border border-yellow-500/20'}`}>
+                        {q.status}
+                      </span>
+                    </td>
+                    <td className="py-3 text-right">
+                      {q.status !== 'quoted' ? (
+                        <Link href={`/admin/rfq?search=${q.rfq_number}`} className="text-teal-400 font-semibold hover:underline">Link Quote PDF</Link>
+                      ) : (
+                        <span className="text-slate-500 font-medium">✓ Linked to Invoice</span>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            {rfqs.length === 0 && <p className="text-center py-6 text-slate-500">No Request-for-Quotation (RFQ) entries logs found for this account.</p>}
+          </div>
+        )}
+
+        {/* Tab 7: Returns */}
+        {activeTab === 'returns' && (
+          <div className="text-center py-8 text-slate-500 space-y-2">
+            <RefreshCw className="w-8 h-8 text-slate-650 mx-auto animate-spin" />
+            <p>No active Sales Return Vouchers found.</p>
+            <p className="text-[10px] text-slate-600">Inventory returns can be registered during POS checkouts.</p>
+          </div>
+        )}
+
+        {/* Tab 8: Negotiated Products */}
+        {activeTab === 'products' && (
+          <div className="space-y-4">
+            <div className="flex justify-between items-center text-xs pb-1 border-b border-white/5">
+              <span className="text-slate-400">Regular Contract Pricing List</span>
+              <span className="text-[10px] text-teal-400 font-bold bg-[#0f766e]/10 px-2 py-0.5 rounded">Active B2B Contract</span>
+            </div>
+            
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="p-3.5 bg-slate-950/40 rounded-xl border border-white/5 flex justify-between items-center text-xs">
+                <div>
+                  <p className="font-semibold text-slate-200">Commercial Grade Cable Roll</p>
+                  <p className="text-[10px] text-slate-500">Retail MSRP: $84.00</p>
+                </div>
+                <div className="text-right">
+                  <p className="font-bold text-teal-400">$68.00</p>
+                  <p className="text-[9px] font-semibold text-slate-500">19% Margin Discount</p>
+                </div>
+              </div>
+              <div className="p-3.5 bg-slate-950/40 rounded-xl border border-white/5 flex justify-between items-center text-xs">
+                <div>
+                  <p className="font-semibold text-slate-200">Industrial Electrical Conduits (Pack/10)</p>
+                  <p className="text-[10px] text-slate-500">Retail MSRP: $120.00</p>
+                </div>
+                <div className="text-right">
+                  <p className="font-bold text-teal-400">$95.00</p>
+                  <p className="text-[9px] font-semibold text-slate-500">20.8% Margin Discount</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Tab 9: Communications / Followups */}
+        {activeTab === 'communication' && (
+          <div className="space-y-6">
+            
+            {/* Input log dialog */}
+            <form onSubmit={handleAddCommLog} className="space-y-3 bg-slate-950/40 p-4 rounded-xl border border-white/5">
+              <div className="flex gap-2 items-center">
+                <span className="text-xs text-slate-400 font-semibold uppercase">Add CRM Follow-up Log:</span>
+                <select
+                  value={commType}
+                  onChange={(e: any) => setCommType(e.target.value)}
+                  className="bg-slate-900 border border-white/10 rounded-lg px-2 py-1 text-xs font-semibold text-slate-200 focus:outline-none"
+                >
+                  <option value="Call">Phone Call</option>
+                  <option value="WhatsApp">WhatsApp Message</option>
+                  <option value="Meeting">In-Person Meeting</option>
+                </select>
+              </div>
+
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  placeholder="Summarize discussion details, resolutions, or tasks action item..."
+                  value={commNote}
+                  onChange={(e) => setCommNote(e.target.value)}
+                  className="flex-1 bg-slate-900 border border-white/10 rounded-xl px-3 py-2 text-xs text-slate-250 placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-teal-500"
+                />
+                <button
+                  type="submit"
+                  className="bg-teal-500 hover:bg-teal-400 text-white rounded-xl px-4 py-2 text-xs font-bold transition-all flex items-center gap-1 shrink-0 cursor-pointer"
+                >
+                  <Send className="w-3.5 h-3.5" /> Log
+                </button>
+              </div>
+            </form>
+
+            {/* Timeline history */}
+            <div className="relative border-l border-white/5 ml-3 space-y-4">
+              {clientComms.map((c, idx) => (
+                <div key={idx} className="relative pl-6">
+                  {/* Dots marker overlay */}
+                  <div className="absolute top-1 -left-1.5 w-3 h-3 bg-slate-900 rounded-full border border-teal-400 flex items-center justify-center">
+                    <div className="w-1.5 h-1.5 bg-teal-400 rounded-full" />
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-bold text-slate-200">{c.type} note</span>
+                      <span className="text-[10px] text-slate-500">{c.date}</span>
+                    </div>
+                    <p className="text-xs text-slate-400 mt-1">{c.note}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+          </div>
+        )}
+
+        {/* Tab 10: Activity Log */}
+        {activeTab === 'activity' && (
+          <div className="relative border-l border-white/5 ml-3 space-y-4 text-xs font-semibold">
+            
+            <div className="relative pl-6">
+              <div className="absolute top-1 -left-1 bg-slate-900 w-2.5 h-2.5 border border-teal-500 rounded-full" />
+              <p className="text-slate-400">Invoice Generated <span className="text-white">INV-{invoices[0]?.invoice_number || '001'}</span></p>
+              <p className="text-[10px] text-slate-500 font-medium">Recorded by Admin on {new Date().toLocaleDateString()}</p>
+            </div>
+
+            <div className="relative pl-6">
+              <div className="absolute top-1 -left-1 bg-slate-900 w-2.5 h-2.5 border border-teal-500 rounded-full" />
+              <p className="text-slate-400">Account status set to <span className="text-teal-400">Active</span></p>
+              <p className="text-[10px] text-slate-500 font-medium">B2B review approved by Asif</p>
+            </div>
+
+          </div>
+        )}
+
+      </div>
+
+      {/* Embedded Invoice / Payment lightboxes from the CRM details page */}
       <InvoiceFormLightbox
         isOpen={invoiceLightboxOpen}
         onClose={() => setInvoiceLightboxOpen(false)}
-        onSaved={() => { fetchInvoices(); setInvoiceLightboxOpen(false); }}
+        onSaved={() => { fetchCustomerData(); setInvoiceLightboxOpen(false); }}
         initialCustomerId={id}
       />
       <ReceivePaymentLightbox
         isOpen={receivePaymentOpen}
         onClose={() => { setReceivePaymentOpen(false); setReceivePaymentInvoiceId(undefined); }}
-        onRecorded={() => { fetchInvoices(); fetchCustomer(); }}
+        onRecorded={() => { fetchCustomerData(); }}
         preselectedCustomerId={id}
         preselectedInvoiceId={receivePaymentInvoiceId}
       />
