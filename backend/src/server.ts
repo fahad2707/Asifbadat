@@ -60,7 +60,14 @@ const isProd = process.env.NODE_ENV === 'production';
 app.set('trust proxy', 1);
 
 // Default admin bootstrap only outside production (or when explicitly allowed).
+// An explicit ALLOW_DEFAULT_ADMIN=false also disables it in development, so
+// isolated verification runs can boot without seeding an admin. Previously
+// this early-return only fired in production, which meant dev startups
+// always attempted an Admin.create/write against the configured DB.
 async function ensureDefaultAdmin() {
+  if (String(process.env.ALLOW_DEFAULT_ADMIN || '').toLowerCase() === 'false') {
+    return;
+  }
   if (isProd && process.env.ALLOW_DEFAULT_ADMIN !== 'true') {
     return;
   }

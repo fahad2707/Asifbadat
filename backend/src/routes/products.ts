@@ -11,6 +11,18 @@ import {
   generateProductId,
   migrateProductIdAndSku,
 } from '../utils/productCodes';
+import { toPublicProduct, toStaffProduct } from '../utils/productProjection';
+
+/**
+ * Any response that contains internal product fields (cost_price, vendor_id,
+ * reorder_point, committed_quantity, ...) must not be served through shared
+ * caches. Storefront / guest responses are still cacheable by the default
+ * upstream policy.
+ */
+function markStaffPrivate(res: express.Response) {
+  res.set('Cache-Control', 'private, no-store');
+  res.set('Vary', 'Authorization');
+}
 
 const router = express.Router();
 
@@ -163,39 +175,14 @@ router.get('/', optionalAuthenticateAdmin, async (req: AuthRequest, res) => {
 
     const total = await Product.countDocuments(query);
 
-    // Format products (available = on-hand − committed)
-    const formattedProducts = products.map((product: any) => {
-      const onHand = product.stock_quantity ?? 0;
-      const committed = product.committed_quantity ?? 0;
-      return {
-        id: product._id.toString(),
-        name: product.name,
-        slug: product.slug,
-        product_id: product.product_id != null && String(product.product_id).trim() !== ''
-          ? String(product.product_id).trim()
-          : undefined,
-        sku: product.sku,
-        description: product.description,
-        product_type: product.product_type || 'inventory',
-        price: product.price,
-        cost_price: product.cost_price != null ? Number(product.cost_price) : null,
-        category_id: product.category_id?._id?.toString(),
-        category_name: product.category_id?.name,
-        category_slug: product.category_id?.slug,
-        sub_category_id: product.sub_category_id?._id?.toString(),
-        sub_category_name: product.sub_category_id?.name,
-        image_url: product.image_url,
-        barcode: product.barcode,
-        plu: product.plu,
-        stock_quantity: onHand,
-        committed_quantity: committed,
-        available_quantity: onHand - committed,
-        low_stock_threshold: product.low_stock_threshold,
-        tax_rate: product.tax_rate != null ? Number(product.tax_rate) : 0,
-        is_active: !isExplicitlyInactive(product.is_active),
-        created_at: product.created_at,
-      };
-    });
+    // Authorization decision is server-side ONLY. `isAdmin` came from
+    // `optionalAuthenticateAdmin` verifying the JWT above; we never trust
+    // a client-supplied flag such as `?includeCost=` or a body/isAdmin field.
+    const formattedProducts = isAdmin
+      ? products.map((p) => toStaffProduct(p as any))
+      : products.map((p) => toPublicProduct(p as any));
+
+    if (isAdmin) markStaffPrivate(res);
 
     res.json({
       products: formattedProducts,
@@ -246,6 +233,8 @@ router.get('/barcode/:barcode', authenticateAdmin, async (req, res) => {
       return res.status(404).json({ error: 'Product not found' });
     }
     const p = product as any;
+    // Admin-only route: response contains cost_price — must not be shared-cached.
+    markStaffPrivate(res);
     res.json({
       id: p._id.toString(),
       name: p.name,
@@ -267,28 +256,22 @@ router.get('/:id', optionalAuthenticateAdmin, async (req: AuthRequest, res) => {
   try {
     const product = await Product.findById(req.params.id)
       .populate('category_id', 'name slug')
+      .populate('sub_category_id', 'name slug')
       .lean();
 
     if (!product) {
       return res.status(404).json({ error: 'Product not found' });
     }
 
-    const p = product as any;
-    if (isExplicitlyInactive(p.is_active) && req.userRole !== 'admin') {
+    const isAdmin = req.userRole === 'admin';
+    if (isExplicitlyInactive((product as any).is_active) && !isAdmin) {
       return res.status(404).json({ error: 'Product not found' });
     }
-    const stockQty = p.stock_quantity ?? 0;
-    const committed = p.committed_quantity ?? 0;
-    res.json({
-      id: product._id.toString(),
-      ...product,
-      product_type: p.product_type || 'inventory',
-      committed_quantity: committed,
-      available_quantity: Math.max(0, stockQty - committed),
-      category_id: p.category_id?._id?.toString(),
-      category_name: p.category_id?.name,
-      category_slug: p.category_id?.slug,
-    });
+
+    // Explicit allowlist per role (no full-document spread).
+    const body = isAdmin ? toStaffProduct(product as any) : toPublicProduct(product as any);
+    if (isAdmin) markStaffPrivate(res);
+    res.json(body);
   } catch (error) {
     console.error('Get product error:', error);
     res.status(500).json({ error: 'Failed to fetch product' });
