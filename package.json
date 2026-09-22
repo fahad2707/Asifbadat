@@ -7,7 +7,7 @@
     "backend"
   ],
   "scripts": {
-    "dev": "concurrently \"cd backend && PATH=/opt/homebrew/bin:$PATH npm run dev\" \"cd frontend && PATH=/opt/homebrew/bin:$PATH npm run dev\"",
+    "dev": "concurrently \"npm run dev -w express-distributors-backend\" \"npm run dev -w express-distributors-frontend\"",
     "build": "npm run build --workspace=backend && npm run build --workspace=frontend",
     "start": "npm run start --workspace=backend",
     "install:all": "npm install && cd frontend && npm install && cd ../backend && npm install"
