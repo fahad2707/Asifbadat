@@ -14,6 +14,8 @@ import {
   isReceivableInvoiceType,
 } from './documentType';
 import {
+  formatMoney,
+  PaymentApplicationError,
   paymentStatusForAmounts,
   remainingInvoiceBalance,
   roundMoney,
@@ -68,4 +70,19 @@ export const derivedUnpaidReceivableMatch = {
 export function isUnpaidOnlyListEligible(doc: InvoiceFinancialInput): boolean {
   return isReceivableInvoiceType(doc.invoice_type)
     && invoiceFinancialState(doc).payment_status === 'unpaid';
+}
+
+/**
+ * PUT /invoices/:id — receivable invoices cannot be edited into amount_paid > total.
+ * Quotations are not AR; they skip this guard.
+ * Does not write amount_paid. payment_status is derived from the proposed amounts.
+ */
+export function assertReceivableInvoiceEdit(doc: InvoiceFinancialInput): InvoiceFinancialState {
+  const state = invoiceFinancialState(doc);
+  if (isReceivableInvoiceType(doc.invoice_type) && state.amount_paid > state.total) {
+    throw new PaymentApplicationError(
+      `Cannot update invoice total below the amount already paid. Amount paid: ${formatMoney(state.amount_paid)}. New total: ${formatMoney(state.total)}.`
+    );
+  }
+  return state;
 }

@@ -15,7 +15,11 @@ import {
   receivableInvoiceMatch,
   shouldAdjustInventoryForDocumentType,
 } from '../utils/documentType';
-import { derivedUnpaidReceivableMatch, invoiceFinancialState } from '../utils/invoiceFinancialState';
+import {
+  assertReceivableInvoiceEdit,
+  derivedUnpaidReceivableMatch,
+  invoiceFinancialState,
+} from '../utils/invoiceFinancialState';
 import { httpErrorFromPayment, paymentApplication } from '../services/paymentApplication';
 
 const router = express.Router();
@@ -378,6 +382,21 @@ router.put('/:id', authenticateAdmin, async (req: AuthRequest, res) => {
         price: Number(i.price) || 0,
         subtotal: Number(i.subtotal) || 0,
       }));
+      const subtotal_amount = items.reduce((s: number, i: any) => s + (i.subtotal || 0), 0);
+      const tax_amount = Number(body.tax_amount) ?? invoice.tax_amount;
+      const proposedTotal = subtotal_amount + tax_amount;
+
+      try {
+        assertReceivableInvoiceEdit({
+          invoice_type: invoice.invoice_type,
+          total_amount: proposedTotal,
+          amount_paid: invoice.amount_paid,
+        });
+      } catch (error) {
+        const mapped = httpErrorFromPayment(error);
+        if (mapped) return res.status(mapped.status).json(mapped.body);
+        throw error;
+      }
 
       // Task 05: quotations never restore or deduct stock on edit.
       if (shouldAdjustInventoryForDocumentType(invoice.invoice_type)) {
@@ -401,10 +420,9 @@ router.put('/:id', authenticateAdmin, async (req: AuthRequest, res) => {
       }
 
       invoice.items = items;
-      const subtotal_amount = items.reduce((s: number, i: any) => s + (i.subtotal || 0), 0);
       invoice.subtotal_amount = subtotal_amount;
-      invoice.tax_amount = Number(body.tax_amount) ?? invoice.tax_amount;
-      invoice.total_amount = subtotal_amount + invoice.tax_amount;
+      invoice.tax_amount = tax_amount;
+      invoice.total_amount = proposedTotal;
     }
     // Never overwrite amount_paid on edit. Status comes from the canonical helper.
     const state = invoiceFinancialState(invoice);
