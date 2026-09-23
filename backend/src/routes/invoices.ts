@@ -15,6 +15,7 @@ import {
   receivableInvoiceMatch,
   shouldAdjustInventoryForDocumentType,
 } from '../utils/documentType';
+import { derivedUnpaidReceivableMatch, invoiceFinancialState } from '../utils/invoiceFinancialState';
 import { httpErrorFromPayment, paymentApplication } from '../services/paymentApplication';
 
 const router = express.Router();
@@ -50,37 +51,41 @@ const transporter = nodemailer.createTransport({
   },
 });
 
-// Summary: total paid = sum(amount_paid), total unpaid = sum(total_amount - amount_paid) so timeline matches table
+// Summary: receivable invoices only. Totals/status/overdue come from invoiceFinancialState.
 router.get('/summary', authenticateAdmin, async (_req, res) => {
   try {
     const now = new Date();
     const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
-    const unpaidGroup = { $group: { _id: null as unknown, total: { $sum: { $subtract: ['$total_amount', { $ifNull: ['$amount_paid', 0] }] } } } };
-    const arOnly = receivableInvoiceMatch;
-    const [paidResult, unpaidResult, overdueResult, paidCountResult, unpaidCountResult, overdueCountResult, recentlyPaidResult] = await Promise.all([
-      Invoice.aggregate([{ $match: arOnly }, { $group: { _id: null, total: { $sum: { $ifNull: ['$amount_paid', 0] } } } }]),
-      Invoice.aggregate([{ $match: arOnly }, { $project: { balance: { $subtract: ['$total_amount', { $ifNull: ['$amount_paid', 0] }] } } }, { $match: { balance: { $gt: 0 } } }, { $group: { _id: null, total: { $sum: '$balance' } } }]),
-      Invoice.aggregate([{ $match: { ...arOnly, due_date: { $lt: now } } }, { $project: { balance: { $subtract: ['$total_amount', { $ifNull: ['$amount_paid', 0] }] } } }, { $match: { balance: { $gt: 0 } } }, { $group: { _id: null, total: { $sum: '$balance' } } }]),
-      Invoice.countDocuments({ ...arOnly, $expr: { $gte: [{ $ifNull: ['$amount_paid', 0] }, '$total_amount'] } }),
-      Invoice.countDocuments({ ...arOnly, $expr: { $lt: [{ $ifNull: ['$amount_paid', 0] }, '$total_amount'] } }),
-      Invoice.countDocuments({ ...arOnly, due_date: { $lt: now }, $expr: { $lt: [{ $ifNull: ['$amount_paid', 0] }, '$total_amount'] } }),
-      Invoice.aggregate([{ $match: { ...arOnly, updated_at: { $gte: thirtyDaysAgo } } }, { $group: { _id: null, total: { $sum: { $ifNull: ['$amount_paid', 0] } } } }]),
-    ]);
-    const totalPaid = paidResult[0]?.total ?? 0;
-    const totalUnpaid = unpaidResult[0]?.total ?? 0;
-    const overdueTotal = overdueResult[0]?.total ?? 0;
-    const openTotal = totalUnpaid;
-    const openCount = unpaidCountResult ?? 0;
-    const overdueCount = overdueCountResult ?? 0;
-    const paidCount = paidCountResult ?? 0;
-    const recentlyPaidTotal = recentlyPaidResult[0]?.total ?? 0;
+    const docs = await Invoice.find(receivableInvoiceMatch).lean();
+    let totalPaid = 0;
+    let totalUnpaid = 0;
+    let overdueTotal = 0;
+    let paidCount = 0;
+    let unpaidCount = 0;
+    let overdueCount = 0;
+    let recentlyPaidTotal = 0;
+    for (const doc of docs) {
+      const state = invoiceFinancialState(doc, now);
+      totalPaid += state.amount_paid;
+      if (state.balance_due > 0) totalUnpaid += state.balance_due;
+      if (state.overdue) {
+        overdueTotal += state.balance_due;
+        overdueCount += 1;
+      }
+      if (state.payment_status === 'paid') paidCount += 1;
+      else unpaidCount += 1;
+      const updatedAt = (doc as { updated_at?: Date }).updated_at;
+      if (updatedAt && new Date(updatedAt) >= thirtyDaysAgo) {
+        recentlyPaidTotal += state.amount_paid;
+      }
+    }
     res.json({
       totalPaid,
       totalUnpaid,
       overdueTotal,
       overdueCount,
-      openTotal,
-      openCount,
+      openTotal: totalUnpaid,
+      openCount: unpaidCount,
       paidCount,
       recentlyPaidTotal,
     });
@@ -112,9 +117,7 @@ router.get('/', authenticateAdmin, async (req: AuthRequest, res) => {
       query.invoice_type = docType;
     }
     if (unpaid_only === 'true' || unpaid_only === '1') {
-      query.payment_status = 'unpaid';
-      // Payment/AR selection: quotations are never open receivables.
-      query.invoice_type = DOCUMENT_TYPE_INVOICE;
+      Object.assign(query, derivedUnpaidReceivableMatch);
     }
 
     const invoices = await Invoice.find(query)
@@ -126,25 +129,28 @@ router.get('/', authenticateAdmin, async (req: AuthRequest, res) => {
     const total = await Invoice.countDocuments(query);
 
     res.json(
-      invoices.map((invoice: any) => ({
-        id: invoice._id.toString(),
-        invoice_number: invoice.invoice_number,
-        invoice_type: invoice.invoice_type,
-        customer_id: invoice.customer_id?.toString(),
-        customer_name: invoice.customer_name,
-        customer_phone: invoice.customer_phone,
-        customer_email: invoice.customer_email,
-        customer_address: invoice.customer_address,
-        total_amount: invoice.total_amount,
-        amount_paid: invoice.amount_paid ?? 0,
-        tax_amount: invoice.tax_amount || 0,
-        payment_method: invoice.payment_method,
-        payment_status: invoice.payment_status,
-        invoice_date: invoice.invoice_date,
-        due_date: invoice.due_date,
-        created_at: invoice.created_at,
-        items: invoice.items || [],
-      }))
+      invoices.map((invoice: any) => {
+        const state = invoiceFinancialState(invoice);
+        return {
+          id: invoice._id.toString(),
+          invoice_number: invoice.invoice_number,
+          invoice_type: invoice.invoice_type,
+          customer_id: invoice.customer_id?.toString(),
+          customer_name: invoice.customer_name,
+          customer_phone: invoice.customer_phone,
+          customer_email: invoice.customer_email,
+          customer_address: invoice.customer_address,
+          total_amount: state.total,
+          amount_paid: state.amount_paid,
+          tax_amount: invoice.tax_amount || 0,
+          payment_method: invoice.payment_method,
+          payment_status: state.payment_status,
+          invoice_date: invoice.invoice_date,
+          due_date: invoice.due_date,
+          created_at: invoice.created_at,
+          items: invoice.items || [],
+        };
+      })
     );
   } catch (error) {
     console.error('Get invoices error:', error);
@@ -319,6 +325,7 @@ router.get('/:id', authenticateAdmin, async (req: AuthRequest, res) => {
     }
 
     const doc = invoice as any;
+    const state = invoiceFinancialState(doc);
     res.json({
       id: doc._id.toString(),
       invoice_number: doc.invoice_number,
@@ -331,12 +338,12 @@ router.get('/:id', authenticateAdmin, async (req: AuthRequest, res) => {
       invoice_type: doc.invoice_type,
       invoice_date: doc.invoice_date,
       due_date: doc.due_date,
-      total_amount: doc.total_amount,
+      total_amount: state.total,
       subtotal_amount: doc.subtotal_amount,
       tax_amount: doc.tax_amount,
-      amount_paid: doc.amount_paid ?? 0,
+      amount_paid: state.amount_paid,
       terms: doc.terms,
-      payment_status: doc.payment_status,
+      payment_status: state.payment_status,
       items: doc.items || [],
       created_at: doc.created_at,
       updated_at: doc.updated_at,
@@ -399,10 +406,9 @@ router.put('/:id', authenticateAdmin, async (req: AuthRequest, res) => {
       invoice.tax_amount = Number(body.tax_amount) ?? invoice.tax_amount;
       invoice.total_amount = subtotal_amount + invoice.tax_amount;
     }
-    // Never overwrite amount_paid on edit. Recompute payment_status from actual amount_paid vs total.
-    const paid = invoice.amount_paid ?? 0;
-    const total = invoice.total_amount ?? 0;
-    invoice.payment_status = paid >= total ? 'paid' : 'unpaid';
+    // Never overwrite amount_paid on edit. Status comes from the canonical helper.
+    const state = invoiceFinancialState(invoice);
+    invoice.payment_status = state.payment_status;
     await invoice.save();
 
     if (invoice.customer_id && invoice.items?.length) {

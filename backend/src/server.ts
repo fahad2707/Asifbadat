@@ -53,17 +53,11 @@ process.on('uncaughtException', (err) => {
   process.exit(1);
 });
 
-const app = express();
 const PORT = process.env.PORT || 5001;
 const isProd = process.env.NODE_ENV === 'production';
 
-app.set('trust proxy', 1);
-
 // Default admin bootstrap only outside production (or when explicitly allowed).
-// An explicit ALLOW_DEFAULT_ADMIN=false also disables it in development, so
-// isolated verification runs can boot without seeding an admin. Previously
-// this early-return only fired in production, which meant dev startups
-// always attempted an Admin.create/write against the configured DB.
+// Used by start() only — createApp() does not write to MongoDB.
 async function ensureDefaultAdmin() {
   if (String(process.env.ALLOW_DEFAULT_ADMIN || '').toLowerCase() === 'false') {
     return;
@@ -86,6 +80,10 @@ async function ensureDefaultAdmin() {
     console.error('Could not ensure default admin:', e);
   }
 }
+
+export function createApp() {
+  const app = express();
+  app.set('trust proxy', 1);
 
 // Security middleware – disable cross-origin headers that block API calls from frontend on different origin (e.g. Render)
 app.use(helmet({
@@ -205,10 +203,15 @@ app.use((err: any, req: express.Request, res: express.Response, next: express.Ne
   });
 });
 
-// 404 handler
-app.use((req, res) => {
-  res.status(404).json({ error: 'Route not found' });
-});
+  // 404 handler
+  app.use((req, res) => {
+    res.status(404).json({ error: 'Route not found' });
+  });
+
+  return app;
+}
+
+export const app = createApp();
 
 let server: ReturnType<typeof app.listen> | null = null;
 
@@ -226,12 +229,21 @@ async function start() {
   });
 }
 
-start();
+function isDirectServerStart(): boolean {
+  const entry = process.argv[1] || '';
+  return /(?:^|[\\/])server\.(ts|js)$/.test(entry);
+}
+
+if (isDirectServerStart()) {
+  start();
+}
 
 function shutdown(signal: string) {
   console.log(`\n${signal} received, shutting down gracefully...`);
   if (server) server.close(() => process.exit(0));
   setTimeout(() => process.exit(0), 5000);
 }
-process.on('SIGINT', () => shutdown('SIGINT'));
-process.on('SIGTERM', () => shutdown('SIGTERM'));
+if (isDirectServerStart()) {
+  process.on('SIGINT', () => shutdown('SIGINT'));
+  process.on('SIGTERM', () => shutdown('SIGTERM'));
+}
