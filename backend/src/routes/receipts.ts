@@ -122,29 +122,61 @@ router.get('/generate-id', authenticateAdmin, (req, res) => {
   res.json({ trx_id: generateTrxId() });
 });
 
-// Update receipt
+// Update receipt. Invoice-applied rows adjust Invoice.amount_paid by the amount delta.
 router.put('/:id', authenticateAdmin, async (req: AuthRequest, res) => {
   try {
-    const receipt = await Receipt.findByIdAndUpdate(
-      req.params.id,
-      { $set: req.body },
-      { new: true }
-    ).lean();
-    if (!receipt) return res.status(404).json({ error: 'Receipt not found' });
-    res.json(receipt);
+    const { trx_date, trx_id, customer_id, customer_name, bank_account_id, state, city, so_id, invoice_num, so_balance, pmt_mode, amount_received } = req.body || {};
+    const result = await paymentApplication.updateReceiptLifecycle(req.params.id, {
+      ...(amount_received !== undefined ? { amount_received: Number(amount_received) } : {}),
+      ...(invoice_num !== undefined ? { invoice_num } : {}),
+      ...(trx_date !== undefined ? { trx_date: new Date(trx_date) } : {}),
+      ...(trx_id !== undefined ? { trx_id } : {}),
+      ...(customer_name !== undefined ? { customer_name } : {}),
+      ...(pmt_mode !== undefined ? { pmt_mode } : {}),
+      ...(bank_account_id !== undefined ? { bank_account_id } : {}),
+      ...(customer_id !== undefined ? { customer_id } : {}),
+      ...(state !== undefined ? { state } : {}),
+      ...(city !== undefined ? { city } : {}),
+      ...(so_id !== undefined ? { so_id } : {}),
+      ...(so_balance !== undefined ? { so_balance: Number(so_balance) } : {}),
+    });
+    res.json({
+      id: result.receipt.id,
+      trx_id: result.receipt.trx_id,
+      invoice_num: result.receipt.invoice_num,
+      amount_received: result.receipt.amount_received,
+      ...(result.invoice
+        ? {
+            amount_paid: result.invoice.amount_paid,
+            payment_status: result.invoice.payment_status,
+            remaining_balance: result.invoice.total_amount - result.invoice.amount_paid,
+          }
+        : {}),
+    });
   } catch (error) {
+    const mapped = httpErrorFromPayment(error);
+    if (mapped) return res.status(mapped.status).json(mapped.body);
     console.error('Update receipt error:', error);
     res.status(500).json({ error: 'Failed to update receipt' });
   }
 });
 
-// Delete receipt
+// Delete receipt. Invoice-applied rows reverse Invoice.amount_paid first.
 router.delete('/:id', authenticateAdmin, async (req: AuthRequest, res) => {
   try {
-    const receipt = await Receipt.findByIdAndDelete(req.params.id);
-    if (!receipt) return res.status(404).json({ error: 'Receipt not found' });
-    res.json({ success: true });
+    const result = await paymentApplication.deleteReceiptLifecycle(req.params.id);
+    res.json({
+      success: true,
+      ...(result.invoice
+        ? {
+            amount_paid: result.invoice.amount_paid,
+            payment_status: result.invoice.payment_status,
+          }
+        : {}),
+    });
   } catch (error) {
+    const mapped = httpErrorFromPayment(error);
+    if (mapped) return res.status(mapped.status).json(mapped.body);
     console.error('Delete receipt error:', error);
     res.status(500).json({ error: 'Failed to delete receipt' });
   }

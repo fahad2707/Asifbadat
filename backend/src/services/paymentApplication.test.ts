@@ -44,19 +44,25 @@ function memoryStore(seed: InvoiceSnapshot[]) {
       }
       return null;
     },
+    async findReceiptById(id) {
+      return receipts.find((r) => r.id === id) || null;
+    },
     async findReceiptByTrxId(trxId) {
       return receipts.find((r) => r.trx_id === trxId) || null;
     },
     async applyInvoicePayment(invoiceId, amount, paymentStatus) {
+      return store.adjustInvoicePaid(invoiceId, amount, paymentStatus);
+    },
+    async adjustInvoicePaid(invoiceId, delta, paymentStatus) {
       if (failNextApply) {
         failNextApply = false;
         return null;
       }
       const inv = invoices.get(invoiceId);
       if (!inv) return null;
-      const remaining = remainingInvoiceBalance(inv.total_amount, inv.amount_paid);
-      if (amount > remaining) return null;
-      inv.amount_paid = Math.round((inv.amount_paid + amount) * 100) / 100;
+      const next = Math.round((inv.amount_paid + delta) * 100) / 100;
+      if (next < 0 || next > remainingInvoiceBalance(inv.total_amount, 0)) return null;
+      inv.amount_paid = next;
       inv.payment_status = paymentStatus;
       return { ...inv };
     },
@@ -71,9 +77,21 @@ function memoryStore(seed: InvoiceSnapshot[]) {
       receipts.push(receipt);
       return { ...receipt };
     },
+    async updateReceipt(id, patch) {
+      const receipt = receipts.find((r) => r.id === id);
+      if (!receipt) return null;
+      if (patch.amount_received !== undefined) receipt.amount_received = patch.amount_received;
+      if (patch.invoice_num !== undefined) receipt.invoice_num = patch.invoice_num;
+      if (patch.trx_id !== undefined) receipt.trx_id = patch.trx_id;
+      if (patch.pmt_mode !== undefined) receipt.pmt_mode = patch.pmt_mode;
+      if (patch.customer_name !== undefined) receipt.customer_name = patch.customer_name;
+      return { ...receipt };
+    },
     async deleteReceiptById(id) {
       const idx = receipts.findIndex((r) => r.id === id);
-      if (idx >= 0) receipts.splice(idx, 1);
+      if (idx < 0) return false;
+      receipts.splice(idx, 1);
+      return true;
     },
   };
 

@@ -78,6 +78,17 @@ export interface ReceiptSnapshot {
   trx_id: string;
   amount_received: number;
   invoice_num?: string;
+  pmt_mode?: string;
+  customer_name?: string;
+}
+
+/** Invoice-applied iff invoice_num is a non-empty string. Schema has no invoice_id. */
+export function isInvoiceAppliedReceipt(receipt: { invoice_num?: unknown }): boolean {
+  return Boolean(String(receipt.invoice_num ?? '').trim());
+}
+
+export function receiptInvoiceNumber(receipt: { invoice_num?: unknown }): string {
+  return String(receipt.invoice_num ?? '').trim();
 }
 
 export interface ApplyPaymentInput {
@@ -110,11 +121,28 @@ export interface CustomerPaymentInput {
   trx_id?: string;
 }
 
+export interface ReceiptPatch {
+  amount_received?: number;
+  invoice_num?: string;
+  trx_id?: string;
+  trx_date?: Date;
+  customer_name?: string;
+  pmt_mode?: string;
+  bank_account_id?: string | null;
+  customer_id?: string | null;
+  state?: string;
+  city?: string;
+  so_id?: string;
+  so_balance?: number;
+}
+
 export interface PaymentApplicationStore {
   findInvoiceById(id: string): Promise<InvoiceSnapshot | null>;
   findInvoiceByNumber(num: string): Promise<InvoiceSnapshot | null>;
+  findReceiptById(id: string): Promise<ReceiptSnapshot | null>;
   findReceiptByTrxId(trxId: string): Promise<{ trx_id: string } | null>;
   applyInvoicePayment(invoiceId: string, amount: number, paymentStatus: 'paid' | 'unpaid'): Promise<InvoiceSnapshot | null>;
+  adjustInvoicePaid(invoiceId: string, delta: number, paymentStatus: 'paid' | 'unpaid'): Promise<InvoiceSnapshot | null>;
   createReceipt(doc: {
     trx_id: string;
     trx_date: Date;
@@ -125,7 +153,8 @@ export interface PaymentApplicationStore {
     pmt_mode: string;
     amount_received: number;
   }): Promise<ReceiptSnapshot>;
-  deleteReceiptById(id: string): Promise<void>;
+  updateReceipt(id: string, patch: ReceiptPatch): Promise<ReceiptSnapshot | null>;
+  deleteReceiptById(id: string): Promise<boolean>;
 }
 
 function toInvoiceSnapshot(doc: any): InvoiceSnapshot {
@@ -141,6 +170,17 @@ function toInvoiceSnapshot(doc: any): InvoiceSnapshot {
   };
 }
 
+function toReceiptSnapshot(doc: any): ReceiptSnapshot {
+  return {
+    id: doc._id.toString(),
+    trx_id: doc.trx_id,
+    amount_received: Number(doc.amount_received) || 0,
+    invoice_num: doc.invoice_num || '',
+    pmt_mode: doc.pmt_mode,
+    customer_name: doc.customer_name,
+  };
+}
+
 export const mongoosePaymentStore: PaymentApplicationStore = {
   async findInvoiceById(id) {
     if (!mongoose.Types.ObjectId.isValid(id)) return null;
@@ -151,22 +191,35 @@ export const mongoosePaymentStore: PaymentApplicationStore = {
     const doc = await Invoice.findOne({ invoice_number: num }).lean();
     return doc ? toInvoiceSnapshot(doc) : null;
   },
+  async findReceiptById(id) {
+    if (!mongoose.Types.ObjectId.isValid(id)) return null;
+    const doc = await Receipt.findById(id).lean();
+    return doc ? toReceiptSnapshot(doc) : null;
+  },
   async findReceiptByTrxId(trxId) {
     const doc = await Receipt.findOne({ trx_id: trxId }).select('trx_id').lean();
     return doc ? { trx_id: (doc as any).trx_id } : null;
   },
   async applyInvoicePayment(invoiceId, amount, paymentStatus) {
+    return mongoosePaymentStore.adjustInvoicePaid(invoiceId, amount, paymentStatus);
+  },
+  async adjustInvoicePaid(invoiceId, delta, paymentStatus) {
     const updated = await Invoice.findOneAndUpdate(
       {
         _id: invoiceId,
         $expr: {
-          $lte: [
-            amount,
-            { $subtract: [{ $ifNull: ['$total_amount', 0] }, { $ifNull: ['$amount_paid', 0] }] },
+          $and: [
+            { $gte: [{ $add: [{ $ifNull: ['$amount_paid', 0] }, delta] }, 0] },
+            {
+              $lte: [
+                { $add: [{ $ifNull: ['$amount_paid', 0] }, delta] },
+                { $ifNull: ['$total_amount', 0] },
+              ],
+            },
           ],
         },
       },
-      { $inc: { amount_paid: amount }, $set: { payment_status: paymentStatus } },
+      { $inc: { amount_paid: delta }, $set: { payment_status: paymentStatus } },
       { new: true }
     ).lean();
     return updated ? toInvoiceSnapshot(updated) : null;
@@ -185,15 +238,38 @@ export const mongoosePaymentStore: PaymentApplicationStore = {
         : {}),
     });
     const r = created.toObject() as any;
-    return {
-      id: r._id.toString(),
-      trx_id: r.trx_id,
-      amount_received: r.amount_received,
-      invoice_num: r.invoice_num,
-    };
+    return toReceiptSnapshot(r);
+  },
+  async updateReceipt(id, patch) {
+    if (!mongoose.Types.ObjectId.isValid(id)) return null;
+    const $set: Record<string, unknown> = {};
+    if (patch.amount_received !== undefined) $set.amount_received = patch.amount_received;
+    if (patch.invoice_num !== undefined) $set.invoice_num = patch.invoice_num;
+    if (patch.trx_id !== undefined) $set.trx_id = patch.trx_id;
+    if (patch.trx_date !== undefined) $set.trx_date = patch.trx_date;
+    if (patch.customer_name !== undefined) $set.customer_name = patch.customer_name;
+    if (patch.pmt_mode !== undefined) $set.pmt_mode = patch.pmt_mode;
+    if (patch.bank_account_id !== undefined) {
+      $set.bank_account_id =
+        patch.bank_account_id && mongoose.Types.ObjectId.isValid(patch.bank_account_id)
+          ? patch.bank_account_id
+          : null;
+    }
+    if (patch.customer_id !== undefined) {
+      $set.customer_id =
+        patch.customer_id && mongoose.Types.ObjectId.isValid(patch.customer_id) ? patch.customer_id : null;
+    }
+    if (patch.state !== undefined) $set.state = patch.state;
+    if (patch.city !== undefined) $set.city = patch.city;
+    if (patch.so_id !== undefined) $set.so_id = patch.so_id;
+    if (patch.so_balance !== undefined) $set.so_balance = patch.so_balance;
+    const updated = await Receipt.findByIdAndUpdate(id, { $set }, { new: true }).lean();
+    return updated ? toReceiptSnapshot(updated) : null;
   },
   async deleteReceiptById(id) {
-    await Receipt.findByIdAndDelete(id);
+    if (!mongoose.Types.ObjectId.isValid(id)) return false;
+    const deleted = await Receipt.findByIdAndDelete(id);
+    return Boolean(deleted);
   },
 };
 
@@ -362,7 +438,206 @@ export function createPaymentApplicationService(store: PaymentApplicationStore) 
     };
   }
 
-  return { applyPaymentToInvoice, applyCustomerPayment };
+  async function loadAppliedInvoice(receipt: ReceiptSnapshot): Promise<InvoiceSnapshot> {
+    const number = receiptInvoiceNumber(receipt);
+    const invoice = await store.findInvoiceByNumber(number);
+    if (!invoice) {
+      throw new PaymentApplicationError(
+        `Cannot modify an invoice-applied receipt without updating its invoice payment. Invoice ${number} was not found.`,
+        400
+      );
+    }
+    if (isQuotationType(invoice.invoice_type)) {
+      throw new PaymentApplicationError(quotationPaymentRejection([invoice.invoice_number]).error);
+    }
+    if (!isReceivableInvoiceType(invoice.invoice_type)) {
+      throw new PaymentApplicationError(`Only invoices can receive payment: ${invoice.invoice_number}`);
+    }
+    return invoice;
+  }
+
+  function rejectReassignment(currentNum: string, nextRef?: string) {
+    if (nextRef === undefined) return;
+    const next = String(nextRef).trim();
+    if (next !== currentNum) {
+      throw new PaymentApplicationError('Cannot reassign an invoice payment receipt to another invoice.');
+    }
+  }
+
+  function nonFinancialPatch(patch: ReceiptPatch): ReceiptPatch {
+    const out: ReceiptPatch = {};
+    if (patch.trx_date !== undefined) out.trx_date = patch.trx_date;
+    if (patch.trx_id !== undefined) out.trx_id = patch.trx_id;
+    if (patch.customer_name !== undefined) out.customer_name = patch.customer_name;
+    if (patch.pmt_mode !== undefined) out.pmt_mode = patch.pmt_mode;
+    if (patch.bank_account_id !== undefined) out.bank_account_id = patch.bank_account_id;
+    if (patch.customer_id !== undefined) out.customer_id = patch.customer_id;
+    if (patch.state !== undefined) out.state = patch.state;
+    if (patch.city !== undefined) out.city = patch.city;
+    if (patch.so_id !== undefined) out.so_id = patch.so_id;
+    if (patch.so_balance !== undefined) out.so_balance = patch.so_balance;
+    return out;
+  }
+
+  /**
+   * PUT /receipts/:id
+   * Standalone receipts update in place (no invoice writes).
+   * Invoice-applied receipts adjust Invoice.amount_paid by the amount delta.
+   * Reassignment of invoice_num is rejected.
+   */
+  async function updateReceiptLifecycle(receiptId: string, patch: ReceiptPatch): Promise<{
+    receipt: ReceiptSnapshot;
+    invoice?: InvoiceSnapshot;
+  }> {
+    const receipt = await store.findReceiptById(receiptId);
+    if (!receipt) {
+      throw new PaymentApplicationError('Receipt not found', 404);
+    }
+
+    const incomingInvoiceRef =
+      patch.invoice_num !== undefined ? String(patch.invoice_num).trim() : undefined;
+
+    if (!isInvoiceAppliedReceipt(receipt)) {
+      if (incomingInvoiceRef) {
+        throw new PaymentApplicationError('Cannot reassign an invoice payment receipt to another invoice.');
+      }
+      const updated = await store.updateReceipt(receiptId, {
+        ...nonFinancialPatch(patch),
+        ...(patch.amount_received !== undefined ? { amount_received: roundMoney(patch.amount_received) } : {}),
+        invoice_num: '',
+      });
+      if (!updated) {
+        throw new PaymentApplicationError('Receipt not found', 404);
+      }
+      return { receipt: updated };
+    }
+
+    rejectReassignment(receiptInvoiceNumber(receipt), incomingInvoiceRef);
+
+    const invoice = await loadAppliedInvoice(receipt);
+    const cosmetic = nonFinancialPatch(patch);
+
+    if (patch.amount_received === undefined) {
+      const updated = await store.updateReceipt(receiptId, cosmetic);
+      if (!updated) {
+        throw new PaymentApplicationError('Receipt not found', 404);
+      }
+      return { receipt: updated, invoice };
+    }
+
+    const newAmount = roundMoney(patch.amount_received);
+    if (!(newAmount > 0)) {
+      throw new PaymentApplicationError('Payment amount must be greater than zero.');
+    }
+
+    const oldAmount = roundMoney(receipt.amount_received);
+    const delta = roundMoney(newAmount - oldAmount);
+    if (delta === 0) {
+      const updated = await store.updateReceipt(receiptId, { ...cosmetic, amount_received: newAmount });
+      if (!updated) {
+        throw new PaymentApplicationError('Receipt not found', 404);
+      }
+      return { receipt: updated, invoice };
+    }
+
+    const nextPaid = roundMoney(invoice.amount_paid + delta);
+    if (nextPaid < 0) {
+      throw new PaymentApplicationError(
+        `Cannot modify an invoice-applied receipt without updating its invoice payment. Invoice amount_paid cannot be negative.`
+      );
+    }
+    if (nextPaid > roundMoney(invoice.total_amount)) {
+      throw new PaymentApplicationError(
+        `Payment amount exceeds the remaining invoice balance. Remaining balance: ${formatMoney(remainingInvoiceBalance(invoice.total_amount, invoice.amount_paid))}. Attempted payment: ${formatMoney(newAmount)}.`
+      );
+    }
+
+    const paymentStatus = paymentStatusForAmounts(invoice.total_amount, nextPaid);
+    const adjusted = await store.adjustInvoicePaid(invoice.id, delta, paymentStatus);
+    if (!adjusted) {
+      throw new PaymentApplicationError(
+        'Cannot modify an invoice-applied receipt without updating its invoice payment.'
+      );
+    }
+
+    let updatedReceipt: ReceiptSnapshot | null = null;
+    try {
+      updatedReceipt = await store.updateReceipt(receiptId, {
+        ...cosmetic,
+        amount_received: newAmount,
+        invoice_num: receiptInvoiceNumber(receipt),
+      });
+    } catch (err) {
+      await store.adjustInvoicePaid(invoice.id, -delta, paymentStatusForAmounts(invoice.total_amount, invoice.amount_paid));
+      throw err;
+    }
+
+    if (!updatedReceipt) {
+      await store.adjustInvoicePaid(invoice.id, -delta, paymentStatusForAmounts(invoice.total_amount, invoice.amount_paid));
+      throw new PaymentApplicationError('Receipt not found', 404);
+    }
+
+    return { receipt: updatedReceipt, invoice: adjusted };
+  }
+
+  /**
+   * DELETE /receipts/:id
+   * Standalone: delete only.
+   * Invoice-applied: reverse amount_paid, then delete. If delete fails, re-apply the amount.
+   */
+  async function deleteReceiptLifecycle(receiptId: string): Promise<{ deleted: true; invoice?: InvoiceSnapshot }> {
+    const receipt = await store.findReceiptById(receiptId);
+    if (!receipt) {
+      throw new PaymentApplicationError('Receipt not found', 404);
+    }
+
+    if (!isInvoiceAppliedReceipt(receipt)) {
+      const deleted = await store.deleteReceiptById(receiptId);
+      if (!deleted) {
+        throw new PaymentApplicationError('Receipt not found', 404);
+      }
+      return { deleted: true };
+    }
+
+    const invoice = await loadAppliedInvoice(receipt);
+    const amount = roundMoney(receipt.amount_received);
+    if (roundMoney(invoice.amount_paid) < amount) {
+      throw new PaymentApplicationError(
+        'Cannot modify an invoice-applied receipt without updating its invoice payment. Invoice amount_paid is less than this receipt.'
+      );
+    }
+
+    const nextPaid = roundMoney(invoice.amount_paid - amount);
+    const paymentStatus = paymentStatusForAmounts(invoice.total_amount, nextPaid);
+    const adjusted = await store.adjustInvoicePaid(invoice.id, -amount, paymentStatus);
+    if (!adjusted) {
+      throw new PaymentApplicationError(
+        'Cannot modify an invoice-applied receipt without updating its invoice payment.'
+      );
+    }
+
+    let deleted = false;
+    try {
+      deleted = await store.deleteReceiptById(receiptId);
+    } catch (err) {
+      await store.adjustInvoicePaid(invoice.id, amount, paymentStatusForAmounts(invoice.total_amount, invoice.amount_paid));
+      throw err;
+    }
+
+    if (!deleted) {
+      await store.adjustInvoicePaid(invoice.id, amount, paymentStatusForAmounts(invoice.total_amount, invoice.amount_paid));
+      throw new PaymentApplicationError('Receipt not found', 404);
+    }
+
+    return { deleted: true, invoice: adjusted };
+  }
+
+  return {
+    applyPaymentToInvoice,
+    applyCustomerPayment,
+    updateReceiptLifecycle,
+    deleteReceiptLifecycle,
+  };
 }
 
 export const paymentApplication = createPaymentApplicationService(mongoosePaymentStore);
