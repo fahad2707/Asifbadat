@@ -126,11 +126,12 @@ export default function Customer360Page() {
     }
   }, [id]);
 
-  const openBalance = invoices
+  const saleInvoices = invoices.filter((i) => i.invoice_type !== 'quotation');
+  const openBalance = saleInvoices
     .filter((i) => (i.payment_status || '').toLowerCase() !== 'paid')
     .reduce((s, i) => s + ((i.total_amount || 0) - (i.amount_paid || 0)), 0);
 
-  const lifetimeSpent = invoices
+  const lifetimeSpent = saleInvoices
     .filter((i) => (i.payment_status || '').toLowerCase() === 'paid')
     .reduce((s, i) => s + (i.total_amount || 0), 0);
 
@@ -366,7 +367,7 @@ export default function Customer360Page() {
                 </tr>
               </thead>
               <tbody>
-                {invoices.map((inv, idx) => {
+                {saleInvoices.map((inv, idx) => {
                   const balance = inv.total_amount - (inv.amount_paid || 0);
                   return (
                     <tr key={idx} className="border-b border-white/5 hover:bg-white/[0.02]">

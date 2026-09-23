@@ -305,13 +305,15 @@ export default function InvoicesPage() {
                         >
                           <Edit2 className="w-3.5 h-3.5" />
                         </button>
-                        <button
-                          onClick={() => openReceivePayment(invoice)}
-                          className="p-1.5 text-emerald-450 hover:text-emerald-350 hover:bg-white/5 rounded-lg transition-all"
-                          title="Receive payment"
-                        >
-                          <DollarSign className="w-3.5 h-3.5" />
-                        </button>
+                        {invoice.invoice_type !== 'quotation' && (
+                          <button
+                            onClick={() => openReceivePayment(invoice)}
+                            className="p-1.5 text-emerald-450 hover:text-emerald-350 hover:bg-white/5 rounded-lg transition-all"
+                            title="Receive payment"
+                          >
+                            <DollarSign className="w-3.5 h-3.5" />
+                          </button>
+                        )}
                       </div>
                     </td>
                   </tr>

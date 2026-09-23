@@ -40,6 +40,7 @@ interface InvoiceSummary {
   total_amount: number;
   amount_paid?: number;
   payment_status: string;
+  invoice_type?: string;
 }
 
 interface InvoiceSummaryStats {
@@ -310,8 +311,9 @@ export default function CustomersPage() {
     router.push(`/admin/customers/${c.id}?newInvoice=1`);
   };
 
-  const detailPaid = detailInvoices.filter((i) => (i.payment_status || '').toLowerCase() === 'paid').reduce((s, i) => s + (i.total_amount || 0), 0);
-  const detailUnpaid = detailInvoices.filter((i) => (i.payment_status || '').toLowerCase() !== 'paid').reduce((s, i) => s + ((i.total_amount || 0) - (i.amount_paid || 0)), 0);
+  const detailSaleInvoices = detailInvoices.filter((i) => i.invoice_type !== 'quotation');
+  const detailPaid = detailSaleInvoices.filter((i) => (i.payment_status || '').toLowerCase() === 'paid').reduce((s, i) => s + (i.total_amount || 0), 0);
+  const detailUnpaid = detailSaleInvoices.filter((i) => (i.payment_status || '').toLowerCase() !== 'paid').reduce((s, i) => s + ((i.total_amount || 0) - (i.amount_paid || 0)), 0);
 
   const getOpenBalance = (customerId: string) => balances[customerId] ?? 0;
 

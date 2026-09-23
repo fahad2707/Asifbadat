@@ -10,6 +10,14 @@ import { authenticateAdmin, AuthRequest } from '../middleware/auth';
 import nodemailer from 'nodemailer';
 import { buildInvoicePdfBuffer } from '../utils/invoicePdfLayout';
 import { sendPdfResponse } from '../utils/pdfHelpers';
+import {
+  DOCUMENT_TYPE_INVOICE,
+  DOCUMENT_TYPE_QUOTATION,
+  isQuotationType,
+  quotationPaymentRejection,
+  receivableInvoiceMatch,
+  shouldAdjustInventoryForDocumentType,
+} from '../utils/documentType';
 
 const router = express.Router();
 
@@ -50,14 +58,15 @@ router.get('/summary', authenticateAdmin, async (_req, res) => {
     const now = new Date();
     const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
     const unpaidGroup = { $group: { _id: null as unknown, total: { $sum: { $subtract: ['$total_amount', { $ifNull: ['$amount_paid', 0] }] } } } };
+    const arOnly = receivableInvoiceMatch;
     const [paidResult, unpaidResult, overdueResult, paidCountResult, unpaidCountResult, overdueCountResult, recentlyPaidResult] = await Promise.all([
-      Invoice.aggregate([{ $group: { _id: null, total: { $sum: { $ifNull: ['$amount_paid', 0] } } } }]),
-      Invoice.aggregate([{ $project: { balance: { $subtract: ['$total_amount', { $ifNull: ['$amount_paid', 0] }] } } }, { $match: { balance: { $gt: 0 } } }, { $group: { _id: null, total: { $sum: '$balance' } } }]),
-      Invoice.aggregate([{ $match: { due_date: { $lt: now } } }, { $project: { balance: { $subtract: ['$total_amount', { $ifNull: ['$amount_paid', 0] }] } } }, { $match: { balance: { $gt: 0 } } }, { $group: { _id: null, total: { $sum: '$balance' } } }]),
-      Invoice.countDocuments({ $expr: { $gte: [{ $ifNull: ['$amount_paid', 0] }, '$total_amount'] } }),
-      Invoice.countDocuments({ $expr: { $lt: [{ $ifNull: ['$amount_paid', 0] }, '$total_amount'] } }),
-      Invoice.countDocuments({ due_date: { $lt: now }, $expr: { $lt: [{ $ifNull: ['$amount_paid', 0] }, '$total_amount'] } }),
-      Invoice.aggregate([{ $match: { updated_at: { $gte: thirtyDaysAgo } } }, { $group: { _id: null, total: { $sum: { $ifNull: ['$amount_paid', 0] } } } }]),
+      Invoice.aggregate([{ $match: arOnly }, { $group: { _id: null, total: { $sum: { $ifNull: ['$amount_paid', 0] } } } }]),
+      Invoice.aggregate([{ $match: arOnly }, { $project: { balance: { $subtract: ['$total_amount', { $ifNull: ['$amount_paid', 0] }] } } }, { $match: { balance: { $gt: 0 } } }, { $group: { _id: null, total: { $sum: '$balance' } } }]),
+      Invoice.aggregate([{ $match: { ...arOnly, due_date: { $lt: now } } }, { $project: { balance: { $subtract: ['$total_amount', { $ifNull: ['$amount_paid', 0] }] } } }, { $match: { balance: { $gt: 0 } } }, { $group: { _id: null, total: { $sum: '$balance' } } }]),
+      Invoice.countDocuments({ ...arOnly, $expr: { $gte: [{ $ifNull: ['$amount_paid', 0] }, '$total_amount'] } }),
+      Invoice.countDocuments({ ...arOnly, $expr: { $lt: [{ $ifNull: ['$amount_paid', 0] }, '$total_amount'] } }),
+      Invoice.countDocuments({ ...arOnly, due_date: { $lt: now }, $expr: { $lt: [{ $ifNull: ['$amount_paid', 0] }, '$total_amount'] } }),
+      Invoice.aggregate([{ $match: { ...arOnly, updated_at: { $gte: thirtyDaysAgo } } }, { $group: { _id: null, total: { $sum: { $ifNull: ['$amount_paid', 0] } } } }]),
     ]);
     const totalPaid = paidResult[0]?.total ?? 0;
     const totalUnpaid = unpaidResult[0]?.total ?? 0;
@@ -101,11 +110,13 @@ router.get('/', authenticateAdmin, async (req: AuthRequest, res) => {
     if (customer_id && typeof customer_id === 'string') {
       query.customer_id = new mongoose.Types.ObjectId(customer_id);
     }
-    if (unpaid_only === 'true' || unpaid_only === '1') {
-      query.payment_status = 'unpaid';
-    }
     if (docType === 'invoice' || docType === 'quotation') {
       query.invoice_type = docType;
+    }
+    if (unpaid_only === 'true' || unpaid_only === '1') {
+      query.payment_status = 'unpaid';
+      // Payment/AR selection: quotations are never open receivables.
+      query.invoice_type = DOCUMENT_TYPE_INVOICE;
     }
 
     const invoices = await Invoice.find(query)
@@ -193,8 +204,8 @@ router.get('/customer-prices/:customerId', authenticateAdmin, async (req: AuthRe
 router.post('/', authenticateAdmin, async (req: AuthRequest, res) => {
   try {
     const body = req.body as any;
-    const docType = body.invoice_type === 'quotation' ? 'quotation' : 'invoice';
-    const invoice_number = body.invoice_number || (docType === 'quotation' ? await getNextQuotationNumber() : await getNextInvoiceNumber());
+    const docType = body.invoice_type === DOCUMENT_TYPE_QUOTATION ? DOCUMENT_TYPE_QUOTATION : DOCUMENT_TYPE_INVOICE;
+    const invoice_number = body.invoice_number || (docType === DOCUMENT_TYPE_QUOTATION ? await getNextQuotationNumber() : await getNextInvoiceNumber());
     const invoice_date = body.invoice_date ? new Date(body.invoice_date) : new Date();
     const due_date = body.due_date ? new Date(body.due_date) : invoice_date;
     const customer_id = body.customer_id ? new mongoose.Types.ObjectId(body.customer_id) : undefined;
@@ -210,16 +221,18 @@ router.post('/', authenticateAdmin, async (req: AuthRequest, res) => {
     const tax_amount = Number(body.tax_amount) || 0;
     const total_amount = subtotal_amount + tax_amount;
 
-    // Prevent negative stock: block when out of stock so inventory never goes below zero
-    for (const item of items) {
-      if (!item.product_id || (item.quantity || 0) <= 0) continue;
-      const product = await Product.findById(item.product_id);
-      if (!product) continue;
-      if ((product as any).product_type === 'service' || (product as any).product_type === 'non_inventory') continue;
-      const qty = Number(item.quantity) || 0;
-      const currentQty = (product as any).stock_quantity ?? 0;
-      if (currentQty - qty < 0) {
-        return res.status(400).json({ error: `Product "${product.name}" is out of stock. Please restock before invoicing.` });
+    // Task 05: quotations never reserve or deduct stock. Invoices keep the existing guard.
+    if (shouldAdjustInventoryForDocumentType(docType)) {
+      for (const item of items) {
+        if (!item.product_id || (item.quantity || 0) <= 0) continue;
+        const product = await Product.findById(item.product_id);
+        if (!product) continue;
+        if ((product as any).product_type === 'service' || (product as any).product_type === 'non_inventory') continue;
+        const qty = Number(item.quantity) || 0;
+        const currentQty = (product as any).stock_quantity ?? 0;
+        if (currentQty - qty < 0) {
+          return res.status(400).json({ error: `Product "${product.name}" is out of stock. Please restock before invoicing.` });
+        }
       }
     }
 
@@ -231,7 +244,7 @@ router.post('/', authenticateAdmin, async (req: AuthRequest, res) => {
       customer_email: body.customer_email,
       customer_address: body.customer_address,
       location_of_sale: body.location_of_sale || LOCATION_OF_SALE,
-      invoice_type: body.invoice_type || 'invoice',
+      invoice_type: docType,
       invoice_date,
       due_date,
       subtotal_amount,
@@ -242,14 +255,16 @@ router.post('/', authenticateAdmin, async (req: AuthRequest, res) => {
       payment_status: 'unpaid',
       items,
     });
-    // Decrement stock for inventory products (safe: we already validated non-negative above)
-    for (const item of items) {
-      if (!item.product_id || (item.quantity || 0) <= 0) continue;
-      const product = await Product.findById(item.product_id);
-      if (!product) continue;
-      if ((product as any).product_type === 'service' || (product as any).product_type === 'non_inventory') continue;
-      const qty = Number(item.quantity) || 0;
-      await Product.findByIdAndUpdate(item.product_id, { $inc: { stock_quantity: -qty } });
+    // Task 05: only invoices deduct inventory. Quotations are proposals.
+    if (shouldAdjustInventoryForDocumentType(docType)) {
+      for (const item of items) {
+        if (!item.product_id || (item.quantity || 0) <= 0) continue;
+        const product = await Product.findById(item.product_id);
+        if (!product) continue;
+        if ((product as any).product_type === 'service' || (product as any).product_type === 'non_inventory') continue;
+        const qty = Number(item.quantity) || 0;
+        await Product.findByIdAndUpdate(item.product_id, { $inc: { stock_quantity: -qty } });
+      }
     }
 
     await saveCustomerProductPrices(customer_id as any, items, inv._id, invoice_date);
@@ -342,7 +357,7 @@ router.put('/:id', authenticateAdmin, async (req: AuthRequest, res) => {
     if (!invoice) return res.status(404).json({ error: 'Invoice not found' });
 
     if (body.invoice_date !== undefined) invoice.invoice_date = new Date(body.invoice_date);
-    if (body.invoice_type !== undefined) invoice.invoice_type = body.invoice_type;
+    // Task 05: document type is immutable here. Conversion is a later explicit operation.
     if (body.customer_id !== undefined) invoice.customer_id = body.customer_id ? new mongoose.Types.ObjectId(body.customer_id) : undefined;
     if (body.customer_name !== undefined) invoice.customer_name = body.customer_name;
     if (body.customer_phone !== undefined) invoice.customer_phone = body.customer_phone;
@@ -359,24 +374,25 @@ router.put('/:id', authenticateAdmin, async (req: AuthRequest, res) => {
         subtotal: Number(i.subtotal) || 0,
       }));
 
-      // Return stock for old invoice items (inventory products only)
-      const oldItems = (invoice as any).items || [];
-      for (const item of oldItems) {
-        if (!item.product_id || (item.quantity || 0) <= 0) continue;
-        const product = await Product.findById(item.product_id).lean();
-        if (!product) continue;
-        const p = product as any;
-        if (p.product_type === 'service' || p.product_type === 'non_inventory') continue;
-        await Product.findByIdAndUpdate(item.product_id, { $inc: { stock_quantity: Number(item.quantity) || 0 } });
-      }
+      // Task 05: quotations never restore or deduct stock on edit.
+      if (shouldAdjustInventoryForDocumentType(invoice.invoice_type)) {
+        const oldItems = (invoice as any).items || [];
+        for (const item of oldItems) {
+          if (!item.product_id || (item.quantity || 0) <= 0) continue;
+          const product = await Product.findById(item.product_id).lean();
+          if (!product) continue;
+          const p = product as any;
+          if (p.product_type === 'service' || p.product_type === 'non_inventory') continue;
+          await Product.findByIdAndUpdate(item.product_id, { $inc: { stock_quantity: Number(item.quantity) || 0 } });
+        }
 
-      // Decrement stock for new items (allows negative stock)
-      for (const item of items) {
-        if (!item.product_id || (item.quantity || 0) <= 0) continue;
-        const product = await Product.findById(item.product_id);
-        if (!product) continue;
-        if ((product as any).product_type === 'service' || (product as any).product_type === 'non_inventory') continue;
-        await Product.findByIdAndUpdate(item.product_id, { $inc: { stock_quantity: -(Number(item.quantity) || 0) } });
+        for (const item of items) {
+          if (!item.product_id || (item.quantity || 0) <= 0) continue;
+          const product = await Product.findById(item.product_id);
+          if (!product) continue;
+          if ((product as any).product_type === 'service' || (product as any).product_type === 'non_inventory') continue;
+          await Product.findByIdAndUpdate(item.product_id, { $inc: { stock_quantity: -(Number(item.quantity) || 0) } });
+        }
       }
 
       invoice.items = items;
@@ -421,6 +437,18 @@ router.post('/receive-payment', authenticateAdmin, async (req: AuthRequest, res)
     };
     if (!allocations || !Array.isArray(allocations) || allocations.length === 0) {
       return res.status(400).json({ error: 'allocations (invoice_id, amount) required' });
+    }
+    const allocatedIds = allocations
+      .map((a) => a.invoice_id)
+      .filter((id): id is string => typeof id === 'string' && mongoose.Types.ObjectId.isValid(id));
+    if (allocatedIds.length > 0) {
+      const allocatedDocs = await Invoice.find({ _id: { $in: allocatedIds } }).select('invoice_type invoice_number').lean();
+      const quotationDocs = allocatedDocs.filter((d: any) => isQuotationType(d.invoice_type));
+      if (quotationDocs.length > 0) {
+        return res.status(400).json(
+          quotationPaymentRejection(quotationDocs.map((d: any) => d.invoice_number))
+        );
+      }
     }
     // Bank account is optional; payment is recorded and invoices updated either way.
     const bankId = bank_account_id || deposit_to || undefined;

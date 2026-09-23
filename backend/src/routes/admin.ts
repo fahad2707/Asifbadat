@@ -8,6 +8,7 @@ import PurchaseOrder from '../models/PurchaseOrder';
 import { authenticateAdmin, AuthRequest } from '../middleware/auth';
 import Expense from '../modules/expenses/models/Expense';
 import mongoose from 'mongoose';
+import { nonQuotationMatch, receivableOpenBalance } from '../utils/documentType';
 
 const router = express.Router();
 
@@ -39,7 +40,7 @@ router.get('/dashboard', authenticateAdmin, async (req: AuthRequest, res) => {
     const [orders, posSales, invoices, pos_agg, expenseAgg] = await Promise.all([
       Order.find({ created_at: { $gte: startDate }, payment_status: 'paid' }).lean(),
       POSSale.find({ created_at: { $gte: startDate } }).lean(),
-      Invoice.find({ created_at: { $gte: startDate } }).lean(),
+      Invoice.find({ created_at: { $gte: startDate }, ...nonQuotationMatch }).lean(),
       PurchaseOrder.aggregate([
         { $match: { created_at: { $gte: startDate } } },
         { $group: { _id: null, total: { $sum: '$total_amount' } } },
@@ -102,9 +103,8 @@ router.get('/dashboard', authenticateAdmin, async (req: AuthRequest, res) => {
 
     const netProfit = totalSales - totalCOGS - totalExpenses;
 
-    const totalReceivable = invoices.reduce((sum: number, inv: { total_amount?: number; amount_paid?: number }) => {
-      const due = (inv.total_amount || 0) - (inv.amount_paid || 0);
-      return sum + (due > 0 ? due : 0);
+    const totalReceivable = invoices.reduce((sum: number, inv: { invoice_type?: string; total_amount?: number; amount_paid?: number }) => {
+      return sum + receivableOpenBalance(inv);
     }, 0);
 
     const totalPayable = Number(pos_agg[0]?.total || 0);

@@ -18,6 +18,7 @@ interface InvoiceRow {
   total_amount: number;
   amount_paid: number;
   payment_status: string;
+  invoice_type?: string;
   created_at: string;
 }
 
@@ -72,7 +73,7 @@ export default function ReceivePaymentLightbox({ isOpen, onClose, onRecorded, pr
       adminApi.get('/invoices', { params: { customer_id: customerId, unpaid_only: 'true', limit: 100 } })
         .then((r) => {
           const list = Array.isArray(r.data) ? r.data : (r.data.invoices || r.data);
-          setOutstandingInvoices(list.filter((inv: any) => (inv.payment_status || '').toLowerCase() === 'unpaid'));
+          setOutstandingInvoices(list.filter((inv: any) => (inv.payment_status || '').toLowerCase() === 'unpaid' && inv.invoice_type !== 'quotation'));
           setLoading(false);
         })
         .catch(() => setLoading(false));
