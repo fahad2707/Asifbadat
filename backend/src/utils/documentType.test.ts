@@ -94,11 +94,13 @@ test('route source keeps quotation inventory and payment gates explicit', () => 
   const invoices = readFileSync(join(root, 'routes/invoices.ts'), 'utf8');
   const customers = readFileSync(join(root, 'routes/customers.ts'), 'utf8');
   const admin = readFileSync(join(root, 'routes/admin.ts'), 'utf8');
+  const paymentApplication = readFileSync(join(root, 'services/paymentApplication.ts'), 'utf8');
 
   assert.match(invoices, /shouldAdjustInventoryForDocumentType\(docType\)/);
   assert.match(invoices, /shouldAdjustInventoryForDocumentType\(invoice\.invoice_type\)/);
-  assert.match(invoices, /isQuotationType/);
-  assert.match(invoices, /Quotations cannot receive payment|quotationPaymentRejection/);
+  assert.match(invoices, /paymentApplication/);
+  assert.match(paymentApplication, /isQuotationType/);
+  assert.match(paymentApplication, /Quotations cannot receive payment|quotationPaymentRejection/);
   assert.match(invoices, /receivableInvoiceMatch/);
   assert.match(customers, /receivableInvoiceMatch/);
   assert.match(admin, /nonQuotationMatch/);

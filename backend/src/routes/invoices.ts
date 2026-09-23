@@ -2,7 +2,6 @@ import express from 'express';
 import mongoose from 'mongoose';
 import Invoice from '../models/Invoice';
 import Customer from '../models/Customer';
-import Receipt from '../models/Receipt';
 import StoreSettings from '../models/StoreSettings';
 import Product from '../models/Product';
 import CustomerProductPrice from '../models/CustomerProductPrice';
@@ -13,11 +12,10 @@ import { sendPdfResponse } from '../utils/pdfHelpers';
 import {
   DOCUMENT_TYPE_INVOICE,
   DOCUMENT_TYPE_QUOTATION,
-  isQuotationType,
-  quotationPaymentRejection,
   receivableInvoiceMatch,
   shouldAdjustInventoryForDocumentType,
 } from '../utils/documentType';
+import { httpErrorFromPayment, paymentApplication } from '../services/paymentApplication';
 
 const router = express.Router();
 
@@ -423,69 +421,36 @@ router.put('/:id', authenticateAdmin, async (req: AuthRequest, res) => {
   }
 });
 
-// Receive payment: apply amount to one or more invoices, update amount_paid and payment_status, create Receipt
+// Receive payment: thin HTTP layer. Application lives in paymentApplication.
 router.post('/receive-payment', authenticateAdmin, async (req: AuthRequest, res) => {
   try {
-    const { amount_received, payment_date, payment_method, reference_no, deposit_to, bank_account_id, allocations } = req.body as {
-      amount_received: number;
+    const { amount_received, payment_date, payment_method, deposit_to, bank_account_id, allocations } = req.body as {
+      amount_received?: number;
       payment_date?: string;
       payment_method?: string;
-      reference_no?: string;
       deposit_to?: string;
       bank_account_id?: string;
       allocations: { invoice_id: string; amount: number }[];
     };
-    if (!allocations || !Array.isArray(allocations) || allocations.length === 0) {
-      return res.status(400).json({ error: 'allocations (invoice_id, amount) required' });
-    }
-    const allocatedIds = allocations
-      .map((a) => a.invoice_id)
-      .filter((id): id is string => typeof id === 'string' && mongoose.Types.ObjectId.isValid(id));
-    if (allocatedIds.length > 0) {
-      const allocatedDocs = await Invoice.find({ _id: { $in: allocatedIds } }).select('invoice_type invoice_number').lean();
-      const quotationDocs = allocatedDocs.filter((d: any) => isQuotationType(d.invoice_type));
-      if (quotationDocs.length > 0) {
-        return res.status(400).json(
-          quotationPaymentRejection(quotationDocs.map((d: any) => d.invoice_number))
-        );
-      }
-    }
-    // Bank account is optional; payment is recorded and invoices updated either way.
-    const bankId = bank_account_id || deposit_to || undefined;
-    const totalAlloc = allocations.reduce((s, a) => s + Number(a.amount || 0), 0);
-    const amount = Number(amount_received) || totalAlloc;
-    const pmtDate = payment_date ? new Date(payment_date) : new Date();
 
-    const invoiceIds: string[] = [];
-    const customerName: string[] = [];
-    let firstCustomerId: mongoose.Types.ObjectId | null = null;
-    for (const { invoice_id, amount: amt } of allocations) {
-      const a = Number(amt);
-      if (a <= 0) continue;
-      const inv = await Invoice.findById(invoice_id);
-      if (!inv) continue;
-      if (!firstCustomerId && (inv as any).customer_id) firstCustomerId = (inv as any).customer_id;
-      const paid = (inv.amount_paid ?? 0) + a;
-      inv.amount_paid = paid;
-      inv.payment_status = paid >= (inv.total_amount || 0) ? 'paid' : 'unpaid';
-      await inv.save();
-      invoiceIds.push(inv.invoice_number);
-      if (inv.customer_name) customerName.push(inv.customer_name);
-    }
-    const trxId = 'RT' + Date.now().toString(36).toUpperCase().slice(-5) + Math.random().toString(36).substring(2, 5).toUpperCase();
-    await Receipt.create({
-      trx_id: trxId,
-      trx_date: pmtDate,
-      customer_id: firstCustomerId || undefined,
-      customer_name: customerName[0] || 'Customer',
-      invoice_num: invoiceIds.join(', '),
-      pmt_mode: payment_method || 'Other',
-      amount_received: amount,
-      ...(bankId ? { bank_account_id: bankId } : {}),
+    const result = await paymentApplication.applyCustomerPayment({
+      allocations,
+      amount_received,
+      payment_date: payment_date ? new Date(payment_date) : undefined,
+      payment_method,
+      bank_account_id: bank_account_id || deposit_to || undefined,
     });
 
-    res.json({ success: true, message: 'Payment recorded', trx_id: trxId });
+    res.json({
+      success: true,
+      message: 'Payment recorded',
+      trx_id: result.trx_ids[0],
+      trx_ids: result.trx_ids,
+      applications: result.applications,
+    });
   } catch (error) {
+    const mapped = httpErrorFromPayment(error);
+    if (mapped) return res.status(mapped.status).json(mapped.body);
     console.error('Receive payment error:', error);
     res.status(500).json({ error: 'Failed to record payment' });
   }
