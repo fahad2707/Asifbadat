@@ -26,7 +26,7 @@
     "test:invoice-edit-financial": "tsx --test src/utils/invoiceEditFinancial.test.ts src/routes/invoiceEditFinancial.test.ts",
     "test:customer-balances": "tsx --test src/routes/customerBalances.test.ts",
     "test:online-order-delivery": "tsx --test src/routes/onlineOrderDelivery.test.ts",
-    "test:pos-model-a": "tsx --test src/utils/posTender.test.ts src/utils/dashboardFinancial.test.ts src/routes/posSaleTender.test.ts src/utils/documentType.test.ts"
+    "test:pos-model-a": "tsx --test src/utils/posTender.test.ts src/utils/dashboardFinancial.test.ts src/routes/posSaleTender.test.ts src/routes/posSaleAtomicity.test.ts src/utils/documentType.test.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.490.0",

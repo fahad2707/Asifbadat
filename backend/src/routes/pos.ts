@@ -1,4 +1,5 @@
 import express from 'express';
+import mongoose from 'mongoose';
 import POSSale from '../models/POSSale';
 import Product from '../models/Product';
 import Invoice from '../models/Invoice';
@@ -219,87 +220,115 @@ router.post('/sale', authenticateAdmin, async (req: AuthRequest, res) => {
       throw error;
     }
 
-    // Create invoice slip. Settled amounts stay consistent; this is not AR.
-    const invoiceNumber = `INV-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
-    const invoice = await Invoice.create({
-      invoice_number: invoiceNumber,
-      invoice_type: sale_type,
-      customer_name: customerName || undefined,
-      customer_phone: customerPhone || undefined,
-      customer_email: customerEmail || undefined,
-      total_amount: totalAmount,
-      tax_amount: finalTax,
-      discount_amount: finalDiscount,
-      payment_method: payment_method,
-      amount_paid: totalAmount,
-      payment_status: 'paid',
-      items: saleItems.map((item: any) => ({
-        product_id: item.product_id,
-        product_name: item.product_name || 'Product',
-        quantity: item.quantity,
-        price: item.price,
-        subtotal: item.subtotal,
-      })),
-    });
+    // Financial + inventory writes are one Mongo transaction (same pattern as
+    // credit-memo approve / shipment deliver). Tender validation stays above.
+    const session = await mongoose.startSession();
+    session.startTransaction();
+    try {
+      const invoiceNumber = `INV-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+      const [invoice] = await Invoice.create(
+        [
+          {
+            invoice_number: invoiceNumber,
+            invoice_type: sale_type,
+            customer_name: customerName || undefined,
+            customer_phone: customerPhone || undefined,
+            customer_email: customerEmail || undefined,
+            total_amount: totalAmount,
+            tax_amount: finalTax,
+            discount_amount: finalDiscount,
+            payment_method: payment_method,
+            amount_paid: totalAmount,
+            payment_status: 'paid',
+            items: saleItems.map((item: any) => ({
+              product_id: item.product_id,
+              product_name: item.product_name || 'Product',
+              quantity: item.quantity,
+              price: item.price,
+              subtotal: item.subtotal,
+            })),
+          },
+        ],
+        { session }
+      );
 
-    // Create POS sale
-    const saleNumber = generateSaleNumber();
-    const sale = await POSSale.create({
-      sale_number: saleNumber,
-      invoice_id: invoice._id,
-      customer_name: customerName || undefined,
-      customer_phone: customerPhone || undefined,
-      customer_email: customerEmail || undefined,
-      customer_id: customerId ? customerId : undefined,
-      pos_customer_id: pos_customer_id || undefined,
-      items: saleItems,
-      subtotal,
-      discount_amount: finalDiscount,
-      tax_amount: finalTax,
-      total_amount: totalAmount,
-      payment_method,
-      payment_split: {
-        cash: tenders.cash,
-        card: tenders.card,
-        digital: tenders.digital,
-      },
-      sale_type,
-      admin_id: adminId,
-    });
+      const saleNumber = generateSaleNumber();
+      const [sale] = await POSSale.create(
+        [
+          {
+            sale_number: saleNumber,
+            invoice_id: invoice._id,
+            customer_name: customerName || undefined,
+            customer_phone: customerPhone || undefined,
+            customer_email: customerEmail || undefined,
+            customer_id: customerId ? customerId : undefined,
+            pos_customer_id: pos_customer_id || undefined,
+            items: saleItems,
+            subtotal,
+            discount_amount: finalDiscount,
+            tax_amount: finalTax,
+            total_amount: totalAmount,
+            payment_method,
+            payment_split: {
+              cash: tenders.cash,
+              card: tenders.card,
+              digital: tenders.digital,
+            },
+            sale_type,
+            admin_id: adminId,
+          },
+        ],
+        { session }
+      );
 
-    // Update stock and log movements (inventory products only)
-    for (const item of saleItems) {
-      if (!(item as any).isInventory) continue;
-      await Product.findByIdAndUpdate(item.product_id, {
-        $inc: { stock_quantity: -item.quantity },
+      for (const item of saleItems) {
+        if (!(item as any).isInventory) continue;
+        await Product.findByIdAndUpdate(
+          item.product_id,
+          { $inc: { stock_quantity: -item.quantity } },
+          { session }
+        );
+        await StockMovement.create(
+          [
+            {
+              product_id: item.product_id,
+              movement_type: 'sale',
+              quantity_change: -item.quantity,
+              reference_type: 'pos_sale',
+              reference_id: sale._id,
+              admin_id: adminId,
+            },
+          ],
+          { session }
+        );
+      }
+
+      if (customerId) {
+        await User.findByIdAndUpdate(
+          customerId,
+          { $inc: { total_spent: totalAmount } },
+          { session }
+        );
+      }
+
+      await session.commitTransaction();
+
+      res.status(201).json({
+        sale: {
+          id: sale._id.toString(),
+          ...sale.toObject(),
+        },
+        invoice: {
+          id: invoice._id.toString(),
+          ...invoice.toObject(),
+        },
       });
-      await StockMovement.create({
-        product_id: item.product_id,
-        movement_type: 'sale',
-        quantity_change: -item.quantity,
-        reference_type: 'pos_sale',
-        reference_id: sale._id,
-        admin_id: adminId,
-      });
+    } catch (error) {
+      await session.abortTransaction();
+      throw error;
+    } finally {
+      session.endSession();
     }
-
-    // Update customer total_spent if customer exists
-    if (customerId) {
-      await User.findByIdAndUpdate(customerId, {
-        $inc: { total_spent: totalAmount },
-      });
-    }
-
-    res.status(201).json({
-      sale: {
-        id: sale._id.toString(),
-        ...sale.toObject(),
-      },
-      invoice: {
-        id: invoice._id.toString(),
-        ...invoice.toObject(),
-      },
-    });
   } catch (error: any) {
     if (error instanceof z.ZodError) {
       return res.status(400).json({ error: error.errors[0].message });

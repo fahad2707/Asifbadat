@@ -130,14 +130,23 @@ test('POST /pos/sale writes a settled POS slip and stores the POSSale tender', a
   stubCatalogProduct();
   const createdInvoices: Array<Record<string, unknown>> = [];
   const createdSales: Array<Record<string, unknown>> = [];
+  const session = {
+    startTransaction: mock.fn(),
+    commitTransaction: mock.fn(async () => {}),
+    abortTransaction: mock.fn(async () => {}),
+    endSession: mock.fn(),
+  };
+  mock.method(mongoose, 'startSession', async () => session);
 
-  mock.method(Invoice, 'create', async (doc: Record<string, unknown>) => {
+  mock.method(Invoice, 'create', async (docs: unknown) => {
+    const doc = Array.isArray(docs) ? (docs[0] as Record<string, unknown>) : (docs as Record<string, unknown>);
     createdInvoices.push(doc);
-    return { _id: { toString: () => 'inv-pos-1' }, ...doc, toObject: () => doc };
+    return [{ _id: { toString: () => 'inv-pos-1' }, ...doc, toObject: () => doc }];
   });
-  mock.method(POSSale, 'create', async (doc: Record<string, unknown>) => {
+  mock.method(POSSale, 'create', async (docs: unknown) => {
+    const doc = Array.isArray(docs) ? (docs[0] as Record<string, unknown>) : (docs as Record<string, unknown>);
     createdSales.push(doc);
-    return { _id: { toString: () => 'sale-pos-1' }, ...doc, toObject: () => doc };
+    return [{ _id: { toString: () => 'sale-pos-1' }, ...doc, toObject: () => doc }];
   });
 
   const res = await postSale({
