@@ -28,6 +28,10 @@ import adminApi from '@/lib/admin-api';
 import toast from 'react-hot-toast';
 import InvoiceFormLightbox from '@/components/admin/InvoiceFormLightbox';
 import ReceivePaymentLightbox from '@/components/admin/ReceivePaymentLightbox';
+import {
+  buildCustomerTallyCsvStatement,
+  buildCustomerTallyLedgerItems,
+} from '@/lib/customerTallyLedger';
 
 type TabId =
   | 'overview'
@@ -433,15 +437,7 @@ export default function Customer360Page() {
                 type="button"
                 onClick={() => {
                   const headers = ['Date', 'Particulars (Voucher)', 'Debit (Product Sales)', 'Credit (Client Payments)', 'Running Balance'];
-                  let balance = 0;
-                  const statement = invoices.map(i => {
-                    balance += i.total_amount;
-                    return [new Date(i.invoice_date).toLocaleDateString(), `${i.invoice_number} Invoice`, i.total_amount.toFixed(2), '0.00', balance.toFixed(2)];
-                  });
-                  receipts.forEach(r => {
-                    balance -= r.amount_received;
-                    statement.push([new Date(r.trx_date).toLocaleDateString(), `${r.trx_id} Payment Recv`, '0.00', r.amount_received.toFixed(2), balance.toFixed(2)]);
-                  });
+                  const statement = buildCustomerTallyCsvStatement(saleInvoices, receipts);
                   const csvRows = [headers.join(','), ...statement.map(row => row.join(','))];
                   const blob = new Blob([csvRows.join('\n')], { type: 'text/csv;charset=utf-8;' });
                   const url = URL.createObjectURL(blob);
@@ -480,16 +476,13 @@ export default function Customer360Page() {
                   {/* Ledger math loop */}
                   {(() => {
                     let runningBalance = 0;
-                    const items = [
-                      ...invoices.map(i => ({ date: i.invoice_date, memo: `${i.invoice_number} B2B Invoice`, debit: i.total_amount, credit: 0 })),
-                      ...receipts.map(r => ({ date: r.trx_date, memo: `Receipt ${r.trx_id} Voucher`, debit: 0, credit: r.amount_received })),
-                    ].sort((a,b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+                    const items = buildCustomerTallyLedgerItems(saleInvoices, receipts);
 
                     return items.map((it, idx) => {
                       runningBalance += it.debit - it.credit;
                       return (
                         <tr key={idx} className="border-b border-white/5 hover:bg-white/[0.01]">
-                          <td className="py-2.5 px-2 text-slate-500">{new Date(it.date).toLocaleDateString()}</td>
+                          <td className="py-2.5 px-2 text-slate-500">{new Date(it.date || 0).toLocaleDateString()}</td>
                           <td className="py-2.5 px-2 text-slate-200">{it.memo}</td>
                           <td className="py-2.5 px-2 text-right text-rose-400 font-bold">${it.debit > 0 ? it.debit.toFixed(2) : '-'}</td>
                           <td className="py-2.5 px-2 text-right text-teal-400 font-bold">${it.credit > 0 ? it.credit.toFixed(2) : '-'}</td>
