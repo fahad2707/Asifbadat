@@ -11,6 +11,11 @@ import { z } from 'zod';
 import { roundMoney } from '../services/paymentApplication';
 import { PosTenderError, normalizePosTenders } from '../utils/posTender';
 import { PosStockError, posStockDecrementFilter } from '../utils/posStock';
+import {
+  formatPosSaleResponse,
+  isIdempotencyDuplicateKey,
+  waitForCommittedKeyedSale,
+} from '../utils/posIdempotency';
 
 const router = express.Router();
 
@@ -18,6 +23,18 @@ const router = express.Router();
 const generateSaleNumber = () => {
   return `POS-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
 };
+
+async function sendCommittedPosSaleReplay(res: express.Response, sale: { invoice_id?: unknown }) {
+  if (!sale.invoice_id) {
+    return res.status(500).json({ error: 'Failed to load POS sale invoice' });
+  }
+  const invoice = await Invoice.findById(sale.invoice_id);
+  if (!invoice) {
+    return res.status(500).json({ error: 'Failed to load POS sale invoice' });
+  }
+  // 200: replay of an already-committed sale (201 remains the first-create contract).
+  return res.status(200).json(formatPosSaleResponse(sale, invoice));
+}
 
 const POS_CATALOG_ACTIVE = {
   $nor: [{ is_active: false }, { is_active: 'false' }, { is_active: 0 }],
@@ -100,6 +117,7 @@ router.post('/sale', authenticateAdmin, async (req: AuthRequest, res) => {
         .optional(),
       discount_amount: z.number().min(0).optional(), // Bill-level discount
       sale_type: z.enum(['pos', 'website', 'store_pickup']).default('pos'),
+      idempotency_key: z.string().trim().min(1).max(128).optional(),
     });
 
     const {
@@ -112,6 +130,7 @@ router.post('/sale', authenticateAdmin, async (req: AuthRequest, res) => {
       payment_split,
       discount_amount = 0,
       sale_type = 'pos',
+      idempotency_key: idempotencyKey,
     } = schema.parse(req.body);
 
     const adminId = req.userId!;
@@ -219,6 +238,16 @@ router.post('/sale', authenticateAdmin, async (req: AuthRequest, res) => {
       throw error;
     }
 
+    // Completed-sale replay is after tenders so invalid tender still 400s
+    // before User.create. The unique index — not this lookup — is the
+    // concurrency guarantee for two in-flight same-key requests.
+    if (idempotencyKey) {
+      const existingSale = await POSSale.findOne({ idempotency_key: idempotencyKey });
+      if (existingSale) {
+        return sendCommittedPosSaleReplay(res, existingSale);
+      }
+    }
+
     // Financial + inventory writes are one Mongo transaction (same pattern as
     // credit-memo approve / shipment deliver). Tender validation stays above.
     const session = await mongoose.startSession();
@@ -289,6 +318,7 @@ router.post('/sale', authenticateAdmin, async (req: AuthRequest, res) => {
             },
             sale_type,
             admin_id: adminId,
+            ...(idempotencyKey ? { idempotency_key: idempotencyKey } : {}),
           },
         ],
         { session }
@@ -329,20 +359,24 @@ router.post('/sale', authenticateAdmin, async (req: AuthRequest, res) => {
 
       await session.commitTransaction();
 
-      res.status(201).json({
-        sale: {
-          id: sale._id.toString(),
-          ...sale.toObject(),
-        },
-        invoice: {
-          id: invoice._id.toString(),
-          ...invoice.toObject(),
-        },
-      });
+      res.status(201).json(formatPosSaleResponse(sale, invoice));
     } catch (error) {
       await session.abortTransaction();
       if (error instanceof PosStockError) {
         return res.status(error.status).json({ error: error.message });
+      }
+      if (idempotencyKey && isIdempotencyDuplicateKey(error)) {
+        // Unique constraint fired, but the winner may still be uncommitted.
+        // Only replay after a no-session read sees the committed sale.
+        const committedSale = await waitForCommittedKeyedSale(() =>
+          POSSale.findOne({ idempotency_key: idempotencyKey })
+        );
+        if (committedSale) {
+          return sendCommittedPosSaleReplay(res, committedSale);
+        }
+        return res.status(409).json({
+          error: 'POS sale with this idempotency key is not yet committed. Retry the same request.',
+        });
       }
       throw error;
     } finally {

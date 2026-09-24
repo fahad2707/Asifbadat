@@ -278,6 +278,7 @@ export default function POSPage() {
   };
 
   const handleCheckout = async () => {
+    const idempotencyKey = crypto.randomUUID();
     if (cart.length === 0) {
       toast.error('Cart is empty');
       return;
@@ -313,6 +314,7 @@ export default function POSPage() {
             : { [paymentMethod]: totals.total },
         discount_amount: totals.billDiscount,
         sale_type: saleType,
+        idempotency_key: idempotencyKey,
       });
 
       toast.success('Sale completed successfully!');

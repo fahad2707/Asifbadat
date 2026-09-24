@@ -30,6 +30,7 @@ export interface IPOSSale extends Document {
   };
   sale_type: string; // 'pos', 'website', 'store_pickup'
   admin_id?: mongoose.Types.ObjectId;
+  idempotency_key?: string;
   created_at: Date;
 }
 
@@ -64,6 +65,9 @@ const POSSaleSchema = new Schema<IPOSSale>(
     },
     sale_type: { type: String, default: 'pos' }, // 'pos', 'website', 'store_pickup'
     admin_id: { type: Schema.Types.ObjectId, ref: 'Admin' },
+    // Client-provided checkout key. unique+sparse: missing keys may repeat;
+    // two documents cannot share the same non-null key.
+    idempotency_key: { type: String, unique: true, sparse: true },
   },
   {
     timestamps: { createdAt: 'created_at', updatedAt: false },
