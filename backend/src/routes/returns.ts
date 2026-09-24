@@ -176,17 +176,33 @@ router.post('/', authenticateAdmin, async (req: AuthRequest, res) => {
       }
     }
 
+    const consumedInRequest = new Map<string, number>();
     const returnItems = items.map((item) => {
       const calcLine = calcByProduct.get(item.product_id)!;
       const product = productsById.get(item.product_id);
+      const alreadyInRequest = consumedInRequest.get(item.product_id) || 0;
+      const sliceLine =
+        alreadyInRequest === 0 && item.quantity === calcLine.requested_quantity
+          ? calcLine
+          : calculatePosReturnRefund(
+              sale,
+              [{ product_id: item.product_id, quantity: item.quantity }],
+              [
+                ...existingReturns,
+                ...(alreadyInRequest > 0
+                  ? [{ status: 'completed', items: [{ product_id: item.product_id, quantity: alreadyInRequest }] }]
+                  : []),
+              ]
+            ).lines[0];
+      consumedInRequest.set(item.product_id, alreadyInRequest + item.quantity);
       return {
         product_id: item.product_id,
-        product_name: calcLine.product_name || product?.name || 'Product',
+        product_name: sliceLine.product_name || product?.name || 'Product',
         quantity: item.quantity,
-        original_unit_price: calcLine.original_unit_price,
-        allocated_discount_per_unit: calcLine.allocated_discount_per_unit,
-        refundable_unit_amount: calcLine.refundable_unit_amount,
-        refundable_amount: roundMoney(calcLine.refundable_unit_amount * item.quantity),
+        original_unit_price: sliceLine.original_unit_price,
+        allocated_discount_per_unit: sliceLine.allocated_discount_per_unit,
+        refundable_unit_amount: sliceLine.refundable_unit_amount,
+        refundable_amount: sliceLine.refundable_amount,
         inventory_disposition: item.inventory_disposition,
       };
     });

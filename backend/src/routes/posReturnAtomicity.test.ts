@@ -26,6 +26,7 @@ import User from '../models/User';
 import Customer from '../models/Customer';
 import Receipt from '../models/Receipt';
 import Payment from '../models/Payment';
+import { calculatePosReturnRefund } from '../utils/posReturnCalc';
 
 const SALE_ID = '64b0000000000000000a0a0a';
 const PRODUCT_ID = '64b0000000000000000d0404';
@@ -171,6 +172,8 @@ test('route uses a session, claim filter, and excludes settlement ledgers', () =
   assert.equal(src.includes('CreditMemo'), false);
   assert.equal(src.includes('outstanding_balance'), false);
   assert.equal(src.includes('applyPaymentToInvoice'), false);
+  assert.equal(src.includes('refundable_unit_amount *'), false);
+  assert.match(src, /refundable_amount:\s*sliceLine\.refundable_amount/);
 
   const path = POSSale.schema.path('returned_quantities') as { instance?: string };
   assert.equal(path.instance, 'Mixed');
@@ -871,4 +874,120 @@ test('quantity claim update touches only returned_quantities', async () => {
   assert.equal(Object.keys(inc).every((key) => key.startsWith('returned_quantities.')), true);
   assert.equal(Object.prototype.hasOwnProperty.call(claimUpdate, 'total_amount'), false);
   assert.equal(Object.prototype.hasOwnProperty.call(claimUpdate, '$set'), false);
+});
+
+function unevenPennySale() {
+  return saleFixture({
+    discount_amount: 1,
+    tax_amount: 0,
+    total_amount: 299,
+  });
+}
+
+async function captureCreatedReturn(body: Record<string, unknown>) {
+  const session = createFakeSession();
+  mock.method(mongoose, 'startSession', async () => session);
+  let created: Record<string, unknown> | undefined;
+  mock.method(Return, 'create', async (docs: unknown) => {
+    created = firstDoc(docs);
+    return [{ _id: { toString: () => RETURN_ID }, ...created, toObject: () => created }];
+  });
+  mock.method(POSSale, 'findOneAndUpdate', async () => ({ _id: SALE_ID }));
+  mock.method(Product, 'findOneAndUpdate', async () => ({ _id: PRODUCT_ID }));
+  mock.method(StockMovement, 'create', async () => [{}]);
+  mock.method(User, 'findByIdAndUpdate', async () => ({}));
+  const res = await postReturn(body);
+  return { res, created, session };
+}
+
+test('07E-03-FIX A — first unit of $1 bill-discount sale stores $99.66', async () => {
+  assertNoMongoConnection();
+  mock.method(POSSale, 'findById', async () => unevenPennySale());
+  stubExistingReturns();
+  stubProduct();
+  const { res, created } = await captureCreatedReturn(
+    baseBody({
+      items: [{ product_id: PRODUCT_ID, quantity: 1, inventory_disposition: 'resalable' }],
+    })
+  );
+  const expected = calculatePosReturnRefund(unevenPennySale(), [{ product_id: PRODUCT_ID, quantity: 1 }]);
+  assert.equal(res.status, 201);
+  assert.equal((created?.items as any[])[0].refundable_amount, 99.66);
+  assert.equal(created?.total_refund, 99.66);
+  assert.equal((created?.items as any[])[0].refundable_amount, expected.lines[0].refundable_amount);
+  assert.equal(created?.total_refund, expected.total_refund);
+});
+
+test('07E-03-FIX B — remaining two units store $199.34', async () => {
+  assertNoMongoConnection();
+  mock.method(POSSale, 'findById', async () => unevenPennySale());
+  stubExistingReturns([{ status: 'completed', items: [{ product_id: PRODUCT_ID, quantity: 1 }] }]);
+  stubProduct();
+  const { res, created } = await captureCreatedReturn(
+    baseBody({
+      items: [{ product_id: PRODUCT_ID, quantity: 2, inventory_disposition: 'resalable' }],
+    })
+  );
+  const expected = calculatePosReturnRefund(
+    unevenPennySale(),
+    [{ product_id: PRODUCT_ID, quantity: 2 }],
+    [{ status: 'completed', items: [{ product_id: PRODUCT_ID, quantity: 1 }] }]
+  );
+  assert.equal(res.status, 201);
+  assert.equal((created?.items as any[])[0].refundable_amount, 199.34);
+  assert.equal(created?.total_refund, 199.34);
+  assert.equal((created?.items as any[])[0].refundable_amount, expected.lines[0].refundable_amount);
+  assert.equal(created?.total_refund, expected.total_refund);
+});
+
+test('07E-03-FIX C — two units then the last unit sum to $299.00', async () => {
+  assertNoMongoConnection();
+  stubProduct();
+
+  mock.method(POSSale, 'findById', async () => unevenPennySale());
+  stubExistingReturns();
+  const first = await captureCreatedReturn(
+    baseBody({
+      items: [{ product_id: PRODUCT_ID, quantity: 2, inventory_disposition: 'resalable' }],
+    })
+  );
+  mock.restoreAll();
+  stubProduct();
+  mock.method(POSSale, 'findById', async () => unevenPennySale());
+  stubExistingReturns([{ status: 'completed', items: [{ product_id: PRODUCT_ID, quantity: 2 }] }]);
+  const second = await captureCreatedReturn(
+    baseBody({
+      items: [{ product_id: PRODUCT_ID, quantity: 1, inventory_disposition: 'resalable' }],
+    })
+  );
+
+  assert.equal(first.res.status, 201);
+  assert.equal(second.res.status, 201);
+  const combined = Number(first.created?.total_refund) + Number(second.created?.total_refund);
+  assert.equal(combined, 299);
+  const firstLines = first.created?.items as Array<{ refundable_amount: number }>;
+  const secondLines = second.created?.items as Array<{ refundable_amount: number }>;
+  assert.equal(
+    firstLines.reduce((sum, line) => sum + line.refundable_amount, 0) +
+      secondLines.reduce((sum, line) => sum + line.refundable_amount, 0),
+    299
+  );
+});
+
+test('07E-03-FIX D — stored line refundable_amount equals the helper output', async () => {
+  assertNoMongoConnection();
+  mock.method(POSSale, 'findById', async () => unevenPennySale());
+  stubExistingReturns();
+  stubProduct();
+  const { res, created } = await captureCreatedReturn(baseBody());
+  const expected = calculatePosReturnRefund(unevenPennySale(), [{ product_id: PRODUCT_ID, quantity: 3 }]);
+  assert.equal(res.status, 201);
+  const stored = created?.items as Array<{ refundable_amount: number }>;
+  assert.equal(stored[0].refundable_amount, expected.lines[0].refundable_amount);
+  assert.equal(created?.total_refund, expected.total_refund);
+  assert.equal(
+    stored.reduce((sum, line) => sum + line.refundable_amount, 0),
+    created?.total_refund
+  );
+  assert.equal(created?.total_refund, 299);
 });

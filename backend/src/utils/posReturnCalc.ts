@@ -1,11 +1,15 @@
 /**
- * Task 07D-10D — POS return merchandise calculation and remaining-qty checks.
+ * Task 07D-10D / 07D-10E-03 — POS return merchandise calculation.
  * Read-only. Does not write Return / POSSale / stock / money.
  *
  * Refund = original unit price
- *         - line discount per unit (POSSale.items[].discount is a line total)
- *         - bill discount / total units sold
+ *         - line discount (POSSale.items[].discount is a line-total, allocated in cents)
+ *         - bill discount (POSSale.discount_amount, allocated by total units sold, in cents)
  * Tax is never included.
+ *
+ * Discount cents use the largest-remainder method so every unit of a sale
+ * sums to the exact merchandise total. Already-returned units consume the
+ * leading slice of that deterministic sequence.
  */
 import { roundMoney } from '../services/paymentApplication';
 
@@ -76,6 +80,26 @@ function requirePositiveInt(value: unknown, label: string): number {
   return n;
 }
 
+function moneyToCents(value: unknown): number {
+  return Math.round(roundMoney(value) * 100);
+}
+
+function centsToMoney(cents: number): number {
+  return roundMoney(cents / 100);
+}
+
+/** Largest-remainder allocation. Extra cents go to the leading slots (stable index order). */
+function allocateCents(totalCents: number, n: number): number[] {
+  if (n <= 0) return [];
+  const base = Math.trunc(totalCents / n);
+  const remainder = totalCents - base * n;
+  const shares = new Array<number>(n);
+  for (let i = 0; i < n; i += 1) {
+    shares[i] = base + (i < remainder ? 1 : 0);
+  }
+  return shares;
+}
+
 export function calculatePosReturnRefund(
   sale: PosReturnCalcSale,
   requested: PosReturnRequestLine[],
@@ -116,8 +140,24 @@ export function calculatePosReturnRefund(
     throw new PosReturnCalcError('Sale has no returnable quantity.');
   }
 
-  const billDiscount = roundMoney(sale.discount_amount);
-  const billDiscountPerUnit = roundMoney(billDiscount / totalUnitsSold);
+  const lineDiscountCents = new Map<string, number[]>();
+  const billDiscountCents = new Map<string, number[]>();
+  for (const [key, line] of byProduct) {
+    lineDiscountCents.set(key, allocateCents(moneyToCents(line.discount), line.quantity));
+    billDiscountCents.set(key, new Array<number>(line.quantity).fill(0));
+  }
+
+  const globalUnits: Array<{ key: string; index: number }> = [];
+  for (const [key, line] of byProduct) {
+    for (let i = 0; i < line.quantity; i += 1) {
+      globalUnits.push({ key, index: i });
+    }
+  }
+  const billShares = allocateCents(moneyToCents(sale.discount_amount), globalUnits.length);
+  for (let i = 0; i < globalUnits.length; i += 1) {
+    const unit = globalUnits[i];
+    billDiscountCents.get(unit.key)![unit.index] = billShares[i];
+  }
 
   const returnedByProduct = new Map<string, number>();
   for (const ret of existingReturns) {
@@ -160,10 +200,19 @@ export function calculatePosReturnRefund(
       );
     }
 
-    const lineDiscountPerUnit = saleLine.quantity > 0 ? roundMoney(saleLine.discount / saleLine.quantity) : 0;
-    const allocatedDiscountPerUnit = roundMoney(lineDiscountPerUnit + billDiscountPerUnit);
-    const refundableUnit = roundMoney(saleLine.price - allocatedDiscountPerUnit);
-    const refundableAmount = roundMoney(refundableUnit * requestedQty);
+    const priceCents = moneyToCents(saleLine.price);
+    const lineShares = lineDiscountCents.get(key)!;
+    const billSharesForProduct = billDiscountCents.get(key)!;
+    let refundCents = 0;
+    for (let i = 0; i < requestedQty; i += 1) {
+      const unitIndex = alreadyReturned + i;
+      refundCents += priceCents - lineShares[unitIndex] - billSharesForProduct[unitIndex];
+    }
+
+    const refundable_amount = centsToMoney(refundCents);
+    const refundable_unit_amount =
+      requestedQty > 0 ? centsToMoney(Math.round(refundCents / requestedQty)) : 0;
+    const allocated_discount_per_unit = roundMoney(saleLine.price - refundable_unit_amount);
 
     lines.push({
       product_id: key,
@@ -173,12 +222,12 @@ export function calculatePosReturnRefund(
       already_returned_quantity: alreadyReturned,
       remaining_quantity: remaining,
       original_unit_price: saleLine.price,
-      allocated_discount_per_unit: allocatedDiscountPerUnit,
-      refundable_unit_amount: refundableUnit,
-      refundable_amount: refundableAmount,
+      allocated_discount_per_unit,
+      refundable_unit_amount,
+      refundable_amount,
     });
   }
 
-  const total_refund = roundMoney(lines.reduce((sum, line) => sum + line.refundable_amount, 0));
+  const total_refund = centsToMoney(lines.reduce((sum, line) => sum + moneyToCents(line.refundable_amount), 0));
   return { lines, total_refund };
 }

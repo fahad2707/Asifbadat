@@ -205,3 +205,150 @@ test('helper does not write Return, stock, or money', () => {
   assert.equal(src.includes('findByIdAndUpdate'), false);
   assert.equal(src.includes('startSession'), false);
 });
+
+test('07E-03 C — 3 × $100 with $1 bill discount is exactly $299.00', () => {
+  const sale = sale3x100({ discount_amount: 1 });
+  const full = calculatePosReturnRefund(sale, [{ product_id: A, quantity: 3 }]);
+  assert.equal(full.total_refund, 299);
+  assert.equal(full.lines[0].refundable_amount, 299);
+});
+
+test('07E-03 D — return 1 then remaining 2 still sums to $299.00', () => {
+  const sale = sale3x100({ discount_amount: 1 });
+  const first = calculatePosReturnRefund(sale, [{ product_id: A, quantity: 1 }]);
+  const rest = calculatePosReturnRefund(
+    sale,
+    [{ product_id: A, quantity: 2 }],
+    [{ status: 'completed', items: [{ product_id: A, quantity: 1 }] }]
+  );
+  assert.equal(first.total_refund + rest.total_refund, 299);
+});
+
+test('07E-03 E — return 2 then the final unit still sums to $299.00', () => {
+  const sale = sale3x100({ discount_amount: 1 });
+  const first = calculatePosReturnRefund(sale, [{ product_id: A, quantity: 2 }]);
+  const rest = calculatePosReturnRefund(
+    sale,
+    [{ product_id: A, quantity: 1 }],
+    [{ status: 'completed', items: [{ product_id: A, quantity: 2 }] }]
+  );
+  assert.equal(first.total_refund + rest.total_refund, 299);
+});
+
+test('07E-03 F — multi-product fractional bill discount reconciles exactly', () => {
+  const sale = {
+    discount_amount: 1,
+    items: [
+      { product_id: A, product_name: 'A', quantity: 2, price: 100, discount: 0 },
+      { product_id: B, product_name: 'B', quantity: 1, price: 50, discount: 0 },
+    ],
+  };
+  const all = calculatePosReturnRefund(sale, [
+    { product_id: A, quantity: 2 },
+    { product_id: B, quantity: 1 },
+  ]);
+  assert.equal(all.total_refund, 249);
+
+  const aThenB =
+    calculatePosReturnRefund(sale, [{ product_id: A, quantity: 2 }]).total_refund +
+    calculatePosReturnRefund(
+      sale,
+      [{ product_id: B, quantity: 1 }],
+      [{ status: 'completed', items: [{ product_id: A, quantity: 2 }] }]
+    ).total_refund;
+  const bThenA =
+    calculatePosReturnRefund(sale, [{ product_id: B, quantity: 1 }]).total_refund +
+    calculatePosReturnRefund(
+      sale,
+      [{ product_id: A, quantity: 2 }],
+      [{ status: 'completed', items: [{ product_id: B, quantity: 1 }] }]
+    ).total_refund;
+  assert.equal(aThenB, 249);
+  assert.equal(bThenA, 249);
+});
+
+test('07E-03 G — line discount plus bill discount is exact and not double-counted', () => {
+  const sale = sale3x100({ discount_amount: 1, line_discount: 1 });
+  const full = calculatePosReturnRefund(sale, [{ product_id: A, quantity: 3 }]);
+  assert.equal(full.total_refund, 298);
+  const first = calculatePosReturnRefund(sale, [{ product_id: A, quantity: 1 }]);
+  const rest = calculatePosReturnRefund(
+    sale,
+    [{ product_id: A, quantity: 2 }],
+    [{ status: 'completed', items: [{ product_id: A, quantity: 1 }] }]
+  );
+  assert.equal(first.total_refund + rest.total_refund, 298);
+});
+
+test('07E-03 H — tax never enters the penny-exact refund total', () => {
+  const sale = sale3x100({ discount_amount: 1, tax_amount: 24.3 });
+  const result = calculatePosReturnRefund(sale, [{ product_id: A, quantity: 3 }]);
+  assert.equal(result.total_refund, 299);
+  assert.equal('tax_refund' in result, false);
+  assert.equal('tax' in result.lines[0], false);
+});
+
+test('07E-03 I — remaining-unit allocation accounts for previously completed returns', () => {
+  const sale = sale3x100({ discount_amount: 1 });
+  const first = calculatePosReturnRefund(sale, [{ product_id: A, quantity: 1 }]);
+  const rest = calculatePosReturnRefund(
+    sale,
+    [{ product_id: A, quantity: 2 }],
+    [{ status: 'completed', items: [{ product_id: A, quantity: 1 }] }]
+  );
+  assert.equal(rest.lines[0].already_returned_quantity, 1);
+  assert.equal(rest.lines[0].remaining_quantity, 2);
+  assert.equal(first.total_refund + rest.total_refund, 299);
+  assert.notEqual(rest.total_refund, first.total_refund * 2);
+});
+
+test('07E-03 J — over-return is still rejected', () => {
+  assert.throws(
+    () =>
+      calculatePosReturnRefund(
+        sale3x100({ discount_amount: 1 }),
+        [{ product_id: A, quantity: 2 }],
+        [{ status: 'completed', items: [{ product_id: A, quantity: 2 }] }]
+      ),
+    (err: unknown) => {
+      assert.ok(err instanceof PosReturnCalcError);
+      assert.match(err.message, /Remaining returnable quantity: 1/);
+      return true;
+    }
+  );
+});
+
+test('07E-03 K — product not on sale is still rejected', () => {
+  assert.throws(
+    () => calculatePosReturnRefund(sale3x100({ discount_amount: 1 }), [{ product_id: MISSING, quantity: 1 }]),
+    (err: unknown) => {
+      assert.ok(err instanceof PosReturnCalcError);
+      assert.match(err.message, /was not part of the original sale/i);
+      return true;
+    }
+  );
+});
+
+test('07E-03 L — duplicate product request is still rejected', () => {
+  assert.throws(
+    () =>
+      calculatePosReturnRefund(sale3x100({ discount_amount: 1 }), [
+        { product_id: A, quantity: 1 },
+        { product_id: A, quantity: 1 },
+      ]),
+    (err: unknown) => {
+      assert.ok(err instanceof PosReturnCalcError);
+      assert.match(err.message, /Duplicate product/i);
+      return true;
+    }
+  );
+});
+
+test('07E-03 M — same sale, priors, and request produce identical results', () => {
+  const sale = sale3x100({ discount_amount: 1 });
+  const existing = [{ status: 'completed', items: [{ product_id: A, quantity: 1 }] }];
+  const requested = [{ product_id: A, quantity: 2 }];
+  const first = calculatePosReturnRefund(sale, requested, existing);
+  const second = calculatePosReturnRefund(sale, requested, existing);
+  assert.deepEqual(first, second);
+});
