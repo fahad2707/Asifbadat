@@ -4,7 +4,9 @@ import OrderItem from '../models/OrderItem';
 import POSSale from '../models/POSSale';
 import Product from '../models/Product';
 import Category from '../models/Category';
+import Return from '../models/Return';
 import { authenticateAdmin, AuthRequest } from '../middleware/auth';
+import { applyPosReturnMerchandiseByDate, completedPosReturnMatch } from '../utils/posFinancialReporting';
 
 const router = express.Router();
 
@@ -54,9 +56,12 @@ router.get('/sales', authenticateAdmin, async (req: AuthRequest, res) => {
       .sort((a, b) => a.date.localeCompare(b.date));
 
     // Offline sales (POS)
-    const posSales = await POSSale.find({
-      created_at: { $gte: startDate },
-    }).lean();
+    const [posSales, posReturns] = await Promise.all([
+      POSSale.find({
+        created_at: { $gte: startDate },
+      }).lean(),
+      Return.find(completedPosReturnMatch(startDate)).lean(),
+    ]);
 
     const offlineSalesMap = new Map<string, { revenue: number; sales: number }>();
     posSales.forEach((sale: any) => {
@@ -66,6 +71,12 @@ router.get('/sales', authenticateAdmin, async (req: AuthRequest, res) => {
       existing.sales += 1;
       offlineSalesMap.set(dateKey, existing);
     });
+    applyPosReturnMerchandiseByDate(
+      offlineSalesMap,
+      posReturns,
+      (createdAt) => formatDate(new Date(createdAt as string | number | Date), groupBy as string),
+      () => ({ revenue: 0, sales: 0 })
+    );
 
     const offlineSales = Array.from(offlineSalesMap.entries())
       .map(([date, data]) => ({
@@ -119,6 +130,20 @@ router.get('/sales', authenticateAdmin, async (req: AuthRequest, res) => {
       }
     }
 
+    for (const ret of posReturns as Array<{ items?: Array<{ product_id?: unknown; quantity?: number; refundable_amount?: number }> }>) {
+      for (const item of ret.items || []) {
+        if (!item.product_id) continue;
+        const product = await Product.findById(item.product_id).lean();
+        if (!product?.category_id) continue;
+        const category = await Category.findById(product.category_id).lean();
+        const categoryName = category?.name || 'Uncategorized';
+        const existing = categorySalesMap.get(categoryName) || { revenue: 0, quantity: 0 };
+        existing.revenue -= Number(item.refundable_amount) || 0;
+        existing.quantity -= Number(item.quantity) || 0;
+        categorySalesMap.set(categoryName, existing);
+      }
+    }
+
     const categorySales = Array.from(categorySalesMap.entries())
       .map(([category, data]) => ({
         category,
@@ -163,15 +188,32 @@ router.get('/revenue', authenticateAdmin, async (req: AuthRequest, res) => {
       .sort((a, b) => a.date.localeCompare(b.date));
 
     // POS revenue
-    const posSales = await POSSale.find({
-      created_at: { $gte: startDate },
-    }).lean();
+    const [posSales, posReturns] = await Promise.all([
+      POSSale.find({
+        created_at: { $gte: startDate },
+      }).lean(),
+      Return.find(completedPosReturnMatch(startDate)).lean(),
+    ]);
 
     const offlineMap = new Map<string, number>();
     posSales.forEach((sale: any) => {
       const dateKey = formatDate(sale.created_at, 'day');
       offlineMap.set(dateKey, (offlineMap.get(dateKey) || 0) + (sale.total_amount || 0));
     });
+    const offlineBuckets = new Map<string, { revenue: number }>();
+    for (const [date, revenue] of offlineMap) {
+      offlineBuckets.set(date, { revenue });
+    }
+    applyPosReturnMerchandiseByDate(
+      offlineBuckets,
+      posReturns,
+      (createdAt) => formatDate(new Date(createdAt as string | number | Date), 'day'),
+      () => ({ revenue: 0 })
+    );
+    offlineMap.clear();
+    for (const [date, bucket] of offlineBuckets) {
+      offlineMap.set(date, bucket.revenue);
+    }
 
     const offline = Array.from(offlineMap.entries())
       .map(([date, revenue]) => ({ date, revenue }))

@@ -5,6 +5,7 @@ import POSSale from '../models/POSSale';
 import Invoice from '../models/Invoice';
 import Product from '../models/Product';
 import PurchaseOrder from '../models/PurchaseOrder';
+import Return from '../models/Return';
 import { authenticateAdmin, AuthRequest } from '../middleware/auth';
 import Expense from '../modules/expenses/models/Expense';
 import mongoose from 'mongoose';
@@ -12,9 +13,15 @@ import { dashboardWholesaleInvoiceMatch, receivableOpenBalance } from '../utils/
 import {
   dashboardInvoiceCogs,
   dashboardInvoiceRevenue,
-  dashboardItemCogs,
+  dashboardPosCogs,
   dashboardPosRevenue,
 } from '../utils/dashboardFinancial';
+import {
+  completedPosReturnMatch,
+  indexPosSalesById,
+  missingPosSaleIds,
+  yearMonthKey,
+} from '../utils/posFinancialReporting';
 
 const router = express.Router();
 
@@ -43,7 +50,7 @@ router.get('/dashboard', authenticateAdmin, async (req: AuthRequest, res) => {
     const startDate = new Date();
     startDate.setDate(startDate.getDate() - days);
 
-    const [orders, posSales, invoices, pos_agg, expenseAgg] = await Promise.all([
+    const [orders, posSales, invoices, pos_agg, expenseAgg, posReturns] = await Promise.all([
       Order.find({ created_at: { $gte: startDate }, payment_status: 'paid' }).lean(),
       POSSale.find({ created_at: { $gte: startDate } }).lean(),
       Invoice.find({ created_at: { $gte: startDate }, ...dashboardWholesaleInvoiceMatch }).lean(),
@@ -60,10 +67,22 @@ router.get('/dashboard', authenticateAdmin, async (req: AuthRequest, res) => {
         },
         { $group: { _id: null, total: { $sum: '$amount' } } },
       ]),
+      Return.find(completedPosReturnMatch(startDate)).lean(),
     ]);
 
+    const posSalesById = indexPosSalesById(posSales as Array<{ _id?: unknown }>);
+    const extraSaleIds = missingPosSaleIds(posReturns as Array<{ status?: unknown; sale_id?: unknown }>, posSalesById)
+      .filter((id) => mongoose.Types.ObjectId.isValid(id))
+      .map((id) => new mongoose.Types.ObjectId(id));
+    const extraPosSales = extraSaleIds.length
+      ? await POSSale.find({ _id: { $in: extraSaleIds } }).lean()
+      : [];
+    for (const sale of extraPosSales) {
+      posSalesById.set(String(sale._id), sale);
+    }
+
     const onlineRevenue = orders.reduce((sum, order) => sum + (order.total_amount || 0), 0);
-    const offlineRevenue = dashboardPosRevenue(posSales);
+    const offlineRevenue = dashboardPosRevenue(posSales, posReturns);
     const invoiceRevenue = dashboardInvoiceRevenue(invoices);
     const totalSales = Math.round((Number(onlineRevenue) + Number(offlineRevenue) + Number(invoiceRevenue)) * 100) / 100;
     const totalPurchases = Math.round(Number(pos_agg[0]?.total || 0) * 100) / 100;
@@ -94,7 +113,7 @@ router.get('/dashboard', authenticateAdmin, async (req: AuthRequest, res) => {
       const pid = item.product_id ? String(item.product_id) : '';
       totalCOGS += (item.quantity || 0) * (costMap.get(pid) ?? 0);
     }
-    totalCOGS += dashboardItemCogs(posSales, costMap);
+    totalCOGS += dashboardPosCogs(posSales, costMap, posReturns, posSalesById);
     totalCOGS += dashboardInvoiceCogs(invoices, costMap);
 
     const netProfit = totalSales - totalCOGS - totalExpenses;
@@ -147,9 +166,13 @@ router.get('/dashboard', authenticateAdmin, async (req: AuthRequest, res) => {
       monthMap.set(key, (monthMap.get(key) || 0) + (o.total_amount || 0));
     });
     posSales.forEach((s: { created_at: Date; total_amount?: number }) => {
-      const d = new Date(s.created_at);
-      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+      const key = yearMonthKey(s.created_at);
       monthMap.set(key, (monthMap.get(key) || 0) + (s.total_amount || 0));
+    });
+    posReturns.forEach((ret: { created_at?: Date; total_refund?: number; status?: string }) => {
+      if (ret.status !== 'completed') return;
+      const key = yearMonthKey(ret.created_at);
+      monthMap.set(key, (monthMap.get(key) || 0) - (Number(ret.total_refund) || 0));
     });
     invoices.forEach((inv: { created_at: Date; total_amount?: number }) => {
       const d = new Date(inv.created_at);

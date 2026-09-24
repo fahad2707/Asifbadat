@@ -40,6 +40,15 @@ export async function waitForCommittedKeyedSale<T>(
   return null;
 }
 
+function omitInternalCostPrice<T>(item: T): T {
+  if (!item || typeof item !== 'object') return item;
+  const plain = typeof (item as { toObject?: () => unknown }).toObject === 'function'
+    ? (item as { toObject: () => Record<string, unknown> }).toObject()
+    : { ...(item as Record<string, unknown>) };
+  const { cost_price: _costPrice, ...rest } = plain;
+  return rest as T;
+}
+
 export function formatPosSaleResponse(sale: any, invoice: any) {
   const saleObj = typeof sale?.toObject === 'function' ? sale.toObject() : { ...sale };
   const invoiceObj = typeof invoice?.toObject === 'function' ? invoice.toObject() : { ...invoice };
@@ -47,10 +56,12 @@ export function formatPosSaleResponse(sale: any, invoice: any) {
     sale: {
       id: String(sale?._id ?? saleObj?._id),
       ...saleObj,
+      items: Array.isArray(saleObj?.items) ? saleObj.items.map(omitInternalCostPrice) : saleObj?.items,
     },
     invoice: {
       id: String(invoice?._id ?? invoiceObj?._id),
       ...invoiceObj,
+      items: Array.isArray(invoiceObj?.items) ? invoiceObj.items.map(omitInternalCostPrice) : invoiceObj?.items,
     },
   };
 }

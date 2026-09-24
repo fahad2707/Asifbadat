@@ -7,6 +7,11 @@ export interface IPOSSaleItem {
   discount?: number; // Line-level discount
   tax?: number; // Tax amount for this line
   subtotal: number;
+  /**
+   * Sale-time Product.cost_price snapshot. Internal COGS basis only.
+   * Optional so historical POSSale lines without a snapshot stay readable.
+   */
+  cost_price?: number;
 }
 
 export interface IPOSSale extends Document {
@@ -46,6 +51,8 @@ const POSSaleItemSchema = new Schema<IPOSSaleItem>({
   discount: { type: Number, default: 0 },
   tax: { type: Number, default: 0 },
   subtotal: { type: Number, required: true },
+  // Immutable sale-time catalog cost. Not required; never backfilled.
+  cost_price: { type: Number },
 });
 
 const POSSaleSchema = new Schema<IPOSSale>(

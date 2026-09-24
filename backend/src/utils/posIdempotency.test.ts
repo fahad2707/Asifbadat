@@ -47,3 +47,19 @@ test('formatPosSaleResponse preserves original ids', () => {
   assert.equal(payload.sale.id, 'sale-orig');
   assert.equal(payload.invoice.id, 'inv-orig');
 });
+
+test('formatPosSaleResponse omits internal sale-time cost from sale and invoice items', () => {
+  const payload = formatPosSaleResponse(
+    {
+      _id: 'sale-cost',
+      items: [{ product_id: 'p1', quantity: 1, price: 100, subtotal: 100, cost_price: 42 }],
+    },
+    {
+      _id: 'inv-cost',
+      items: [{ product_id: 'p1', quantity: 1, price: 100, subtotal: 100, cost_price: 42 }],
+    }
+  );
+  assert.equal('cost_price' in payload.sale.items[0], false);
+  assert.equal(payload.sale.items[0].price, 100);
+  assert.equal('cost_price' in payload.invoice.items[0], false);
+});

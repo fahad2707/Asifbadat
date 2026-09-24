@@ -12,6 +12,7 @@ import {
   dashboardInvoiceCogs,
   dashboardInvoiceRevenue,
   dashboardItemCogs,
+  dashboardPosCogs,
   dashboardPosRevenue,
   invoiceContributesToDashboardFinancials,
 } from './dashboardFinancial';
@@ -48,6 +49,14 @@ test('POS COGS is counted from POSSale items only', () => {
 
   assert.equal(dashboardItemCogs(posSales, costMap), 80);
   assert.equal(dashboardInvoiceCogs(invoices, costMap), 40);
+  assert.equal(
+    dashboardPosCogs(
+      [{ _id: 'sale-1', items: [{ product_id: productId, quantity: 2, cost_price: 40 }] }],
+      new Map([[productId, 99]]),
+      [{ status: 'completed', sale_id: 'sale-1', items: [{ product_id: productId, quantity: 1 }] }]
+    ),
+    40
+  );
 });
 
 test('dashboard route uses wholesale invoice match and POSSale helpers', () => {
@@ -55,6 +64,7 @@ test('dashboard route uses wholesale invoice match and POSSale helpers', () => {
   assert.match(admin, /dashboardWholesaleInvoiceMatch/);
   assert.match(admin, /dashboardPosRevenue/);
   assert.match(admin, /dashboardInvoiceRevenue/);
-  assert.match(admin, /dashboardItemCogs/);
+  assert.match(admin, /dashboardPosCogs/);
   assert.match(admin, /dashboardInvoiceCogs/);
+  assert.match(admin, /completedPosReturnMatch/);
 });

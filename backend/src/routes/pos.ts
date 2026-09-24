@@ -218,6 +218,8 @@ router.post('/sale', authenticateAdmin, async (req: AuthRequest, res) => {
         discount: lineDiscount,
         tax: lineTax,
         subtotal: lineFinal,
+        // Sale-time snapshot only. Not used for price, tax, or tender math.
+        cost_price: Number((product as { cost_price?: number }).cost_price) || 0,
         isInventory,
       });
     }
@@ -425,7 +427,9 @@ router.get('/sales', authenticateAdmin, async (req: AuthRequest, res) => {
         customer_name: sale.customer_name,
         customer_phone: sale.customer_phone,
         customer_email: sale.customer_email,
-        items: sale.items,
+        items: Array.isArray(sale.items)
+          ? sale.items.map(({ cost_price: _costPrice, ...item }: any) => item)
+          : sale.items,
         subtotal: sale.subtotal,
         discount_amount: sale.discount_amount,
         tax_amount: sale.tax_amount,
@@ -463,9 +467,17 @@ router.get('/sales/:id', authenticateAdmin, async (req: AuthRequest, res) => {
       return res.status(404).json({ error: 'Sale not found' });
     }
 
+    const { items: rawItems, ...saleRest } = sale as { items?: unknown[] };
     res.json({
       id: sale._id.toString(),
-      ...sale,
+      ...saleRest,
+      items: Array.isArray(rawItems)
+        ? rawItems.map((item: any) => {
+            if (!item || typeof item !== 'object') return item;
+            const { cost_price: _costPrice, ...rest } = item;
+            return rest;
+          })
+        : rawItems,
     });
   } catch (error) {
     console.error('Get sale error:', error);
