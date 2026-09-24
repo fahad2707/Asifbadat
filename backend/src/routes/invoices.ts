@@ -12,6 +12,7 @@ import { sendPdfResponse } from '../utils/pdfHelpers';
 import {
   DOCUMENT_TYPE_INVOICE,
   DOCUMENT_TYPE_QUOTATION,
+  isPosSaleInvoiceType,
   receivableInvoiceMatch,
   shouldAdjustInventoryForDocumentType,
 } from '../utils/documentType';
@@ -364,6 +365,12 @@ router.put('/:id', authenticateAdmin, async (req: AuthRequest, res) => {
     const body = req.body as any;
     const invoice = await Invoice.findById(req.params.id);
     if (!invoice) return res.status(404).json({ error: 'Invoice not found' });
+
+    if (isPosSaleInvoiceType(invoice.invoice_type)) {
+      return res.status(400).json({
+        error: 'Completed POS sales cannot be edited through the invoice endpoint.',
+      });
+    }
 
     if (body.invoice_date !== undefined) invoice.invoice_date = new Date(body.invoice_date);
     // Task 05: document type is immutable here. Conversion is a later explicit operation.
