@@ -177,7 +177,7 @@ export default function AdminRFQPage() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-extrabold text-white tracking-tight">Quote Requests (RFQ)</h1>
+          <h1 className="text-3xl font-extrabold text-white tracking-tight">Quote requests</h1>
           <p className="text-xs text-slate-400 mt-1">
             Incoming digital quote requests submitted by website customers. Convert to quotation drafts.
           </p>

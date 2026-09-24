@@ -385,7 +385,7 @@ export function ProductsAdminView({ mode }: { mode: ProductsAdminMode }) {
       <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between mb-8">
         <div>
           <h1 className="text-3xl font-extrabold text-white tracking-tight">
-            {mode === 'inactive' ? 'Inactive Catalog Products' : 'Products & Catalog'}
+            Products
           </h1>
           {mode === 'inactive' ? (
             <p className="text-slate-400 mt-2 max-w-2xl text-xs">

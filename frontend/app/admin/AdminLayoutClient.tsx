@@ -4,32 +4,49 @@ import { useEffect, useState, useRef } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import Link from 'next/link';
 import {
-  LayoutDashboard,
-  Package,
-  ShoppingCart,
-  FileText,
   BarChart3,
   LogOut,
   Users,
-  Truck,
   ClipboardList,
   Warehouse,
   Settings,
   Bell,
-  FileSignature,
-  PackageCheck,
-  FolderTree,
-  Wallet,
   Landmark,
-  MessageSquare,
   ChevronDown,
   ChevronRight,
   Search,
-  Cpu,
-  CornerRightDown,
-  Sparkles,
+  ShoppingCart,
+  Menu,
+  X,
 } from 'lucide-react';
 import adminApi from '@/lib/admin-api';
+import { adminNavItemClass, adminNavUtilityClass, adminUi } from '@/lib/admin-ui';
+
+function pathMatches(pathname: string | null | undefined, href: string): boolean {
+  if (!pathname) return false;
+  if (href === '/admin/dashboard') return pathname === '/admin/dashboard';
+  return pathname === href || pathname.startsWith(`${href}/`);
+}
+
+function headerContextLabel(pathname: string | null | undefined): string {
+  if (!pathname) return 'Express Distributors';
+  if (pathname === '/admin/dashboard' || pathname.startsWith('/admin/dashboard/')) return 'Overview';
+  if (pathname === '/admin/invoices' || pathname.startsWith('/admin/invoices/')) return 'Invoices';
+  if (pathname === '/admin/customers' || pathname.startsWith('/admin/customers/')) return 'Customers';
+  if (pathname === '/admin/products' || pathname.startsWith('/admin/products/')) return 'Products';
+  if (pathname === '/admin/orders' || pathname.startsWith('/admin/orders/')) return 'Online sales';
+  if (pathname === '/admin/pos' || pathname.startsWith('/admin/pos/')) return 'Offline sales';
+  if (pathname === '/admin/inventory' || pathname.startsWith('/admin/inventory/')) return 'Inventory management';
+  if (pathname === '/admin/purchase-orders' || pathname.startsWith('/admin/purchase-orders/')) return 'Purchase order';
+  if (pathname === '/admin/vendors' || pathname.startsWith('/admin/vendors/')) return 'Vendors';
+  if (pathname === '/admin/expenses' || pathname.startsWith('/admin/expenses/')) return 'Expenses';
+  if (pathname === '/admin/credit-memos' || pathname.startsWith('/admin/credit-memos/')) return 'Credit memo';
+  if (pathname === '/admin/analytics' || pathname.startsWith('/admin/analytics/')) return 'Reports';
+  if (pathname === '/admin/rfq' || pathname.startsWith('/admin/rfq/')) return 'Quote requests';
+  if (pathname === '/admin/shipments' || pathname.startsWith('/admin/shipments/')) return 'Shipments';
+  if (pathname === '/admin/settings' || pathname.startsWith('/admin/settings/')) return 'Settings';
+  return 'Express Distributors';
+}
 
 interface SearchResult {
   type: 'Customer' | 'Product' | 'Invoice' | 'Order';
@@ -46,9 +63,10 @@ export default function AdminLayoutClient({ children }: { children: React.ReactN
   // Collapsible navigational groups
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({
     sales: false,
+    expenses: false,
+    customers: false,
     inventory: false,
-    purchases: false,
-    finance: false,
+    more: false,
   });
 
   // Search & Command Palette States
@@ -58,8 +76,10 @@ export default function AdminLayoutClient({ children }: { children: React.ReactN
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [searchFocused, setSearchFocused] = useState(false);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
 
   const searchRef = useRef<HTMLDivElement>(null);
+  const closeMobileNav = () => setMobileNavOpen(false);
 
   // Hotkeys: Ctrl + K or Cmd + K toggles palette
   useEffect(() => {
@@ -71,6 +91,7 @@ export default function AdminLayoutClient({ children }: { children: React.ReactN
       if (e.key === 'Escape') {
         setPaletteOpen(false);
         setSearchFocused(false);
+        setMobileNavOpen(false);
       }
     };
     window.addEventListener('keydown', handleKeyDown);
@@ -80,18 +101,36 @@ export default function AdminLayoutClient({ children }: { children: React.ReactN
   // Set default group open state based on current path on mount
   useEffect(() => {
     if (pathname) {
-      const isSales = ['/admin/orders', '/admin/rfq', '/admin/invoices'].some((p) => pathname.startsWith(p));
-      const isInventory = ['/admin/inventory', '/admin/shipments'].some((p) => pathname.startsWith(p));
-      const isPurchases = ['/admin/vendors', '/admin/purchase-orders'].some((p) => pathname.startsWith(p));
-      const isFinance = ['/admin/invoices', '/admin/receipts', '/admin/expenses', '/admin/credit-memos'].some((p) => pathname.startsWith(p));
+      const isSales = ['/admin/dashboard', '/admin/invoices', '/admin/products'].some((p) =>
+        pathname === p || pathname.startsWith(`${p}/`)
+      );
+      const isExpenses = ['/admin/expenses', '/admin/vendors'].some((p) =>
+        pathname === p || pathname.startsWith(`${p}/`)
+      );
+      const isCustomers = pathname === '/admin/customers' || pathname.startsWith('/admin/customers/');
+      const isInventory = [
+        '/admin/orders',
+        '/admin/pos',
+        '/admin/inventory',
+        '/admin/purchase-orders',
+        '/admin/credit-memos',
+      ].some((p) => pathname === p || pathname.startsWith(`${p}/`));
+      const isMore = ['/admin/rfq', '/admin/shipments'].some((p) =>
+        pathname === p || pathname.startsWith(`${p}/`)
+      );
 
       setOpenGroups({
         sales: isSales,
+        expenses: isExpenses,
+        customers: isCustomers,
         inventory: isInventory,
-        purchases: isPurchases,
-        finance: isFinance,
+        more: isMore,
       });
     }
+  }, [pathname]);
+
+  useEffect(() => {
+    setMobileNavOpen(false);
   }, [pathname]);
 
   // Handle outside click for search dropdown
@@ -222,67 +261,63 @@ export default function AdminLayoutClient({ children }: { children: React.ReactN
   ];
 
   return (
-    <div className="h-dvh min-h-0 overflow-hidden bg-[#0a0f1d] text-slate-100 flex flex-col font-sans">
-      
-      {/* Universal Command Palette (iOS Glass Modal Overlay) */}
+    <div className={`h-dvh min-h-0 overflow-hidden flex flex-col font-sans ${adminUi.app}`}>
       {paletteOpen && (
-        <div className="fixed inset-0 z-50 flex items-start justify-center pt-[15dvh] px-4 backdrop-blur-md bg-black/40 transition-all duration-300">
-          <div className="w-full max-w-lg rounded-2xl bg-slate-950/75 border border-white/10 shadow-[0_24px_50px_rgba(0,0,0,0.5)] overflow-hidden backdrop-filter backdrop-blur-xl">
-            <div className="p-4 border-b border-white/5 flex items-center gap-3">
-              <Search className="w-5 h-5 text-teal-400" />
+        <div className="fixed inset-0 z-50 flex items-start justify-center pt-[15dvh] px-4 bg-black/50">
+          <div className={`w-full max-w-lg overflow-hidden ${adminUi.overlay}`}>
+            <div className="p-3 border-b border-slate-800 flex items-center gap-3">
+              <Search className="w-4 h-4 text-slate-400" />
               <input
                 type="text"
                 placeholder="Type command or search items..."
-                className="bg-transparent text-white border-0 focus:ring-0 outline-none w-full text-base placeholder-slate-500"
+                className="bg-transparent text-white border-0 focus:ring-0 outline-none w-full text-sm placeholder-slate-500"
                 autoFocus
                 value={globalSearch}
                 onChange={(e) => setGlobalSearch(e.target.value)}
               />
-              <span className="text-[10px] bg-slate-800 text-slate-400 px-2 py-0.5 rounded font-mono">ESC</span>
+              <span className={`${adminUi.badge} font-mono`}>ESC</span>
             </div>
             
             <div className="max-h-[350px] overflow-y-auto p-2 space-y-1">
               {globalSearch.trim() ? (
                 <>
-                  <p className="text-[10px] font-bold text-slate-500 px-2 py-1 tracking-wider uppercase">Search Results</p>
+                  <p className={`${adminUi.navGroup} px-2 py-1`}>Search results</p>
                   {searching ? (
-                    <div className="py-8 text-center text-sm text-slate-400">Searching active databases...</div>
+                    <div className={`py-8 text-center ${adminUi.meta}`}>Searching active databases...</div>
                   ) : searchResults.length > 0 ? (
                     searchResults.map((r, idx) => (
                       <button
                         key={idx}
                         onClick={() => { router.push(r.url); setPaletteOpen(false); setGlobalSearch(''); }}
-                        className="w-full flex items-center justify-between p-2 rounded-xl hover:bg-white/10 transition-colors text-left"
+                        className="w-full flex items-center justify-between p-2 rounded-md hover:bg-slate-900 text-left"
                       >
                         <div>
-                          <p className="text-sm font-semibold text-white">{r.title}</p>
-                          <p className="text-xs text-slate-400">{r.subtitle}</p>
+                          <p className="text-sm font-medium text-white">{r.title}</p>
+                          <p className={adminUi.helper}>{r.subtitle}</p>
                         </div>
-                        <span className="text-[10px] bg-teal-500/20 text-teal-300 px-2 py-0.5 rounded-lg border border-teal-500/30 font-semibold">{r.type}</span>
+                        <span className={adminUi.badge}>{r.type}</span>
                       </button>
                     ))
                   ) : (
-                    <div className="py-8 text-center text-sm text-slate-500">No matches found. Try again.</div>
+                    <div className={`py-8 text-center ${adminUi.helper}`}>No matches found. Try again.</div>
                   )}
                 </>
               ) : (
                 <>
-                  <p className="text-[10px] font-bold text-slate-500 px-2 py-1 tracking-wider uppercase">Quick Actions</p>
+                  <p className={`${adminUi.navGroup} px-2 py-1`}>Quick actions</p>
                   {paletteActions.map((act) => {
                     const ActIcon = act.icon;
                     return (
                       <button
                         key={act.label}
                         onClick={act.action}
-                        className="w-full flex items-center justify-between px-3 py-2.5 rounded-xl hover:bg-white/10 transition-colors text-left group"
+                        className="w-full flex items-center justify-between px-3 py-2 rounded-md hover:bg-slate-900 text-left"
                       >
                         <div className="flex items-center gap-3">
-                          <div className="p-2 rounded-lg bg-teal-500/10 text-teal-400 group-hover:bg-teal-500 group-hover:text-white transition-all">
-                            <ActIcon className="w-4 h-4" />
-                          </div>
+                          <ActIcon className="w-4 h-4 text-slate-400" />
                           <span className="text-sm font-medium text-slate-200">{act.label}</span>
                         </div>
-                        <kbd className="text-[10px] bg-slate-900 border border-white/5 text-slate-400 px-2 py-1 rounded font-mono">{act.short}</kbd>
+                        <kbd className={`${adminUi.badge} font-mono`}>{act.short}</kbd>
                       </button>
                     );
                   })}
@@ -293,198 +328,150 @@ export default function AdminLayoutClient({ children }: { children: React.ReactN
         </div>
       )}
 
-      {/* Main Framework Wrapper */}
-      <div className="flex flex-1 min-h-0">
-        
-        {/* iOS-Style Sidebar (Glassmorphic dark layout) */}
-        <aside className="w-64 bg-slate-950/70 border-r border-white/5 flex flex-col shrink-0 h-full min-h-0 backdrop-filter backdrop-blur-xl">
-          <div className="p-5 flex items-center gap-3 border-b border-white/5 shrink-0">
-            <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-teal-500 to-emerald-400 flex items-center justify-center shadow-lg shadow-teal-500/20">
-              <Sparkles className="w-5 h-5 text-white" />
-            </div>
-            <div>
-              <span className="font-bold text-base tracking-wide text-white block leading-tight">Express ERP</span>
-              <span className="text-[10px] text-teal-400 font-semibold tracking-wider uppercase mt-px block">Enterprise 2.0</span>
-            </div>
+      <div className="flex flex-1 min-h-0 relative">
+        {mobileNavOpen && (
+          <button
+            type="button"
+            className="fixed inset-0 z-30 bg-black/50 lg:hidden"
+            aria-label="Close navigation"
+            onClick={closeMobileNav}
+          />
+        )}
+
+        <aside
+          className={`w-64 flex flex-col shrink-0 h-full min-h-0 ${adminUi.sidebar} fixed inset-y-0 left-0 z-40 transform transition-transform duration-200 lg:static lg:translate-x-0 lg:z-auto ${
+            mobileNavOpen ? 'translate-x-0' : '-translate-x-full'
+          }`}
+        >
+          <div className="px-4 py-4 border-b border-slate-800 shrink-0 flex items-center justify-between gap-2">
+            <span className="font-semibold text-sm text-white block leading-tight">Express Distributors</span>
+            <button
+              type="button"
+              onClick={closeMobileNav}
+              className={`${adminUi.btnIcon} lg:hidden`}
+              aria-label="Close navigation"
+            >
+              <X className="w-4 h-4" />
+            </button>
           </div>
 
-          <nav className="flex-1 min-h-0 p-4 space-y-1 overflow-y-auto overscroll-contain">
-            
-            {/* 1. Dashboard */}
-            <Link
-              href="/admin/dashboard"
-              className={`flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all duration-200 ${
-                pathname === '/admin/dashboard'
-                  ? 'bg-gradient-to-tr from-teal-600 to-teal-500 text-white shadow-lg shadow-teal-500/15 border border-white/10'
-                  : 'text-slate-400 hover:text-white hover:bg-white/5'
-              }`}
-            >
-              <LayoutDashboard className="w-4 h-4 shrink-0" />
-              <span className="text-xs font-semibold">Dashboard</span>
-            </Link>
-
-            {/* 2. Sales Group */}
+          <nav
+            className="flex-1 min-h-0 p-3 space-y-3 overflow-y-auto overscroll-contain"
+            onClick={(e) => {
+              if ((e.target as HTMLElement).closest('a')) closeMobileNav();
+            }}
+          >
             <div>
               <button
                 type="button"
                 onClick={() => toggleGroup('sales')}
-                className="w-full flex items-center justify-between px-3 py-2.5 rounded-xl hover:bg-white/5 text-slate-400 hover:text-white transition-all text-left"
+                className="w-full flex items-center justify-between px-3 py-1.5 rounded-md hover:bg-slate-900 text-left"
               >
-                <div className="flex items-center gap-3">
-                  <ShoppingCart className="w-4 h-4 shrink-0" />
-                  <span className="text-xs font-semibold">Sales</span>
-                </div>
-                {openGroups.sales ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronRight className="w-3.5 h-3.5" />}
+                <span className={adminUi.navGroup}>Sales and get paid</span>
+                {openGroups.sales ? <ChevronDown className="w-3.5 h-3.5 text-slate-500" /> : <ChevronRight className="w-3.5 h-3.5 text-slate-500" />}
               </button>
               {openGroups.sales && (
-                <div className="pl-6 pr-2 mt-1 space-y-1 border-l border-white/5 ml-5">
-                  <Link href="/admin/orders" className={`block px-3 py-2 text-[11px] font-semibold rounded-lg ${pathname === '/admin/orders' ? 'text-teal-400' : 'text-slate-500 hover:text-slate-200'}`}>Orders</Link>
-                  <Link href="/admin/rfq" className={`block px-3 py-2 text-[11px] font-semibold rounded-lg ${pathname === '/admin/rfq' ? 'text-teal-400' : 'text-slate-500 hover:text-slate-200'}`}>Quotations (RFQ)</Link>
-                  <Link href="/admin/invoices" className={`block px-3 py-2 text-[11px] font-semibold rounded-lg ${pathname === '/admin/invoices' ? 'text-teal-400' : 'text-slate-500 hover:text-slate-200'}`}>Invoices</Link>
+                <div className="pl-2 mt-0.5 space-y-0.5">
+                  <Link href="/admin/dashboard" className={adminNavItemClass(pathMatches(pathname, '/admin/dashboard'))}>Overview</Link>
+                  <Link href="/admin/invoices" className={adminNavItemClass(pathMatches(pathname, '/admin/invoices'))}>Invoices</Link>
+                  <Link href="/admin/products" className={adminNavItemClass(pathMatches(pathname, '/admin/products'))}>Products</Link>
                 </div>
               )}
             </div>
 
-            {/* 3. Customers */}
-            <Link
-              href="/admin/customers"
-              className={`flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all duration-200 ${
-                pathname?.startsWith('/admin/customers')
-                  ? 'bg-gradient-to-tr from-teal-600 to-teal-500 text-white shadow-lg shadow-teal-500/15 border border-white/10'
-                  : 'text-slate-400 hover:text-white hover:bg-white/5'
-              }`}
-            >
-              <Users className="w-4 h-4 shrink-0" />
-              <span className="text-xs font-semibold">Customers</span>
-            </Link>
+            <div>
+              <button
+                type="button"
+                onClick={() => toggleGroup('expenses')}
+                className="w-full flex items-center justify-between px-3 py-1.5 rounded-md hover:bg-slate-900 text-left"
+              >
+                <span className={adminUi.navGroup}>Expenses</span>
+                {openGroups.expenses ? <ChevronDown className="w-3.5 h-3.5 text-slate-500" /> : <ChevronRight className="w-3.5 h-3.5 text-slate-500" />}
+              </button>
+              {openGroups.expenses && (
+                <div className="pl-2 mt-0.5 space-y-0.5">
+                  <Link href="/admin/expenses" className={adminNavItemClass(pathMatches(pathname, '/admin/expenses'))}>Overview</Link>
+                  <Link href="/admin/vendors" className={adminNavItemClass(pathMatches(pathname, '/admin/vendors'))}>Vendors</Link>
+                </div>
+              )}
+            </div>
 
-            {/* 4. Products */}
-            <Link
-              href="/admin/products/active"
-              className={`flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all duration-200 ${
-                pathname?.startsWith('/admin/products')
-                  ? 'bg-gradient-to-tr from-teal-600 to-teal-500 text-white shadow-lg shadow-teal-500/15 border border-white/10'
-                  : 'text-slate-400 hover:text-white hover:bg-white/5'
-              }`}
-            >
-              <Package className="w-4 h-4 shrink-0" />
-              <span className="text-xs font-semibold">Products</span>
-            </Link>
+            <div>
+              <button
+                type="button"
+                onClick={() => toggleGroup('customers')}
+                className="w-full flex items-center justify-between px-3 py-1.5 rounded-md hover:bg-slate-900 text-left"
+              >
+                <span className={adminUi.navGroup}>Customer hub</span>
+                {openGroups.customers ? <ChevronDown className="w-3.5 h-3.5 text-slate-500" /> : <ChevronRight className="w-3.5 h-3.5 text-slate-500" />}
+              </button>
+              {openGroups.customers && (
+                <div className="pl-2 mt-0.5 space-y-0.5">
+                  <Link href="/admin/customers" className={adminNavItemClass(pathMatches(pathname, '/admin/customers'))}>Customers</Link>
+                </div>
+              )}
+            </div>
 
-            {/* 5. Inventory Group */}
             <div>
               <button
                 type="button"
                 onClick={() => toggleGroup('inventory')}
-                className="w-full flex items-center justify-between px-3 py-2.5 rounded-xl hover:bg-white/5 text-slate-400 hover:text-white transition-all text-left"
+                className="w-full flex items-center justify-between px-3 py-1.5 rounded-md hover:bg-slate-900 text-left"
               >
-                <div className="flex items-center gap-3">
-                  <Warehouse className="w-4 h-4 shrink-0" />
-                  <span className="text-xs font-semibold">Inventory</span>
-                </div>
-                {openGroups.inventory ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronRight className="w-3.5 h-3.5" />}
+                <span className={adminUi.navGroup}>Inventory</span>
+                {openGroups.inventory ? <ChevronDown className="w-3.5 h-3.5 text-slate-500" /> : <ChevronRight className="w-3.5 h-3.5 text-slate-500" />}
               </button>
               {openGroups.inventory && (
-                <div className="pl-6 pr-2 mt-1 space-y-1 border-l border-white/5 ml-5">
-                  <Link href="/admin/inventory" className={`block px-3 py-2 text-[11px] font-semibold rounded-lg ${pathname === '/admin/inventory' ? 'text-teal-400' : 'text-slate-500 hover:text-slate-200'}`}>Stock Levels</Link>
-                  <Link href="/admin/shipments" className={`block px-3 py-2 text-[11px] font-semibold rounded-lg ${pathname === '/admin/shipments' ? 'text-teal-400' : 'text-slate-500 hover:text-slate-200'}`}>Shipments</Link>
-                  <Link href="/admin/catalog" className={`block px-3 py-2 text-[11px] font-semibold rounded-lg ${pathname === '/admin/catalog' ? 'text-teal-400' : 'text-slate-500 hover:text-slate-200'}`}>Categories &amp; Tax</Link>
+                <div className="pl-2 mt-0.5 space-y-0.5">
+                  <Link href="/admin/orders" className={adminNavItemClass(pathMatches(pathname, '/admin/orders'))}>Online sales</Link>
+                  <Link href="/admin/pos" className={adminNavItemClass(pathMatches(pathname, '/admin/pos'))}>Offline sales</Link>
+                  <Link href="/admin/inventory" className={adminNavItemClass(pathMatches(pathname, '/admin/inventory'))}>Inventory management</Link>
+                  <Link href="/admin/purchase-orders" className={adminNavItemClass(pathMatches(pathname, '/admin/purchase-orders'))}>Purchase order</Link>
+                  <Link href="/admin/credit-memos" className={adminNavItemClass(pathMatches(pathname, '/admin/credit-memos'))}>Credit memo</Link>
                 </div>
               )}
             </div>
 
-            {/* 6. Purchases Group */}
+            <div>
+              <Link href="/admin/analytics" className={adminNavUtilityClass(pathMatches(pathname, '/admin/analytics'))}>
+                <BarChart3 className="w-4 h-4 shrink-0" />
+                <span>Reports</span>
+              </Link>
+            </div>
+
             <div>
               <button
                 type="button"
-                onClick={() => toggleGroup('purchases')}
-                className="w-full flex items-center justify-between px-3 py-2.5 rounded-xl hover:bg-white/5 text-slate-400 hover:text-white transition-all text-left"
+                onClick={() => toggleGroup('more')}
+                className="w-full flex items-center justify-between px-3 py-1.5 rounded-md hover:bg-slate-900 text-left"
               >
-                <div className="flex items-center gap-3">
-                  <Truck className="w-4 h-4 shrink-0" />
-                  <span className="text-xs font-semibold">Purchases</span>
-                </div>
-                {openGroups.purchases ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronRight className="w-3.5 h-3.5" />}
+                <span className={adminUi.navGroup}>More</span>
+                {openGroups.more ? <ChevronDown className="w-3.5 h-3.5 text-slate-500" /> : <ChevronRight className="w-3.5 h-3.5 text-slate-500" />}
               </button>
-              {openGroups.purchases && (
-                <div className="pl-6 pr-2 mt-1 space-y-1 border-l border-white/5 ml-5">
-                  <Link href="/admin/purchase-orders" className={`block px-3 py-2 text-[11px] font-semibold rounded-lg ${pathname === '/admin/purchase-orders' ? 'text-teal-400' : 'text-slate-500 hover:text-slate-200'}`}>PO purchase orders</Link>
-                  <Link href="/admin/vendors" className={`block px-3 py-2 text-[11px] font-semibold rounded-lg ${pathname === '/admin/vendors' ? 'text-teal-400' : 'text-slate-500 hover:text-slate-200'}`}>Suppliers</Link>
+              {openGroups.more && (
+                <div className="pl-2 mt-0.5 space-y-0.5">
+                  <Link href="/admin/rfq" className={adminNavItemClass(pathMatches(pathname, '/admin/rfq'))}>Quote requests / RFQ</Link>
+                  <Link href="/admin/shipments" className={adminNavItemClass(pathMatches(pathname, '/admin/shipments'))}>Shipments</Link>
                 </div>
               )}
             </div>
 
-            {/* 7. Finance Group */}
-            <div>
-              <button
-                type="button"
-                onClick={() => toggleGroup('finance')}
-                className="w-full flex items-center justify-between px-3 py-2.5 rounded-xl hover:bg-white/5 text-slate-400 hover:text-white transition-all text-left"
-              >
-                <div className="flex items-center gap-3">
-                  <Wallet className="w-4 h-4 shrink-0" />
-                  <span className="text-xs font-semibold">Finance</span>
-                </div>
-                {openGroups.finance ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronRight className="w-3.5 h-3.5" />}
-              </button>
-              {openGroups.finance && (
-                <div className="pl-6 pr-2 mt-1 space-y-1 border-l border-white/5 ml-5">
-                  <Link href="/admin/invoices" className={`block px-3 py-2 text-[11px] font-semibold rounded-lg ${pathname === '/admin/invoices' ? 'text-teal-400' : 'text-slate-500 hover:text-slate-200'}`}>Invoices</Link>
-                  <Link href="/admin/receipts" className={`block px-3 py-2 text-[11px] font-semibold rounded-lg ${pathname === '/admin/receipts' ? 'text-teal-400' : 'text-slate-500 hover:text-slate-200'}`}>Payments In (Receipts)</Link>
-                  <Link href="/admin/expenses" className={`block px-3 py-2 text-[11px] font-semibold rounded-lg ${pathname === '/admin/expenses' ? 'text-teal-400' : 'text-slate-500 hover:text-slate-200'}`}>Expenses</Link>
-                  <Link href="/admin/credit-memos" className={`block px-3 py-2 text-[11px] font-semibold rounded-lg ${pathname === '/admin/credit-memos' ? 'text-teal-400' : 'text-slate-500 hover:text-slate-200'}`}>Credit Notes</Link>
-                </div>
-              )}
+            <div className="pt-1">
+              <Link href="/admin/settings" className={adminNavUtilityClass(pathMatches(pathname, '/admin/settings'))}>
+                <Settings className="w-4 h-4 shrink-0" />
+                <span>Settings</span>
+              </Link>
             </div>
-
-            {/* 8. Reports */}
-            <Link
-              href="/admin/analytics"
-              className={`flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all duration-200 ${
-                pathname === '/admin/analytics'
-                  ? 'bg-gradient-to-tr from-teal-600 to-teal-500 text-white shadow-lg shadow-teal-500/15 border border-white/10'
-                  : 'text-slate-400 hover:text-white hover:bg-white/5'
-              }`}
-            >
-              <BarChart3 className="w-4 h-4 shrink-0" />
-              <span className="text-xs font-semibold">Reports</span>
-            </Link>
-
-            {/* 9. Automation */}
-            <Link
-              href="/admin/automation"
-              className={`flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all duration-200 ${
-                pathname === '/admin/automation'
-                  ? 'bg-gradient-to-tr from-teal-600 to-teal-500 text-white shadow-lg shadow-teal-500/15 border border-white/10'
-                  : 'text-slate-400 hover:text-white hover:bg-white/5'
-              }`}
-            >
-              <Cpu className="w-4 h-4 shrink-0" />
-              <span className="text-xs font-semibold">Automation</span>
-            </Link>
-
-            {/* 10. Settings */}
-            <Link
-              href="/admin/settings"
-              className={`flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all duration-200 ${
-                pathname === '/admin/settings'
-                  ? 'bg-gradient-to-tr from-teal-600 to-teal-500 text-white shadow-lg shadow-teal-500/15 border border-white/10'
-                  : 'text-slate-400 hover:text-white hover:bg-white/5'
-              }`}
-            >
-              <Settings className="w-4 h-4 shrink-0" />
-              <span className="text-xs font-semibold">Settings</span>
-            </Link>
           </nav>
 
-          <div className="p-4 border-t border-white/5 shrink-0">
+          <div className="p-3 border-t border-slate-800 shrink-0">
             <button
               type="button"
               onClick={handleLogout}
-              className="flex items-center gap-3 px-3 py-2.5 rounded-xl text-slate-400 hover:text-white hover:bg-white/5 w-full transition-all"
+              className={`${adminUi.btnGhost} w-full justify-start`}
             >
               <LogOut className="w-4 h-4" />
-              <span className="text-xs font-semibold">Logout</span>
+              <span>Logout</span>
             </button>
           </div>
         </aside>
@@ -492,35 +479,43 @@ export default function AdminLayoutClient({ children }: { children: React.ReactN
         {/* Unified Application View Port */}
         <div className="flex-1 flex flex-col min-w-0 min-h-0 overflow-hidden">
           
-          {/* Header containing search matching metrics */}
-          <header className="h-16 bg-slate-950/40 border-b border-white/5 flex items-center justify-between px-6 shrink-0 backdrop-filter backdrop-blur-xl">
-            
-            {/* Header Universal Search Input */}
-            <div ref={searchRef} className="relative w-96 z-40">
-              <div className="relative group">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 group-focus-within:text-teal-400 transition-colors" />
+          <header className={`z-20 flex flex-wrap items-center gap-3 px-3 py-2 min-h-14 lg:h-14 lg:flex-nowrap lg:gap-6 lg:px-6 lg:py-0 shrink-0 ${adminUi.header}`}>
+            <button
+              type="button"
+              className={`${adminUi.btnIcon} lg:hidden`}
+              aria-label="Open navigation"
+              aria-expanded={mobileNavOpen}
+              onClick={() => setMobileNavOpen(true)}
+            >
+              <Menu className="w-4 h-4" />
+            </button>
+
+            <div className="min-w-0 flex-1 lg:w-44 lg:flex-none">
+              <p className="text-sm font-semibold text-white truncate">{headerContextLabel(pathname)}</p>
+            </div>
+
+            <div ref={searchRef} className="relative z-40 w-full min-w-0 order-last lg:order-none lg:flex-1 lg:max-w-md">
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
                 <input
                   type="text"
-                  placeholder="Ctrl + K search databases..."
+                  placeholder="Search"
                   value={globalSearch}
                   onFocus={() => setSearchFocused(true)}
                   onChange={(e) => setGlobalSearch(e.target.value)}
-                  className="w-full bg-slate-900/60 border border-white/10 rounded-xl pl-9 pr-4 py-2.5 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-teal-500 focus:border-teal-500 focus:bg-slate-950/80 transition-all font-semibold"
+                  className={`${adminUi.input} pl-9 pr-16`}
                 />
-                
-                {/* Visual hotkey indicator */}
-                <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-0.5 pointer-events-none">
-                  <span className="text-[10px] bg-slate-800 text-slate-500 px-1.5 py-0.5 rounded font-mono tracking-tighter">⌘</span>
-                  <span className="text-[10px] bg-slate-800 text-slate-500 px-1 py-0.5 rounded font-mono">K</span>
+                <div className="absolute right-2.5 top-1/2 -translate-y-1/2 hidden sm:flex items-center gap-0.5 pointer-events-none">
+                  <span className={`${adminUi.badge} font-mono`}>⌘</span>
+                  <span className={`${adminUi.badge} font-mono`}>K</span>
                 </div>
               </div>
 
-              {/* Dynamic search results overlay panel */}
               {searchFocused && (globalSearch.trim() || searchResults.length > 0) && (
-                <div className="absolute top-full left-0 right-0 mt-2 p-2 bg-slate-950/90 border border-white/10 rounded-xl shadow-[0_15px_30px_rgba(0,0,0,0.6)] backdrop-filter backdrop-blur-xl max-h-[300px] overflow-y-auto space-y-1">
+                <div className={`absolute top-full left-0 right-0 mt-2 p-2 max-h-[300px] overflow-y-auto space-y-1 ${adminUi.overlay}`}>
                   {searching ? (
-                    <div className="p-4 text-center text-xs text-slate-400 flex items-center justify-center gap-2">
-                      <div className="w-4 h-4 border-2 border-teal-500 border-t-transparent rounded-full animate-spin" />
+                    <div className={`p-4 text-center ${adminUi.meta} flex items-center justify-center gap-2`}>
+                      <div className="w-4 h-4 border-2 border-teal-600 border-t-transparent rounded-full animate-spin" />
                       Searching...
                     </div>
                   ) : searchResults.length > 0 ? (
@@ -533,72 +528,59 @@ export default function AdminLayoutClient({ children }: { children: React.ReactN
                           setSearchFocused(false);
                           setGlobalSearch('');
                         }}
-                        className="w-full p-2 hover:bg-white/5 rounded-lg flex items-center justify-between text-left transition-colors"
+                        className="w-full p-2 hover:bg-slate-900 rounded-md flex items-center justify-between text-left"
                       >
                         <div>
-                          <p className="text-xs font-bold text-slate-200">{r.title}</p>
-                          <p className="text-[10px] text-slate-500">{r.subtitle}</p>
+                          <p className="text-sm font-medium text-slate-200">{r.title}</p>
+                          <p className={adminUi.helper}>{r.subtitle}</p>
                         </div>
-                        <span className="text-[9px] bg-teal-500/10 text-teal-400 border border-teal-500/25 px-1.5 py-0.5 rounded font-bold uppercase">{r.type}</span>
+                        <span className={adminUi.badge}>{r.type}</span>
                       </button>
                     ))
                   ) : (
-                    <p className="text-center py-4 text-xs text-slate-500">No results found for &ldquo;{globalSearch}&rdquo;</p>
+                    <p className={`text-center py-4 ${adminUi.helper}`}>No results found for &ldquo;{globalSearch}&rdquo;</p>
                   )}
                 </div>
               )}
             </div>
 
-            {/* Notification & profile layout actions */}
-            <div className="flex items-center gap-3">
+            <div className="ml-auto flex items-center gap-3 shrink-0">
               <div className="relative">
                 <button
                   type="button"
                   onClick={() => setNotificationsOpen(!notificationsOpen)}
-                  className="p-2.5 rounded-xl bg-slate-900 border border-white/5 hover:bg-slate-800 text-slate-400 hover:text-white transition-all relative"
-                  aria-label="Alerts"
+                  className={adminUi.btnIcon}
+                  aria-label="Notifications"
                 >
                   <Bell className="w-4 h-4" />
-                  <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-teal-400 rounded-full animate-pulse" />
                 </button>
 
-                {/* Notifications Drawer */}
                 {notificationsOpen && (
                   <>
                     <div className="fixed inset-0 z-40" onClick={() => setNotificationsOpen(false)} />
-                    <div className="absolute right-0 top-full mt-2 w-72 p-3 bg-slate-950/95 border border-white/10 rounded-xl shadow-2xl z-50 backdrop-filter backdrop-blur-xl space-y-2">
-                      <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Alerts &amp; Updates</p>
-                      <div className="space-y-1.5 divide-y divide-white/5 text-[11px]">
-                        <div className="pt-1.5">
-                          <p className="font-semibold text-slate-200">System Alert: Low Stock</p>
-                          <p className="text-slate-500 text-[10px]">3 products fell below safety thresholds.</p>
-                        </div>
-                        <div className="pt-1.5">
-                          <p className="font-semibold text-slate-200">New RFQ Received</p>
-                          <p className="text-slate-500 text-[10px]">Received a wholesale request from ABC Traders.</p>
-                        </div>
-                      </div>
+                    <div className={`absolute right-0 top-full mt-2 w-72 max-w-[calc(100vw-2rem)] p-3 z-50 space-y-2 ${adminUi.overlay}`}>
+                      <p className={adminUi.navGroup}>Notifications</p>
+                      <p className={adminUi.helper}>No notifications</p>
                     </div>
                   </>
                 )}
               </div>
 
-              <div className="h-8 w-px bg-white/10 mx-1" />
+              <div className="h-6 w-px bg-slate-800" />
 
               <div className="flex items-center gap-2">
-                <div className="w-8 h-8 rounded-xl bg-teal-500/10 border border-teal-500/30 flex items-center justify-center text-teal-400 font-bold text-xs uppercase shadow-sm">
-                  AD
+                <div className="w-8 h-8 rounded-md bg-slate-800 border border-slate-700 flex items-center justify-center text-slate-300 text-xs font-medium">
+                  ED
                 </div>
-                <div className="hidden md:block leading-none text-left">
-                  <span className="text-xs font-semibold text-slate-200 block">Admin Office</span>
-                  <span className="text-[9px] text-slate-500 font-medium">Headquarters</span>
+                <div className="hidden md:block leading-tight text-left">
+                  <span className="text-xs font-medium text-slate-200 block">Account</span>
+                  <span className={`${adminUi.helper} block`}>Express Distributors</span>
                 </div>
               </div>
             </div>
           </header>
 
-          {/* Main Inner Content Body */}
-          <main className="flex-1 min-h-0 overflow-y-auto overscroll-contain bg-[#080d19] p-6 text-slate-200">
+          <main className={`flex-1 min-w-0 min-h-0 overflow-y-auto overflow-x-hidden overscroll-contain p-4 lg:p-6 ${adminUi.workspace}`}>
             {children}
           </main>
         </div>

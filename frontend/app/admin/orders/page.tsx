@@ -116,7 +116,7 @@ export default function OnlineOrdersPage() {
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-extrabold text-white tracking-tight">Online Orders</h1>
+          <h1 className="text-3xl font-extrabold text-white tracking-tight">Online sales</h1>
           <p className="text-xs text-slate-400 mt-1">Track and manage digital commerce sales orders and fulfillment pipelines.</p>
         </div>
         {summary && <span className="text-xs text-slate-500 font-bold uppercase tracking-wider">{summary.total} total orders</span>}

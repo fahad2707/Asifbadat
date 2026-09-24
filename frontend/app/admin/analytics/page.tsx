@@ -179,7 +179,7 @@ export default function AnalyticsPage() {
     <div className="space-y-6">
       <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between mb-2">
         <div>
-          <h1 className="text-3xl font-extrabold text-white tracking-tight">Ledger Reports &amp; Analytics</h1>
+          <h1 className="text-3xl font-extrabold text-white tracking-tight">Reports</h1>
           <p className="text-slate-400 text-xs mt-1">B2B Financial Overview, Gross Profit Margins, &amp; Operating Cost Trends.</p>
         </div>
         <div className="flex items-center gap-2.5 flex-wrap">

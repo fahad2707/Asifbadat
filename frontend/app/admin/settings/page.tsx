@@ -80,7 +80,7 @@ export default function SettingsPage() {
       <div className="flex items-center gap-3.5 mb-6">
         <Settings className="w-8 h-8 text-teal-400" />
         <div>
-          <h1 className="text-3xl font-extrabold text-white tracking-tight">System Settings</h1>
+          <h1 className="text-3xl font-extrabold text-white tracking-tight">Settings</h1>
           <p className="text-xs text-slate-400 mt-1">Configure retail invoice headers, default tax brackets, location parameters, and receipt notes.</p>
         </div>
       </div>

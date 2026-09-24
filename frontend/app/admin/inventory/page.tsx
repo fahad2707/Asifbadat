@@ -197,7 +197,7 @@ export default function InventoryPage() {
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-extrabold text-white tracking-tight">Warehouse Inventory</h1>
+          <h1 className="text-3xl font-extrabold text-white tracking-tight">Inventory management</h1>
           <p className="text-xs text-slate-400 mt-1">Track units purchased versus units sold, control buffer stock margins, and log adjustments.</p>
         </div>
       </div>

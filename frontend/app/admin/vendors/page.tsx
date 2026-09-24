@@ -165,7 +165,7 @@ export default function VendorsPage() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-extrabold text-white tracking-tight">Supplier Directory</h1>
+          <h1 className="text-3xl font-extrabold text-white tracking-tight">Vendors</h1>
           <p className="text-xs text-slate-400 mt-1">Registry ledger of wholesale merchant suppliers, drop-shippers, and procurement partners.</p>
         </div>
       </div>

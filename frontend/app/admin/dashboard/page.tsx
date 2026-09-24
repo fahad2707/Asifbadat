@@ -82,9 +82,7 @@ export default function AdminDashboard() {
     <div className="max-w-[1400px] mx-auto space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-extrabold text-white tracking-tight flex items-center gap-2">
-            Workspace <span className="text-teal-400">Dashboard</span>
-          </h1>
+          <h1 className="text-3xl font-extrabold text-white tracking-tight">Overview</h1>
           <p className="text-slate-400 text-xs mt-1">Operational view of Express Distributors</p>
         </div>
         <button

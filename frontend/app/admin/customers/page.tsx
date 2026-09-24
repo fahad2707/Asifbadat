@@ -330,9 +330,7 @@ export default function CustomersPage() {
       {/* Title block */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-extrabold text-white tracking-tight flex items-center gap-2">
-            CRM <span className="text-teal-400">Directory</span>
-          </h1>
+          <h1 className="text-3xl font-extrabold text-white tracking-tight">Customers</h1>
           <p className="text-slate-400 text-xs mt-1">Manage B2B Customer Profiles, credit accounts, and statements.</p>
         </div>
         <div className="flex items-center gap-2">

@@ -265,7 +265,7 @@ export default function CreditMemosPage() {
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-extrabold text-white tracking-tight">Credit Memos</h1>
+          <h1 className="text-3xl font-extrabold text-white tracking-tight">Credit memo</h1>
           <p className="text-xs text-slate-400 mt-1">Issue customer return credits, vendor rebates, scheme adjustments, and rate corrections.</p>
         </div>
       </div>

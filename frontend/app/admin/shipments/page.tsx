@@ -54,7 +54,7 @@ export default function ShipmentsPage() {
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-extrabold text-white tracking-tight">Shipments & Logistics</h1>
+          <h1 className="text-3xl font-extrabold text-white tracking-tight">Shipments</h1>
           <p className="text-xs text-slate-400 mt-1">Track outbound dispatch shipments, transporter details, vehicle entries, and delivery status logs.</p>
         </div>
       </div>

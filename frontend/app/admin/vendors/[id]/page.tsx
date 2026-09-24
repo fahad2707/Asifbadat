@@ -118,7 +118,7 @@ export default function SupplierDetailPage() {
       <div>
         <Link href="/admin/vendors" className="inline-flex items-center gap-2 text-teal-450 hover:text-teal-350 hover:underline text-xs font-bold transition-all">
           <ArrowLeft className="w-4 h-4" />
-          Back to Suppliers Directory
+          Back to Vendors
         </Link>
       </div>
 
