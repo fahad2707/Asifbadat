@@ -102,7 +102,7 @@ test('route source keeps quotation inventory and payment gates explicit', () => 
   assert.match(paymentApplication, /isQuotationType/);
   assert.match(paymentApplication, /Quotations cannot receive payment|quotationPaymentRejection/);
   assert.match(invoices, /receivableInvoiceMatch/);
-  assert.match(customers, /receivableInvoiceMatch/);
+  assert.match(customers, /derivedUnpaidReceivableMatch/);
   assert.match(admin, /nonQuotationMatch/);
   assert.equal(invoices.includes('document type is immutable'), true);
 });

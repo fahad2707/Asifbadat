@@ -5,7 +5,7 @@ import fs from 'fs';
 import Customer from '../models/Customer';
 import Invoice from '../models/Invoice';
 import { authenticateAdmin, AuthRequest } from '../middleware/auth';
-import { receivableInvoiceMatch } from '../utils/documentType';
+import { derivedUnpaidReceivableMatch } from '../utils/invoiceFinancialState';
 import { z } from 'zod';
 
 const router = express.Router();
@@ -96,7 +96,7 @@ router.get('/', authenticateAdmin, async (req: AuthRequest, res) => {
 router.get('/balances', authenticateAdmin, async (_req, res) => {
   try {
     const balances = await Invoice.aggregate([
-      { $match: { ...receivableInvoiceMatch, payment_status: 'unpaid', customer_id: { $exists: true, $ne: null } } },
+      { $match: { ...derivedUnpaidReceivableMatch, customer_id: { $exists: true, $ne: null } } },
       { $project: { customer_id: 1, balance: { $subtract: ['$total_amount', { $ifNull: ['$amount_paid', 0] }] } } },
       { $group: { _id: '$customer_id', open_balance: { $sum: '$balance' } } },
     ]);
