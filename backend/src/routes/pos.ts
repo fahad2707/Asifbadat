@@ -148,16 +148,14 @@ router.post('/sale', authenticateAdmin, async (req: AuthRequest, res) => {
         customerEmail = customerEmail ?? posCustomer.email;
       }
     }
+    let createUserForSale = false;
     if (customerPhone && !customerId) {
-      let user = await User.findOne({ phone: customerPhone });
-      if (!user) {
-        user = await User.create({
-          phone: customerPhone,
-          name: customerName,
-          email: customerEmail,
-        });
+      const user = await User.findOne({ phone: customerPhone });
+      if (user) {
+        customerId = user._id.toString();
+      } else {
+        createUserForSale = true;
       }
-      if (user) customerId = user._id.toString();
     }
 
     // Calculate totals and validate stock
@@ -226,6 +224,20 @@ router.post('/sale', authenticateAdmin, async (req: AuthRequest, res) => {
     const session = await mongoose.startSession();
     session.startTransaction();
     try {
+      if (createUserForSale && customerPhone) {
+        const [createdUser] = await User.create(
+          [
+            {
+              phone: customerPhone,
+              name: customerName,
+              email: customerEmail,
+            },
+          ],
+          { session }
+        );
+        customerId = createdUser._id.toString();
+      }
+
       const invoiceNumber = `INV-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
       const [invoice] = await Invoice.create(
         [

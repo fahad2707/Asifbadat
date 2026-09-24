@@ -76,7 +76,7 @@ function stubCatalogReads(opts?: { withUser?: boolean }) {
   if (opts?.withUser) {
     mock.method(User, 'findOne', async () => ({ _id: { toString: () => USER_ID } }));
     mock.method(User, 'create', async () => {
-      throw new Error('User.create must stay outside the sale transaction');
+      throw new Error('User.create must not run when findOne resolves a User');
     });
   } else {
     mock.method(User, 'findOne', async () => null);
