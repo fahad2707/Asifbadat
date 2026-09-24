@@ -8,6 +8,7 @@ import assert from 'node:assert/strict';
 import {
   formatPosSaleResponse,
   isIdempotencyDuplicateKey,
+  omitInternalCostPrice,
   waitForCommittedKeyedSale,
 } from './posIdempotency';
 
@@ -62,4 +63,24 @@ test('formatPosSaleResponse omits internal sale-time cost from sale and invoice 
   assert.equal('cost_price' in payload.sale.items[0], false);
   assert.equal(payload.sale.items[0].price, 100);
   assert.equal('cost_price' in payload.invoice.items[0], false);
+});
+
+test('omitInternalCostPrice strips cost_price from plain and toObject lines', () => {
+  const plain = omitInternalCostPrice({ product_id: 'p1', price: 100, cost_price: 42 });
+  assert.ok(plain);
+  assert.equal('cost_price' in plain, false);
+  assert.equal(plain.price, 100);
+
+  const fromDoc = omitInternalCostPrice({
+    product_id: 'p1',
+    price: 100,
+    cost_price: 42,
+    toObject() {
+      return { product_id: 'p1', price: 100, cost_price: 42 };
+    },
+  });
+  assert.ok(fromDoc);
+  assert.equal('cost_price' in fromDoc, false);
+  assert.equal(fromDoc.price, 100);
+  assert.equal('toObject' in fromDoc, false);
 });

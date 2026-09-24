@@ -40,13 +40,28 @@ export async function waitForCommittedKeyedSale<T>(
   return null;
 }
 
-function omitInternalCostPrice<T>(item: T): T {
-  if (!item || typeof item !== 'object') return item;
-  const plain = typeof (item as { toObject?: () => unknown }).toObject === 'function'
-    ? (item as { toObject: () => Record<string, unknown> }).toObject()
-    : { ...(item as Record<string, unknown>) };
-  const { cost_price: _costPrice, ...rest } = plain;
-  return rest as T;
+function copyEnumerable(value: object): Record<string, unknown> {
+  const record: Record<string, unknown> = {};
+  for (const key of Object.keys(value)) {
+    record[key] = Reflect.get(value, key);
+  }
+  return record;
+}
+
+function documentToPlain(value: object): object {
+  const method = Reflect.get(value, 'toObject');
+  if (typeof method !== 'function') return value;
+  const converted = Reflect.apply(method, value, []);
+  return converted !== null && typeof converted === 'object' ? converted : value;
+}
+
+/** Drops internal sale-time cost from a response line. Persisted POSSale is unchanged. */
+export function omitInternalCostPrice(
+  item: object | null | undefined
+): Record<string, unknown> | null | undefined {
+  if (item === null || item === undefined) return item;
+  const { cost_price: _costPrice, ...rest } = copyEnumerable(documentToPlain(item));
+  return rest;
 }
 
 export function formatPosSaleResponse(sale: any, invoice: any) {
