@@ -307,7 +307,10 @@ export default function POSPage() {
         customer_phone: customerPhone || undefined,
         customer_email: customerEmail || undefined,
         payment_method: paymentMethod,
-        payment_split: paymentMethod === 'split' ? paymentSplit : undefined,
+        payment_split:
+          paymentMethod === 'split'
+            ? paymentSplit
+            : { [paymentMethod]: totals.total },
         discount_amount: totals.billDiscount,
         sale_type: saleType,
       });

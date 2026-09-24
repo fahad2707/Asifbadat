@@ -8,6 +8,9 @@
 
 export const DOCUMENT_TYPE_INVOICE = 'invoice';
 export const DOCUMENT_TYPE_QUOTATION = 'quotation';
+/** POS/retail slips stored in the invoices collection. Not AR. */
+export const POS_SALE_INVOICE_TYPES = ['pos', 'website', 'store_pickup'] as const;
+export type PosSaleInvoiceType = (typeof POS_SALE_INVOICE_TYPES)[number];
 
 export type DocumentTypeField = { invoice_type?: unknown };
 
@@ -20,6 +23,11 @@ export function isReceivableInvoiceType(type: unknown): boolean {
   return type === DOCUMENT_TYPE_INVOICE;
 }
 
+/** POS checkout slips. Financially represented by POSSale, not the Invoice row. */
+export function isPosSaleInvoiceType(type: unknown): boolean {
+  return (POS_SALE_INVOICE_TYPES as readonly string[]).includes(String(type));
+}
+
 /** Inventory moves only for true invoices, never quotations. */
 export function shouldAdjustInventoryForDocumentType(type: unknown): boolean {
   return isReceivableInvoiceType(type);
@@ -30,6 +38,11 @@ export const receivableInvoiceMatch = { invoice_type: DOCUMENT_TYPE_INVOICE } as
 
 /** Mongo match: Invoice rows that may count toward sales/revenue. */
 export const nonQuotationMatch = { invoice_type: { $ne: DOCUMENT_TYPE_QUOTATION } } as const;
+
+/** Wholesale invoice rows for dashboard revenue/COGS. Excludes quotations and POS slips. */
+export const dashboardWholesaleInvoiceMatch = {
+  invoice_type: DOCUMENT_TYPE_INVOICE,
+} as const;
 
 export function openDocumentBalance(totalAmount: unknown, amountPaid: unknown): number {
   return (Number(totalAmount) || 0) - (Number(amountPaid) || 0);
@@ -56,9 +69,9 @@ export function isOverdueReceivable(
   return due < now && openDocumentBalance(doc.total_amount, doc.amount_paid) > 0;
 }
 
-/** Sales/revenue contribution from an Invoice document. Quotations are 0. */
+/** Sales/revenue contribution from an Invoice document. Quotations and POS slips are 0. */
 export function saleAmountFromInvoiceDocument(doc: DocumentTypeField & { total_amount?: unknown }): number {
-  if (isQuotationType(doc.invoice_type)) return 0;
+  if (isQuotationType(doc.invoice_type) || isPosSaleInvoiceType(doc.invoice_type)) return 0;
   return Number(doc.total_amount) || 0;
 }
 

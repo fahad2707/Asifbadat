@@ -7,6 +7,8 @@ import User from '../models/User';
 import Customer from '../models/Customer';
 import { authenticateAdmin, AuthRequest } from '../middleware/auth';
 import { z } from 'zod';
+import { roundMoney } from '../services/paymentApplication';
+import { PosTenderError, normalizePosTenders } from '../utils/posTender';
 
 const router = express.Router();
 
@@ -205,17 +207,19 @@ router.post('/sale', authenticateAdmin, async (req: AuthRequest, res) => {
     const finalDiscount = discount_amount || 0;
     const totalAfterDiscount = subtotal - finalDiscount;
     const finalTax = (totalTax * (totalAfterDiscount / subtotal)) || totalTax; // Adjust tax proportionally
-    const totalAmount = totalAfterDiscount + finalTax;
+    const totalAmount = roundMoney(totalAfterDiscount + finalTax);
 
-    // Validate split payment
-    if (payment_method === 'split' && payment_split) {
-      const splitTotal = (payment_split.cash || 0) + (payment_split.card || 0) + (payment_split.digital || 0);
-      if (Math.abs(splitTotal - totalAmount) > 0.01) {
-        return res.status(400).json({ error: 'Split payment amounts do not match total' });
+    let tenders;
+    try {
+      tenders = normalizePosTenders(payment_method, payment_split, totalAmount);
+    } catch (error) {
+      if (error instanceof PosTenderError) {
+        return res.status(error.status).json({ error: error.message });
       }
+      throw error;
     }
 
-    // Create invoice
+    // Create invoice slip. Settled amounts stay consistent; this is not AR.
     const invoiceNumber = `INV-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
     const invoice = await Invoice.create({
       invoice_number: invoiceNumber,
@@ -227,6 +231,7 @@ router.post('/sale', authenticateAdmin, async (req: AuthRequest, res) => {
       tax_amount: finalTax,
       discount_amount: finalDiscount,
       payment_method: payment_method,
+      amount_paid: totalAmount,
       payment_status: 'paid',
       items: saleItems.map((item: any) => ({
         product_id: item.product_id,
@@ -253,7 +258,11 @@ router.post('/sale', authenticateAdmin, async (req: AuthRequest, res) => {
       tax_amount: finalTax,
       total_amount: totalAmount,
       payment_method,
-      payment_split: payment_method === 'split' ? payment_split : undefined,
+      payment_split: {
+        cash: tenders.cash,
+        card: tenders.card,
+        digital: tenders.digital,
+      },
       sale_type,
       admin_id: adminId,
     });

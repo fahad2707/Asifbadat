@@ -11,7 +11,9 @@ import { join } from 'node:path';
 import {
   DOCUMENT_TYPE_INVOICE,
   DOCUMENT_TYPE_QUOTATION,
+  dashboardWholesaleInvoiceMatch,
   isOverdueReceivable,
+  isPosSaleInvoiceType,
   isQuotationType,
   isReceivableInvoiceType,
   nonQuotationMatch,
@@ -76,6 +78,17 @@ test('quotation is excluded from sales/revenue aggregation of Invoice documents'
   assert.deepEqual(nonQuotationMatch, { invoice_type: { $ne: DOCUMENT_TYPE_QUOTATION } });
 });
 
+test('POS invoice slips do not contribute Invoice-document sales or AR', () => {
+  const posSlip = { invoice_type: 'pos', total_amount: 100, amount_paid: 100 };
+  assert.equal(isPosSaleInvoiceType('pos'), true);
+  assert.equal(isPosSaleInvoiceType('website'), true);
+  assert.equal(isPosSaleInvoiceType('store_pickup'), true);
+  assert.equal(isReceivableInvoiceType('pos'), false);
+  assert.equal(saleAmountFromInvoiceDocument(posSlip), 0);
+  assert.equal(receivableOpenBalance(posSlip), 0);
+  assert.deepEqual(dashboardWholesaleInvoiceMatch, { invoice_type: DOCUMENT_TYPE_INVOICE });
+});
+
 test('quotation cannot receive payment', () => {
   assert.equal(isQuotationType(DOCUMENT_TYPE_QUOTATION), true);
   const body = quotationPaymentRejection(['QTN#002']);
@@ -103,6 +116,6 @@ test('route source keeps quotation inventory and payment gates explicit', () => 
   assert.match(paymentApplication, /Quotations cannot receive payment|quotationPaymentRejection/);
   assert.match(invoices, /receivableInvoiceMatch/);
   assert.match(customers, /derivedUnpaidReceivableMatch/);
-  assert.match(admin, /nonQuotationMatch/);
+  assert.match(admin, /dashboardWholesaleInvoiceMatch/);
   assert.equal(invoices.includes('document type is immutable'), true);
 });

@@ -8,7 +8,13 @@ import PurchaseOrder from '../models/PurchaseOrder';
 import { authenticateAdmin, AuthRequest } from '../middleware/auth';
 import Expense from '../modules/expenses/models/Expense';
 import mongoose from 'mongoose';
-import { nonQuotationMatch, receivableOpenBalance } from '../utils/documentType';
+import { dashboardWholesaleInvoiceMatch, receivableOpenBalance } from '../utils/documentType';
+import {
+  dashboardInvoiceCogs,
+  dashboardInvoiceRevenue,
+  dashboardItemCogs,
+  dashboardPosRevenue,
+} from '../utils/dashboardFinancial';
 
 const router = express.Router();
 
@@ -40,7 +46,7 @@ router.get('/dashboard', authenticateAdmin, async (req: AuthRequest, res) => {
     const [orders, posSales, invoices, pos_agg, expenseAgg] = await Promise.all([
       Order.find({ created_at: { $gte: startDate }, payment_status: 'paid' }).lean(),
       POSSale.find({ created_at: { $gte: startDate } }).lean(),
-      Invoice.find({ created_at: { $gte: startDate }, ...nonQuotationMatch }).lean(),
+      Invoice.find({ created_at: { $gte: startDate }, ...dashboardWholesaleInvoiceMatch }).lean(),
       PurchaseOrder.aggregate([
         { $match: { created_at: { $gte: startDate } } },
         { $group: { _id: null, total: { $sum: '$total_amount' } } },
@@ -57,8 +63,8 @@ router.get('/dashboard', authenticateAdmin, async (req: AuthRequest, res) => {
     ]);
 
     const onlineRevenue = orders.reduce((sum, order) => sum + (order.total_amount || 0), 0);
-    const offlineRevenue = posSales.reduce((sum, sale) => sum + (sale.total_amount || 0), 0);
-    const invoiceRevenue = invoices.reduce((sum: number, inv: { total_amount?: number }) => sum + (inv.total_amount || 0), 0);
+    const offlineRevenue = dashboardPosRevenue(posSales);
+    const invoiceRevenue = dashboardInvoiceRevenue(invoices);
     const totalSales = Math.round((Number(onlineRevenue) + Number(offlineRevenue) + Number(invoiceRevenue)) * 100) / 100;
     const totalPurchases = Math.round(Number(pos_agg[0]?.total || 0) * 100) / 100;
     const totalExpenses = Number(expenseAgg[0]?.total || 0);
@@ -88,18 +94,8 @@ router.get('/dashboard', authenticateAdmin, async (req: AuthRequest, res) => {
       const pid = item.product_id ? String(item.product_id) : '';
       totalCOGS += (item.quantity || 0) * (costMap.get(pid) ?? 0);
     }
-    for (const sale of posSales as { items?: { product_id?: unknown; quantity?: number }[] }[]) {
-      for (const it of sale.items || []) {
-        const pid = it.product_id ? String(it.product_id) : '';
-        totalCOGS += (it.quantity || 0) * (costMap.get(pid) ?? 0);
-      }
-    }
-    for (const inv of invoices as { items?: { product_id?: unknown; quantity?: number }[] }[]) {
-      for (const it of inv.items || []) {
-        const pid = it.product_id ? String(it.product_id) : '';
-        totalCOGS += (it.quantity || 0) * (costMap.get(pid) ?? 0);
-      }
-    }
+    totalCOGS += dashboardItemCogs(posSales, costMap);
+    totalCOGS += dashboardInvoiceCogs(invoices, costMap);
 
     const netProfit = totalSales - totalCOGS - totalExpenses;
 
