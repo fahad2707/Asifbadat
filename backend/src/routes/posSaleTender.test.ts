@@ -50,7 +50,7 @@ function stubCatalogProduct() {
     stock_quantity: 10,
     committed_quantity: 0,
   }));
-  mock.method(Product, 'findByIdAndUpdate', async () => ({}));
+  mock.method(Product, 'findOneAndUpdate', async () => ({}));
   mock.method(StockMovement, 'create', async () => ({}));
   mock.method(User, 'findOne', async () => null);
   mock.method(User, 'create', async () => ({ _id: { toString: () => 'user-1' } }));

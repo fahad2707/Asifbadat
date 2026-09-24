@@ -107,7 +107,7 @@ function stubSuccessfulWrites(session: ReturnType<typeof createFakeSession>) {
       },
     ];
   });
-  mock.method(Product, 'findByIdAndUpdate', async () => ({}));
+  mock.method(Product, 'findOneAndUpdate', async () => ({}));
   mock.method(StockMovement, 'create', async () => [{}]);
   mock.method(User, 'findByIdAndUpdate', async () => ({}));
 }
@@ -163,7 +163,7 @@ test('B — Invoice.create uses array form and the sale session', async () => {
     const doc = firstDoc(docs);
     return [{ _id: { toString: () => 'sale-b' }, ...doc, toObject: () => doc }];
   });
-  mock.method(Product, 'findByIdAndUpdate', async () => ({}));
+  mock.method(Product, 'findOneAndUpdate', async () => ({}));
   mock.method(StockMovement, 'create', async () => [{}]);
   mock.method(User, 'findByIdAndUpdate', async () => ({}));
 
@@ -203,7 +203,7 @@ test('C — POSSale.create uses array form, same session, and invoice_id from In
     const doc = firstDoc(args[0]);
     return [{ _id: { toString: () => 'sale-c' }, ...doc, toObject: () => doc }];
   });
-  mock.method(Product, 'findByIdAndUpdate', async () => ({}));
+  mock.method(Product, 'findOneAndUpdate', async () => ({}));
   mock.method(StockMovement, 'create', async () => [{}]);
   mock.method(User, 'findByIdAndUpdate', async () => ({}));
 
@@ -229,7 +229,7 @@ test('D — Product stock update receives the same session', async () => {
   stubSuccessfulWrites(session);
 
   const productUpdateSessions: unknown[] = [];
-  mock.method(Product, 'findByIdAndUpdate', async (...args: unknown[]) => {
+  mock.method(Product, 'findOneAndUpdate', async (...args: unknown[]) => {
     productUpdateSessions.push((args[2] as { session?: unknown } | undefined)?.session);
     return {};
   });
@@ -337,7 +337,7 @@ test('H — POSSale.create failure aborts and skips later writes', async () => {
   let productUpdated = false;
   let movementCreated = false;
   let userUpdated = false;
-  mock.method(Product, 'findByIdAndUpdate', async () => {
+  mock.method(Product, 'findOneAndUpdate', async () => {
     productUpdated = true;
     return {};
   });
@@ -375,8 +375,8 @@ test('I — Product stock update failure aborts and skips subsequent writes', as
 
   let movementCreated = false;
   let userUpdated = false;
-  mock.method(Product, 'findByIdAndUpdate', async () => {
-    throw new Error('simulated Product.findByIdAndUpdate failure');
+  mock.method(Product, 'findOneAndUpdate', async () => {
+    throw new Error('simulated Product.findOneAndUpdate failure');
   });
   mock.method(StockMovement, 'create', async () => {
     movementCreated = true;

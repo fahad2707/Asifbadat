@@ -10,6 +10,7 @@ import { authenticateAdmin, AuthRequest } from '../middleware/auth';
 import { z } from 'zod';
 import { roundMoney } from '../services/paymentApplication';
 import { PosTenderError, normalizePosTenders } from '../utils/posTender';
+import { PosStockError, posStockDecrementFilter } from '../utils/posStock';
 
 const router = express.Router();
 
@@ -283,11 +284,14 @@ router.post('/sale', authenticateAdmin, async (req: AuthRequest, res) => {
 
       for (const item of saleItems) {
         if (!(item as any).isInventory) continue;
-        await Product.findByIdAndUpdate(
-          item.product_id,
+        const decremented = await Product.findOneAndUpdate(
+          posStockDecrementFilter(item.product_id, item.quantity),
           { $inc: { stock_quantity: -item.quantity } },
-          { session }
+          { session, new: true }
         );
+        if (!decremented) {
+          throw new PosStockError(`Insufficient stock for ${item.product_name}.`);
+        }
         await StockMovement.create(
           [
             {
@@ -325,6 +329,9 @@ router.post('/sale', authenticateAdmin, async (req: AuthRequest, res) => {
       });
     } catch (error) {
       await session.abortTransaction();
+      if (error instanceof PosStockError) {
+        return res.status(error.status).json({ error: error.message });
+      }
       throw error;
     } finally {
       session.endSession();
