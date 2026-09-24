@@ -199,11 +199,9 @@ test('duplicate product_id in one request is rejected', () => {
   );
 });
 
-test('helper does not write and POST /api/returns stays disabled', () => {
+test('helper does not write Return, stock, or money', () => {
   const src = readFileSync(join(process.cwd(), 'src/utils/posReturnCalc.ts'), 'utf8');
   assert.equal(src.includes('.create('), false);
   assert.equal(src.includes('findByIdAndUpdate'), false);
   assert.equal(src.includes('startSession'), false);
-  const route = readFileSync(join(process.cwd(), 'src/routes/returns.ts'), 'utf8');
-  assert.match(route, /status\(501\)/);
 });

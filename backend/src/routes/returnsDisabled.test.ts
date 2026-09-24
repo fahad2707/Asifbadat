@@ -1,5 +1,6 @@
 /**
- * Task 07D-10A — POST /api/returns is disabled until a safe POS refund exists.
+ * Task 07D-10A / 10E-01 — GET /api/returns stays read-only.
+ * POST is now the Model A-safe return path (see posReturnAtomicity.test.ts).
  *
  * Isolated harness: no Mongo connection.
  *
@@ -17,6 +18,7 @@ import Return from '../models/Return';
 import Product from '../models/Product';
 import StockMovement from '../models/StockMovement';
 import Customer from '../models/Customer';
+import POSSale from '../models/POSSale';
 
 function adminTestToken(): string {
   const secret = process.env.JWT_SECRET?.trim();
@@ -50,12 +52,13 @@ const unsafeBody = {
   pos_customer_id: '64b0000000000000000c0c0c',
 };
 
-test('A — POST /api/returns is rejected and performs no writes', async () => {
+test('A — legacy POST body is rejected and performs no writes', async () => {
   assertNoMongoConnection();
   let returnCreates = 0;
   let productUpdates = 0;
   let movements = 0;
   let customerUpdates = 0;
+  let saleLookups = 0;
   mock.method(Return, 'create', async () => {
     returnCreates += 1;
     throw new Error('Return.create must not run');
@@ -72,6 +75,10 @@ test('A — POST /api/returns is rejected and performs no writes', async () => {
     customerUpdates += 1;
     throw new Error('Customer balance must not run');
   });
+  mock.method(POSSale, 'findById', async () => {
+    saleLookups += 1;
+    throw new Error('POSSale.findById must not run for an invalid body');
+  });
 
   const res = await request(createApp())
     .post('/api/returns')
@@ -79,12 +86,12 @@ test('A — POST /api/returns is rejected and performs no writes', async () => {
     .send(unsafeBody);
 
   assertNoMongoConnection();
-  assert.equal(res.status, 501);
-  assert.match(String(res.body.error), /not currently supported/i);
+  assert.equal(res.status, 400);
   assert.equal(returnCreates, 0);
   assert.equal(productUpdates, 0);
   assert.equal(movements, 0);
   assert.equal(customerUpdates, 0);
+  assert.equal(saleLookups, 0);
 });
 
 test('B — GET /api/returns remains a read-only list', async () => {
@@ -101,9 +108,8 @@ test('B — GET /api/returns remains a read-only list', async () => {
         _id: { toString: () => 'ret-1' },
         return_number: 'RET-1',
         sale_id: { toString: () => 'sale-1' },
-        order_id: undefined,
+        sale_number: 'POS-1',
         total_refund: 12,
-        reason: 'existing',
         refund_method: 'cash',
         status: 'completed',
         created_at: new Date('2026-01-01'),
@@ -120,6 +126,7 @@ test('B — GET /api/returns remains a read-only list', async () => {
   assert.equal(res.body.returns.length, 1);
   assert.equal(res.body.returns[0].id, 'ret-1');
   assert.equal(res.body.returns[0].return_number, 'RET-1');
+  assert.equal(res.body.returns[0].sale_number, 'POS-1');
 });
 
 test('C — unauthenticated POST and GET follow existing auth', async () => {

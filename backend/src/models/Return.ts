@@ -12,6 +12,9 @@ export type PosReturnWindowDays = (typeof POS_RETURN_WINDOW_DAYS)[number];
 export const POS_RETURN_STATUSES = ['completed'] as const;
 export type PosReturnStatus = (typeof POS_RETURN_STATUSES)[number];
 
+export const POS_RETURN_SETTLEMENT_STATUSES = ['unsettled', 'settled'] as const;
+export type PosReturnSettlementStatus = (typeof POS_RETURN_SETTLEMENT_STATUSES)[number];
+
 export interface IReturnItem {
   product_id: mongoose.Types.ObjectId;
   product_name: string;
@@ -40,6 +43,10 @@ export interface IReturn extends Document {
   total_refund: number;
   refund_method: PosReturnRefundMethod;
   cheque_reference?: string;
+  /** Completed return is not financially settled until this is `settled`. */
+  settlement_status: PosReturnSettlementStatus;
+  settled_at?: Date;
+  settlement_id?: mongoose.Types.ObjectId;
   return_window_days: PosReturnWindowDays;
   return_deadline?: Date;
   window_extended?: boolean;
@@ -84,6 +91,13 @@ const ReturnSchema = new Schema<IReturn>(
     total_refund: { type: Number, required: true, min: 0 },
     refund_method: { type: String, enum: POS_RETURN_REFUND_METHODS, required: true },
     cheque_reference: String,
+    settlement_status: {
+      type: String,
+      enum: POS_RETURN_SETTLEMENT_STATUSES,
+      default: 'unsettled',
+    },
+    settled_at: Date,
+    settlement_id: { type: Schema.Types.ObjectId, ref: 'PosReturnSettlement' },
     return_window_days: { type: Number, enum: POS_RETURN_WINDOW_DAYS, default: 15 },
     return_deadline: Date,
     window_extended: { type: Boolean, default: false },
@@ -96,5 +110,6 @@ const ReturnSchema = new Schema<IReturn>(
 ReturnSchema.index({ sale_id: 1 });
 ReturnSchema.index({ sale_id: 1, status: 1 });
 ReturnSchema.index({ created_at: -1 });
+ReturnSchema.index({ settlement_status: 1 });
 
 export default mongoose.model<IReturn>('Return', ReturnSchema);

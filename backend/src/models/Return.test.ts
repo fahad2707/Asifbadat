@@ -8,8 +8,6 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
 import mongoose from 'mongoose';
 import Return, {
   POS_RETURN_DISPOSITIONS,
@@ -185,9 +183,21 @@ test('walk-in sale may omit customer_id; cheque_reference and window fields are 
   assert.equal(walkIn.return_window_days, 30);
 });
 
-test('POST /api/returns remains disabled', () => {
-  const src = readFileSync(join(process.cwd(), 'src/routes/returns.ts'), 'utf8');
-  assert.match(src, /status\(501\)/);
-  assert.match(src, /not currently supported/i);
-  assert.equal(src.includes('Return.create'), false);
+test('completed return defaults to unsettled and does not treat status as settlement', () => {
+  const doc = validReturn({ return_number: 'RET-UNSETTLED' });
+  assert.equal(doc.validateSync(), undefined);
+  assert.equal(doc.status, 'completed');
+  assert.equal(doc.settlement_status, 'unsettled');
+  assert.equal(doc.settled_at, undefined);
+
+  const settled = validReturn({
+    return_number: 'RET-SETTLED',
+    settlement_status: 'settled',
+    settled_at: new Date('2026-01-02'),
+  });
+  assert.equal(settled.validateSync(), undefined);
+  assert.equal(settled.settlement_status, 'settled');
+
+  const invalid = validReturn({ return_number: 'RET-BAD-SETTLE', settlement_status: 'paid' });
+  assert.ok(invalid.validateSync()?.errors.settlement_status);
 });

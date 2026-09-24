@@ -31,6 +31,11 @@ export interface IPOSSale extends Document {
   sale_type: string; // 'pos', 'website', 'store_pickup'
   admin_id?: mongoose.Types.ObjectId;
   idempotency_key?: string;
+  /**
+   * Per-product units already returned. Non-financial concurrency counter.
+   * Does not change original sale economics (price, discount, tax, total).
+   */
+  returned_quantities?: Record<string, number>;
   created_at: Date;
 }
 
@@ -68,6 +73,8 @@ const POSSaleSchema = new Schema<IPOSSale>(
     // Client-provided checkout key. unique+sparse: missing keys may repeat;
     // two documents cannot share the same non-null key.
     idempotency_key: { type: String, unique: true, sparse: true },
+    // Atomic remaining-qty claim for POS returns. Not a financial field.
+    returned_quantities: { type: Schema.Types.Mixed, default: undefined },
   },
   {
     timestamps: { createdAt: 'created_at', updatedAt: false },
