@@ -8,6 +8,7 @@ import StockMovement from '../models/StockMovement';
 import { authenticateAdmin, AuthRequest } from '../middleware/auth';
 import { onlineCheckoutLimiter, onlineTrackLimiter } from '../middleware/rateLimit';
 import { logSecurityEvent } from '../utils/securityLog';
+import { httpErrorFromPayment, paymentApplication } from '../services/paymentApplication';
 
 const router = express.Router();
 
@@ -218,11 +219,58 @@ router.put('/:id/status', authenticateAdmin, async (req: AuthRequest, res) => {
       return res.status(400).json({ error: 'Cancelled orders cannot be modified' });
     }
 
-    order.status = status;
-    order.status_history.push({ status, timestamp: new Date() } as any);
-
-    // On delivered: subtract inventory + generate invoice
+    // Delivered requires invoice + canonical payment before the status is persisted.
     if (status === 'delivered') {
+      const invoiceNumber = `INV-WEB-${order.order_number.replace('WEB-', '')}`;
+      const LOCATION_OF_SALE = '511 W Germantown Pike, Plymouth Meeting, PA 19462-1303';
+      let inv;
+      try {
+        inv = await Invoice.create({
+          invoice_number: invoiceNumber,
+          customer_name: order.customer_name,
+          customer_phone: order.customer_phone,
+          customer_email: order.customer_email,
+          customer_address: [order.address_line1, order.address_line2, order.city, order.state, order.zip].filter(Boolean).join(', '),
+          location_of_sale: LOCATION_OF_SALE,
+          invoice_type: 'invoice',
+          invoice_date: new Date(),
+          due_date: new Date(),
+          subtotal_amount: order.subtotal,
+          tax_amount: order.tax_amount,
+          total_amount: order.total_amount,
+          amount_paid: 0,
+          terms: 'Paid',
+          payment_status: 'unpaid',
+          items: order.items.map((i: any) => ({
+            product_id: i.product_id,
+            product_name: i.product_name,
+            quantity: i.quantity,
+            price: i.price,
+            subtotal: i.subtotal,
+          })),
+        });
+      } catch (invErr) {
+        console.error('Auto invoice error:', invErr);
+        return res.status(500).json({ error: 'Failed to create invoice for delivered order' });
+      }
+
+      try {
+        await paymentApplication.applyPaymentToInvoice({
+          invoiceId: (inv as any)._id.toString(),
+          amount: order.total_amount,
+          paymentMethod: order.payment_method === 'cod' ? 'COD' : 'Credit Card',
+          customerName: order.customer_name,
+        });
+      } catch (payErr) {
+        await Invoice.findByIdAndDelete((inv as any)._id).catch((delErr) => {
+          console.error('Rollback newly created delivery invoice failed:', delErr);
+        });
+        const mapped = httpErrorFromPayment(payErr);
+        if (mapped) return res.status(mapped.status).json(mapped.body);
+        console.error('Delivery payment application error:', payErr);
+        return res.status(500).json({ error: 'Failed to apply payment for delivered order' });
+      }
+
       if (order.payment_method === 'cod') {
         order.payment_status = 'paid';
       }
@@ -241,39 +289,11 @@ router.put('/:id/status', authenticateAdmin, async (req: AuthRequest, res) => {
         }).catch(() => {});
       }
 
-      // Auto-generate invoice
-      try {
-        const invoiceNumber = `INV-WEB-${order.order_number.replace('WEB-', '')}`;
-        const LOCATION_OF_SALE = '511 W Germantown Pike, Plymouth Meeting, PA 19462-1303';
-        const inv = await Invoice.create({
-          invoice_number: invoiceNumber,
-          customer_name: order.customer_name,
-          customer_phone: order.customer_phone,
-          customer_email: order.customer_email,
-          customer_address: [order.address_line1, order.address_line2, order.city, order.state, order.zip].filter(Boolean).join(', '),
-          location_of_sale: LOCATION_OF_SALE,
-          invoice_type: 'invoice',
-          invoice_date: new Date(),
-          due_date: new Date(),
-          subtotal_amount: order.subtotal,
-          tax_amount: order.tax_amount,
-          total_amount: order.total_amount,
-          amount_paid: order.total_amount,
-          terms: 'Paid',
-          payment_status: 'paid',
-          items: order.items.map((i: any) => ({
-            product_id: i.product_id,
-            product_name: i.product_name,
-            quantity: i.quantity,
-            price: i.price,
-            subtotal: i.subtotal,
-          })),
-        });
-        order.invoice_id = inv._id as any;
-      } catch (invErr) {
-        console.error('Auto invoice error:', invErr);
-      }
+      order.invoice_id = (inv as any)._id as any;
     }
+
+    order.status = status;
+    order.status_history.push({ status, timestamp: new Date() } as any);
 
     await order.save();
     res.json({ message: `Order marked as ${status}`, status: order.status });
