@@ -116,7 +116,7 @@ export default function PurchaseOrderDetailPage() {
 
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-extrabold text-white tracking-tight">{po.po_number}</h1>
+          <h1 className="text-2xl font-semibold text-[#0F172A] tracking-tight">{po.po_number}</h1>
           <div className="text-xs text-slate-400 mt-1.5 flex items-center gap-2">
             <span className="font-semibold text-slate-200">{po.vendor?.name}</span>
             <span>•</span>
@@ -135,13 +135,13 @@ export default function PurchaseOrderDetailPage() {
         </div>
         <div className="flex gap-2">
           {canSend && (
-            <button onClick={handleSend} className="bg-gradient-to-tr from-blue-600 to-blue-500 hover:from-blue-500 hover:to-blue-400 border border-white/10 text-white px-4 py-2.5 rounded-xl text-xs font-bold transition-all shadow-sm flex items-center gap-2">
+            <button onClick={handleSend} className="bg-[#0F9F8F] hover:bg-[#0B8275] text-white px-3 py-2 rounded-md text-sm font-medium flex items-center gap-2">
               <Send className="w-4 h-4" />
               Mark as Sent
             </button>
           )}
           {canReceive && (
-            <button onClick={handleReceive} disabled={receiving} className="bg-gradient-to-tr from-teal-600 to-teal-500 hover:from-teal-500 hover:to-teal-400 border border-white/10 text-white px-4 py-2.5 rounded-xl text-xs font-bold transition-all shadow-sm flex items-center gap-2 disabled:opacity-40">
+            <button onClick={handleReceive} disabled={receiving} className="bg-[#0F9F8F] hover:bg-[#0B8275] border-transparent text-white px-4 py-2.5 rounded-xl text-xs font-bold transition-all shadow-sm flex items-center gap-2 disabled:opacity-40">
               <Check className="w-4 h-4" />
               {receiving ? 'Receiving Stock...' : 'Receive Stock'}
             </button>
@@ -149,7 +149,7 @@ export default function PurchaseOrderDetailPage() {
         </div>
       </div>
 
-      <div className="bg-slate-900/40 backdrop-blur-lg border border-white/[0.06] border-t-white/[0.18] shadow-[0_12px_40px_rgba(0,0,0,0.25)] rounded-2xl overflow-hidden mb-6">
+      <div className="bg-white border border-[#E2E8F0] rounded-lg overflow-hidden mb-6">
         <table className="w-full border-collapse">
           <thead className="bg-slate-950/60 text-slate-400 border-b border-white/5">
             <tr>

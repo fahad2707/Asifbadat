@@ -10,11 +10,15 @@ export function generateExpenseNumber(): string {
 }
 
 function paymentModeToAccountType(mode: string): string {
-  switch (mode) {
+  const key = String(mode || '').trim().toUpperCase().replace(/\s+/g, '_');
+  switch (key) {
     case 'CASH': return LedgerAccountType.CASH;
-    case 'BANK': return LedgerAccountType.BANK;
+    case 'BANK':
+    case 'CHEQUE':
+    case 'CHECK': return LedgerAccountType.BANK;
     case 'UPI': return LedgerAccountType.UPI;
-    case 'CARD': return LedgerAccountType.CARD;
+    case 'CARD':
+    case 'CREDIT_CARD': return LedgerAccountType.CARD;
     default: return LedgerAccountType.CASH;
   }
 }

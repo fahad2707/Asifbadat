@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   Search,
   ClipboardList,
@@ -10,15 +10,14 @@ import {
   Building2,
   MessageSquare,
   Trash2,
-  ExternalLink,
   X,
-  Package,
 } from 'lucide-react';
 import adminApi from '@/lib/admin-api';
 import { isAdminAuthRedirectError } from '@/lib/admin-auth-redirect';
 import { formatApiError } from '@/lib/format-api-error';
 import toast from 'react-hot-toast';
 import InvoiceFormLightbox, { type InvoiceInitialItem } from '@/components/admin/InvoiceFormLightbox';
+import { adminUi } from '@/lib/admin-ui';
 
 interface RFQItem {
   product_id: string | null;
@@ -55,24 +54,30 @@ interface RFQListResponse {
 }
 
 const STATUS_STYLES: Record<RFQ['status'], { label: string; cls: string }> = {
-  pending: { label: 'Pending', cls: 'bg-amber-500/10 text-amber-400 border-amber-500/20' },
-  quoted: { label: 'Quoted', cls: 'bg-teal-500/10 text-teal-400 border-teal-500/25' },
-  closed: { label: 'Closed', cls: 'bg-slate-800 text-slate-400 border-white/10' },
-  cancelled: { label: 'Cancelled', cls: 'bg-rose-500/10 text-rose-400 border-rose-500/20' },
+  pending: { label: 'Pending', cls: adminUi.badgeUnpaid },
+  quoted: { label: 'Quoted', cls: adminUi.badgePaid },
+  closed: { label: 'Closed', cls: adminUi.badgeDraft },
+  cancelled: { label: 'Cancelled', cls: 'inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-[#FDECEC] text-[#8A100E]' },
 };
+
+const money = (n?: number | null) => (n != null && Number.isFinite(Number(n)) ? `$${Number(n).toFixed(2)}` : '—');
+
+const estimatedTotal = (rfq: RFQ) =>
+  rfq.items.reduce((s, it) => s + (Number(it.price) || 0) * (Number(it.quantity) || 0), 0);
 
 export default function AdminRFQPage() {
   const [rfqs, setRfqs] = useState<RFQ[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
-  const [statusFilter, setStatusFilter] = useState<'all' | RFQ['status']>('all');
+  const [statusFilter, setStatusFilter] = useState<'all' | RFQ['status']>('pending');
   const [selected, setSelected] = useState<RFQ | null>(null);
   const [summary, setSummary] = useState<{ pending: number; quoted: number }>({ pending: 0, quoted: 0 });
 
-  // Quotation lightbox
+  // Quotation lightbox (shared form from Invoices)
   const [quotationOpen, setQuotationOpen] = useState(false);
   const [quotationCustomerId, setQuotationCustomerId] = useState<string | null>(null);
   const [quotationItems, setQuotationItems] = useState<InvoiceInitialItem[]>([]);
+  const [quotationEditId, setQuotationEditId] = useState<string | null>(null);
   const [pendingRfqId, setPendingRfqId] = useState<string | null>(null);
   const [preparing, setPreparing] = useState(false);
 
@@ -96,19 +101,19 @@ export default function AdminRFQPage() {
   };
 
   useEffect(() => {
-    fetchRfqs();
-  }, []);
-
-  useEffect(() => {
     const t = setTimeout(() => {
       setLoading(true);
       fetchRfqs();
-    }, 400);
+    }, 300);
     return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [search, statusFilter]);
 
-  const filteredRfqs = useMemo(() => rfqs, [rfqs]);
-
+  /**
+   * Draft a quotation from an RFQ: make sure the requester exists as a customer,
+   * then open the standard quotation form with every requested item, quantity and
+   * price already filled in. The admin can adjust prices before saving.
+   */
   const handleGenerateQuotation = async (rfq: RFQ) => {
     if (preparing) return;
     setPreparing(true);
@@ -120,10 +125,14 @@ export default function AdminRFQPage() {
         product_name: it.product_name,
         category_name: it.category_name,
         quantity: it.quantity,
+        price: it.price,
+        cost_price: it.cost_price,
       }));
       setQuotationCustomerId(customerId || null);
       setQuotationItems(items);
+      setQuotationEditId(null);
       setPendingRfqId(rfq.id);
+      setSelected(null);
       setQuotationOpen(true);
     } catch (error) {
       toast.error(formatApiError(error, 'Failed to prepare quotation'));
@@ -132,13 +141,24 @@ export default function AdminRFQPage() {
     }
   };
 
+  /** Open the quotation already linked to this RFQ (view / edit / re-share). */
+  const handleOpenQuotation = (rfq: RFQ) => {
+    if (!rfq.quotation_id) return;
+    setQuotationEditId(rfq.quotation_id);
+    setQuotationItems([]);
+    setQuotationCustomerId(null);
+    setPendingRfqId(null);
+    setSelected(null);
+    setQuotationOpen(true);
+  };
+
   const handleQuotationSaved = async (savedId?: string) => {
     if (pendingRfqId && savedId) {
       try {
         await adminApi.post(`/rfq/${pendingRfqId}/link-quotation`, { quotation_id: savedId });
-        toast.success('Quotation linked to RFQ');
+        toast.success('Quotation linked to quote request');
       } catch {
-        // ignore
+        // linking is best-effort; the quotation itself is already saved
       }
     }
     fetchRfqs();
@@ -148,6 +168,7 @@ export default function AdminRFQPage() {
     setQuotationOpen(false);
     setQuotationCustomerId(null);
     setQuotationItems([]);
+    setQuotationEditId(null);
     setPendingRfqId(null);
   };
 
@@ -155,6 +176,7 @@ export default function AdminRFQPage() {
     try {
       await adminApi.patch(`/rfq/${rfq.id}`, { status });
       toast.success('Status updated');
+      setSelected((cur) => (cur?.id === rfq.id ? { ...cur, status } : cur));
       fetchRfqs();
     } catch (error) {
       toast.error(formatApiError(error, 'Failed to update status'));
@@ -162,194 +184,167 @@ export default function AdminRFQPage() {
   };
 
   const handleDelete = async (rfq: RFQ) => {
-    if (!confirm(`Delete RFQ ${rfq.rfq_number}? This cannot be undone.`)) return;
+    if (!confirm(`Delete quote request ${rfq.rfq_number}? This cannot be undone.`)) return;
     try {
       await adminApi.delete(`/rfq/${rfq.id}`);
-      toast.success('RFQ deleted');
+      toast.success('Quote request deleted');
       setSelected((cur) => (cur?.id === rfq.id ? null : cur));
       fetchRfqs();
     } catch (error) {
-      toast.error(formatApiError(error, 'Failed to delete RFQ'));
+      toast.error(formatApiError(error, 'Failed to delete quote request'));
     }
   };
 
+  const tabs: { key: 'all' | RFQ['status']; label: string; count?: number }[] = [
+    { key: 'pending', label: 'Pending', count: summary.pending },
+    { key: 'quoted', label: 'Quoted', count: summary.quoted },
+    { key: 'closed', label: 'Closed' },
+    { key: 'cancelled', label: 'Cancelled' },
+    { key: 'all', label: 'All' },
+  ];
+
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex items-start justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-extrabold text-white tracking-tight">Quote requests</h1>
-          <p className="text-xs text-slate-400 mt-1">
-            Incoming digital quote requests submitted by website customers. Convert to quotation drafts.
+          <h1 className={adminUi.pageTitle}>Quote requests</h1>
+          <p className={`${adminUi.meta} mt-1`}>
+            Requests submitted by website customers. Draft a quotation from any request — items and prices are filled in for you.
           </p>
         </div>
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <div className="bg-slate-900/40 backdrop-blur-lg border border-white/[0.06] border-t-white/[0.18] shadow-[0_12px_40px_rgba(0,0,0,0.25)] rounded-2xl p-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">Pending RFQs</p>
-              <p className="text-3xl font-extrabold text-amber-400 mt-2 font-mono">{summary.pending}</p>
-            </div>
-            <ClipboardList className="w-7 h-7 text-amber-500/80" />
-          </div>
-        </div>
-        <div className="bg-slate-900/40 backdrop-blur-lg border border-white/[0.06] border-t-white/[0.18] shadow-[0_12px_40px_rgba(0,0,0,0.25)] rounded-2xl p-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">Quoted RFQs</p>
-              <p className="text-3xl font-extrabold text-teal-400 mt-2 font-mono">{summary.quoted}</p>
-            </div>
-            <FileSignature className="w-7 h-7 text-teal-450/80" />
-          </div>
-        </div>
-        <div className="bg-slate-900/40 backdrop-blur-lg border border-white/[0.06] border-t-white/[0.18] shadow-[0_12px_40px_rgba(0,0,0,0.25)] rounded-2xl p-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">Total Visible</p>
-              <p className="text-3xl font-extrabold text-slate-205 mt-2 font-mono">{rfqs.length}</p>
-            </div>
-            <Package className="w-7 h-7 text-slate-500" />
-          </div>
-        </div>
+      <div className="grid grid-cols-1 sm:grid-cols-2 rounded-md overflow-hidden border border-[#E3E5E8]">
+        <button type="button" onClick={() => setStatusFilter('pending')} className="text-left px-5 py-4 bg-[#FFF4E5] hover:brightness-[0.98]">
+          <p className="text-[26px] leading-tight font-normal text-[#1A1A1A] tabular-nums">{summary.pending}</p>
+          <p className="text-xs text-[#6B6C72] mt-1">Pending — waiting for a quotation</p>
+          <div className="mt-3 h-1.5 bg-[#F5A623] rounded-full" />
+        </button>
+        <button type="button" onClick={() => setStatusFilter('quoted')} className="text-left px-5 py-4 bg-[#E5F6E3] hover:brightness-[0.98]">
+          <p className="text-[26px] leading-tight font-normal text-[#1A1A1A] tabular-nums">{summary.quoted}</p>
+          <p className="text-xs text-[#6B6C72] mt-1">Quoted — quotation sent</p>
+          <div className="mt-3 h-1.5 bg-[#2CA01C] rounded-full" />
+        </button>
       </div>
 
-      <div className="bg-slate-900/40 backdrop-blur-lg border border-white/[0.06] border-t-white/[0.18] shadow-[0_12px_40px_rgba(0,0,0,0.25)] rounded-2xl p-4 flex flex-wrap items-end gap-4">
-        <div className="flex-1 min-w-[240px]">
-          <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">Search Catalog Filters</label>
-          <div className="relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
-            <input
-              type="text"
-              placeholder="Search RFQ number, customer name, company, phone or email..."
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              className="w-full pl-10 pr-4 py-2 bg-slate-950/60 border border-white/10 rounded-xl text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-teal-500 focus:border-teal-500"
-            />
-          </div>
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[#E3E5E8]">
+        <div className="flex">
+          {tabs.map((tab) => (
+            <button
+              key={tab.key}
+              type="button"
+              onClick={() => setStatusFilter(tab.key)}
+              className={`py-3 px-4 text-sm font-medium border-b-2 -mb-px ${
+                statusFilter === tab.key ? 'border-black text-[#1A1A1A]' : 'border-transparent text-[#6B6C72] hover:text-[#1A1A1A]'
+              }`}
+            >
+              {tab.label}
+              {typeof tab.count === 'number' && tab.count > 0 && (
+                <span className={`${adminUi.badge} ml-2`}>{tab.count}</span>
+              )}
+            </button>
+          ))}
         </div>
-        <div>
-          <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">Status Code</label>
-          <select
-            value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value as 'all' | RFQ['status'])}
-            className="bg-slate-950/60 border border-white/10 rounded-xl px-3 py-2 text-xs text-slate-205 font-semibold focus:outline-none focus:ring-1 focus:ring-teal-500"
-          >
-            <option value="all">All Statuses</option>
-            <option value="pending">Pending</option>
-            <option value="quoted">Quoted</option>
-            <option value="closed">Closed</option>
-            <option value="cancelled">Cancelled</option>
-          </select>
+        <div className="relative w-full sm:w-80 pb-2 sm:pb-0">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#8D9096]" />
+          <input
+            type="text"
+            placeholder="Search number, customer, company, phone, email"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className={`${adminUi.field} pl-9`}
+          />
         </div>
       </div>
 
       {loading ? (
         <div className="flex items-center justify-center py-16">
-          <div className="animate-spin rounded-full h-8 w-8 border-2 border-teal-500 border-t-transparent" />
+          <div className="animate-spin rounded-full h-8 w-8 border-2 border-black border-t-transparent" />
         </div>
-      ) : filteredRfqs.length === 0 ? (
-        <div className="bg-slate-900/40 backdrop-blur-lg border border-white/[0.06] border-t-white/[0.18] rounded-2xl p-16 text-center text-slate-500 text-xs font-semibold">
-          <ClipboardList className="w-12 h-12 text-slate-700 mx-auto mb-3" />
-          <p className="text-slate-350">No incoming quote requests found.</p>
+      ) : rfqs.length === 0 ? (
+        <div className={`${adminUi.panel} p-12 text-center`}>
+          <ClipboardList className="w-10 h-10 text-[#C7C7C7] mx-auto mb-3" />
+          <p className="text-sm text-[#1A1A1A]">No {statusFilter === 'all' ? '' : statusFilter} quote requests.</p>
+          <p className={`${adminUi.meta} mt-1`}>New requests from the website will appear here.</p>
         </div>
       ) : (
-        <div className="bg-slate-900/40 backdrop-blur-lg border border-white/[0.06] border-t-white/[0.18] shadow-[0_12px_40px_rgba(0,0,0,0.25)] rounded-2xl overflow-hidden">
+        <div className={`${adminUi.panel} overflow-hidden`}>
           <div className="overflow-x-auto">
-            <table className="w-full border-collapse">
-              <thead className="bg-slate-950/60 text-slate-400 border-b border-white/5">
+            <table className="w-full text-sm">
+              <thead className={adminUi.tableHead}>
                 <tr>
-                  <th className="text-left py-3.5 px-4 text-[10px] font-bold uppercase tracking-wider">Submitted</th>
-                  <th className="text-left py-3.5 px-4 text-[10px] font-bold uppercase tracking-wider">RFQ #</th>
-                  <th className="text-left py-3.5 px-4 text-[10px] font-bold uppercase tracking-wider">Customer</th>
-                  <th className="text-left py-3.5 px-4 text-[10px] font-bold uppercase tracking-wider">Contact</th>
-                  <th className="text-right py-3.5 px-4 text-[10px] font-bold uppercase tracking-wider">Unique Items</th>
-                  <th className="text-left py-3.5 px-4 text-[10px] font-bold uppercase tracking-wider">Status</th>
-                  <th className="text-right py-3.5 px-4 text-[10px] font-bold uppercase tracking-wider">Actions</th>
+                  <th className="text-left px-4 py-3 font-medium">Received</th>
+                  <th className="text-left px-4 py-3 font-medium">Request #</th>
+                  <th className="text-left px-4 py-3 font-medium">Customer</th>
+                  <th className="text-left px-4 py-3 font-medium">Items requested</th>
+                  <th className="text-right px-4 py-3 font-medium">Est. value</th>
+                  <th className="text-left px-4 py-3 font-medium">Status</th>
+                  <th className="text-right px-4 py-3 font-medium">Action</th>
                 </tr>
               </thead>
               <tbody>
-                {filteredRfqs.map((rfq) => {
+                {rfqs.map((rfq) => {
                   const status = STATUS_STYLES[rfq.status] || STATUS_STYLES.pending;
+                  const preview = rfq.items.slice(0, 2).map((it) => `${it.quantity} × ${it.product_name}`).join(', ');
+                  const more = rfq.items.length - 2;
                   return (
                     <tr
                       key={rfq.id}
-                      className="border-b border-white/5 hover:bg-white/[0.02] cursor-pointer transition-colors"
+                      className={`border-t border-[#E3E5E8] ${adminUi.tableRowHover} cursor-pointer`}
                       onClick={() => setSelected(rfq)}
                     >
-                      <td className="py-3 px-4 text-xs text-slate-400 font-mono">
-                        {new Date(rfq.created_at).toLocaleDateString()}{' '}
-                        <span className="text-slate-500 ml-1">
-                          {new Date(rfq.created_at).toLocaleTimeString([], {
-                            hour: '2-digit',
-                            minute: '2-digit',
-                          })}
+                      <td className="px-4 py-3 text-[#1A1A1A] whitespace-nowrap">
+                        {new Date(rfq.created_at).toLocaleDateString()}
+                        <span className={`${adminUi.helper} block`}>
+                          {new Date(rfq.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                         </span>
                       </td>
-                      <td className="py-3 px-4 font-mono text-xs font-bold text-teal-450">{rfq.rfq_number}</td>
-                      <td className="py-3 px-4">
-                        <p className="font-semibold text-slate-200 text-xs">{rfq.customer_name}</p>
-                        {rfq.customer_company && (
-                          <p className="text-[10px] text-slate-450 font-medium mt-0.5">{rfq.customer_company}</p>
-                        )}
-                      </td>
-                      <td className="py-3 px-4 text-xs text-slate-350">
-                        <p className="flex items-center gap-1.5 font-semibold text-slate-300">
-                          <Phone className="w-3.5 h-3.5 text-slate-500" />
-                          {rfq.customer_phone}
+                      <td className="px-4 py-3 font-medium text-[#1A1A1A] whitespace-nowrap">{rfq.rfq_number}</td>
+                      <td className="px-4 py-3">
+                        <p className="text-[#1A1A1A]">{rfq.customer_name}</p>
+                        <p className={adminUi.helper}>
+                          {[rfq.customer_company, rfq.customer_phone].filter(Boolean).join(' · ')}
                         </p>
-                        {rfq.customer_email && (
-                          <p className="flex items-center gap-1.5 text-xs text-slate-400 mt-1">
-                            <Mail className="w-3 h-3 text-slate-500" />
-                            {rfq.customer_email}
-                          </p>
+                      </td>
+                      <td className="px-4 py-3 max-w-[320px]">
+                        <p className="text-[#1A1A1A] truncate" title={rfq.items.map((it) => `${it.quantity} × ${it.product_name}`).join('\n')}>
+                          {preview || '—'}
+                        </p>
+                        <p className={adminUi.helper}>
+                          {rfq.items.length} {rfq.items.length === 1 ? 'item' : 'items'} · {rfq.item_count} units
+                          {more > 0 ? ` · +${more} more` : ''}
+                        </p>
+                      </td>
+                      <td className="px-4 py-3 text-right text-[#1A1A1A] tabular-nums whitespace-nowrap">{money(estimatedTotal(rfq))}</td>
+                      <td className="px-4 py-3">
+                        <span className={status.cls}>{status.label}</span>
+                        {rfq.quotation_number && (
+                          <span className={`${adminUi.helper} block mt-0.5`}>{rfq.quotation_number}</span>
                         )}
                       </td>
-                      <td className="py-3 px-4 text-right text-xs">
-                        <span className="font-bold text-slate-200 font-mono">{rfq.items.length}</span>{' '}
-                        <span className="text-[10px] text-slate-500 font-medium font-mono">
-                          ({rfq.item_count} units)
-                        </span>
-                      </td>
-                      <td className="py-3 px-4">
-                        <span
-                          className={`inline-flex px-2 py-0.5 rounded text-[10px] font-bold border ${status.cls}`}
-                        >
-                          {status.label}
-                        </span>
-                      </td>
-                      <td className="py-3 px-4 text-right text-xs">
-                        <div
-                          className="flex items-center justify-end gap-1.5"
-                          onClick={(e) => e.stopPropagation()}
-                        >
+                      <td className="px-4 py-3 text-right whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
+                        {rfq.quotation_id ? (
+                          <button type="button" onClick={() => handleOpenQuotation(rfq)} className="text-[#0077C5] hover:underline">
+                            Open quotation
+                          </button>
+                        ) : (
                           <button
                             type="button"
                             onClick={() => handleGenerateQuotation(rfq)}
                             disabled={preparing}
-                            className="inline-flex items-center justify-center gap-1.5 px-3 py-2 bg-gradient-to-tr from-teal-600 to-teal-500 hover:from-teal-500 hover:to-teal-400 border border-white/10 text-white rounded-xl text-xs font-bold transition-all shadow-sm disabled:opacity-40"
-                            title="Generate quotation"
+                            className="text-[#0077C5] hover:underline disabled:opacity-50"
                           >
-                            <FileSignature className="w-3.5 h-3.5" />
-                            Draft Quote
+                            Draft quotation
                           </button>
-                          <button
-                            type="button"
-                            onClick={() => setSelected(rfq)}
-                            className="p-1.5 text-slate-400 hover:text-white hover:bg-white/5 rounded-lg transition-all"
-                            title="View details"
-                          >
-                            <ExternalLink className="w-3.5 h-3.5" />
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => handleDelete(rfq)}
-                            className="p-1.5 text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 rounded-lg transition-all"
-                            title="Delete"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
+                        )}
+                        <span className="text-[#C7C7C7] mx-1.5">·</span>
+                        <button type="button" onClick={() => setSelected(rfq)} className="text-[#6B6C72] hover:underline">
+                          View
+                        </button>
+                        <span className="text-[#C7C7C7] mx-1.5">·</span>
+                        <button type="button" onClick={() => handleDelete(rfq)} className="text-[#6B6C72] hover:text-[#C81916] hover:underline">
+                          Delete
+                        </button>
                       </td>
                     </tr>
                   );
@@ -361,145 +356,144 @@ export default function AdminRFQPage() {
       )}
 
       {selected && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm"
-          onClick={() => setSelected(null)}
-        >
+        <div className={adminUi.modalBackdrop} onClick={() => setSelected(null)}>
           <div
-            className="bg-slate-900 border border-white/10 shadow-[0_24px_50px_rgba(0,0,0,0.4)] rounded-2xl max-w-3xl w-full max-h-[90vh] overflow-hidden flex flex-col"
+            className={`${adminUi.modal} max-w-3xl w-full max-h-[90vh] overflow-hidden flex flex-col`}
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="flex items-center justify-between p-5 border-b border-white/5">
+            <div className="flex items-center justify-between p-5 border-b border-[#E3E5E8]">
               <div>
-                <h2 className="text-lg font-bold text-white flex items-center gap-2">
-                  <ClipboardList className="w-5 h-5 text-teal-400" />
-                  {selected.rfq_number}
+                <h2 className="text-lg font-medium text-[#1A1A1A] flex items-center gap-2">
+                  <ClipboardList className="w-5 h-5 text-[#6B6C72]" />
+                  Quote request {selected.rfq_number}
+                  <span className={STATUS_STYLES[selected.status]?.cls || STATUS_STYLES.pending.cls}>
+                    {STATUS_STYLES[selected.status]?.label || 'Pending'}
+                  </span>
                 </h2>
-                <p className="text-[10px] text-slate-500 font-bold uppercase mt-1 tracking-wider">
-                  Submitted {new Date(selected.created_at).toLocaleString()} · Channel: {selected.source}
+                <p className={`${adminUi.meta} mt-1`}>
+                  Received {new Date(selected.created_at).toLocaleString()} · via {selected.source}
+                  {selected.quotation_number ? ` · Quotation ${selected.quotation_number}` : ''}
                 </p>
               </div>
-              <button
-                type="button"
-                onClick={() => setSelected(null)}
-                className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-white/5 transition-all"
-                aria-label="Close"
-              >
+              <button type="button" onClick={() => setSelected(null)} className={adminUi.btnIcon} aria-label="Close">
                 <X className="w-5 h-5" />
               </button>
             </div>
+
             <div className="flex-1 overflow-y-auto p-6 space-y-6">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div className="bg-slate-955/40 border border-white/5 rounded-xl p-4 text-xs">
-                  <p className="text-[9px] uppercase text-slate-500 font-bold tracking-wider mb-2">Requesting Customer</p>
-                  <p className="text-sm font-bold text-slate-200">{selected.customer_name}</p>
+                <div className={`${adminUi.panel} p-4`}>
+                  <p className={`${adminUi.label} mb-2`}>Customer</p>
+                  <p className="text-sm font-medium text-[#1A1A1A]">{selected.customer_name}</p>
                   {selected.customer_company && (
-                    <p className="flex items-center gap-1.5 text-slate-400 mt-2 font-medium">
-                      <Building2 className="w-4 h-4 text-slate-500" />
+                    <p className="flex items-center gap-1.5 text-sm text-[#6B6C72] mt-1">
+                      <Building2 className="w-4 h-4 text-[#8D9096]" />
                       {selected.customer_company}
                     </p>
                   )}
                 </div>
-                <div className="bg-slate-955/40 border border-white/5 rounded-xl p-4 text-xs">
-                  <p className="text-[9px] uppercase text-slate-500 font-bold tracking-wider mb-2">Contact Channels</p>
-                  <p className="flex items-center gap-1.5 text-slate-300 mt-1 font-semibold">
-                    <Phone className="w-4 h-4 text-slate-550" />
-                    <a href={`tel:${selected.customer_phone}`} className="hover:text-teal-400 transition-colors">{selected.customer_phone}</a>
+                <div className={`${adminUi.panel} p-4`}>
+                  <p className={`${adminUi.label} mb-2`}>Contact</p>
+                  <p className="flex items-center gap-1.5 text-sm text-[#1A1A1A]">
+                    <Phone className="w-4 h-4 text-[#8D9096]" />
+                    <a href={`tel:${selected.customer_phone}`} className="hover:underline">{selected.customer_phone}</a>
                   </p>
                   {selected.customer_email && (
-                    <p className="flex items-center gap-1.5 text-slate-400 mt-2">
-                      <Mail className="w-4 h-4 text-slate-550" />
-                      <a href={`mailto:${selected.customer_email}`} className="hover:text-teal-400 transition-colors">{selected.customer_email}</a>
+                    <p className="flex items-center gap-1.5 text-sm text-[#1A1A1A] mt-1">
+                      <Mail className="w-4 h-4 text-[#8D9096]" />
+                      <a href={`mailto:${selected.customer_email}`} className="hover:underline">{selected.customer_email}</a>
                     </p>
                   )}
                 </div>
               </div>
 
               {selected.customer_comments && (
-                <div className="bg-amber-500/10 border border-amber-500/15 rounded-xl p-4 text-xs text-amber-400">
-                  <p className="text-[9px] uppercase font-bold tracking-wider flex items-center gap-1.5 mb-2">
+                <div className="rounded-md border border-[#FCD34D] bg-[#FFF4E5] p-4">
+                  <p className={`${adminUi.label} flex items-center gap-1.5 mb-2 text-[#8A4500]`}>
                     <MessageSquare className="w-4 h-4" />
-                    Customer specifications / requirements
+                    Customer notes
                   </p>
-                  <p className="text-slate-300 mt-1 whitespace-pre-wrap leading-relaxed">{selected.customer_comments}</p>
+                  <p className="text-sm text-[#1A1A1A] whitespace-pre-wrap leading-relaxed">{selected.customer_comments}</p>
                 </div>
               )}
 
               <div>
-                <p className="text-[10px] uppercase text-slate-400 font-bold tracking-wider mb-3">
-                  Requested products ({selected.items.length})
-                </p>
-                <div className="border border-white/5 rounded-xl overflow-hidden bg-slate-955/20">
-                  <table className="w-full text-xs border-collapse">
-                    <thead className="bg-slate-950/60 text-slate-400 border-b border-white/5">
+                <p className={`${adminUi.label} mb-3`}>Requested items ({selected.items.length})</p>
+                <div className={`${adminUi.panel} overflow-hidden`}>
+                  <table className="w-full text-sm">
+                    <thead className={adminUi.tableHead}>
                       <tr>
-                        <th className="text-left py-2.5 px-4 font-bold uppercase tracking-wider text-[9px]">#</th>
-                        <th className="text-left py-2.5 px-4 font-bold uppercase tracking-wider text-[9px]">Product Item</th>
-                        <th className="text-left py-2.5 px-4 font-bold uppercase tracking-wider text-[9px]">Category</th>
-                        <th className="text-right py-2.5 px-4 font-bold uppercase tracking-wider text-[9px]">Cost Price</th>
-                        <th className="text-right py-2.5 px-4 font-bold uppercase tracking-wider text-[9px]">Normal Price</th>
-                        <th className="text-right py-2.5 px-4 font-bold uppercase tracking-wider text-[9px]">Qty</th>
+                        <th className="text-left px-4 py-2.5 font-medium">#</th>
+                        <th className="text-left px-4 py-2.5 font-medium">Product</th>
+                        <th className="text-left px-4 py-2.5 font-medium">Category</th>
+                        <th className="text-right px-4 py-2.5 font-medium">Qty</th>
+                        <th className="text-right px-4 py-2.5 font-medium">Price</th>
+                        <th className="text-right px-4 py-2.5 font-medium">Line total</th>
                       </tr>
                     </thead>
                     <tbody>
                       {selected.items.map((it, idx) => (
-                        <tr key={`${it.product_id || it.product_name}-${idx}`} className="border-t border-white/5 hover:bg-white/[0.01]">
-                          <td className="py-2.5 px-4 text-slate-500 font-mono">{idx + 1}</td>
-                          <td className="py-2.5 px-4 text-slate-205 font-medium">{it.product_name}</td>
-                          <td className="py-2.5 px-4 text-slate-400">{it.category_name || '—'}</td>
-                          <td className="py-2.5 px-4 text-right text-slate-450 font-mono">
-                            {it.cost_price != null ? `$${it.cost_price.toFixed(2)}` : '—'}
+                        <tr key={`${it.product_id || it.product_name}-${idx}`} className="border-t border-[#E3E5E8]">
+                          <td className="px-4 py-2.5 text-[#8D9096]">{idx + 1}</td>
+                          <td className="px-4 py-2.5 text-[#1A1A1A]">{it.product_name}</td>
+                          <td className="px-4 py-2.5 text-[#6B6C72]">{it.category_name || '—'}</td>
+                          <td className="px-4 py-2.5 text-right text-[#1A1A1A] tabular-nums">{it.quantity}</td>
+                          <td className="px-4 py-2.5 text-right text-[#1A1A1A] tabular-nums">{money(it.price)}</td>
+                          <td className="px-4 py-2.5 text-right text-[#1A1A1A] tabular-nums">
+                            {it.price != null ? money(Number(it.price) * Number(it.quantity)) : '—'}
                           </td>
-                          <td className="py-2.5 px-4 text-right text-slate-250 font-bold font-mono">
-                            {it.price != null ? `$${it.price.toFixed(2)}` : '—'}
-                          </td>
-                          <td className="py-2.5 px-4 text-right font-extrabold text-slate-100 font-mono">{it.quantity}</td>
                         </tr>
                       ))}
                     </tbody>
+                    <tfoot>
+                      <tr className="border-t border-[#E3E5E8] bg-[#FAFAFA]">
+                        <td colSpan={5} className="px-4 py-2.5 text-right text-sm text-[#6B6C72]">Estimated value at list prices</td>
+                        <td className="px-4 py-2.5 text-right text-sm font-medium text-[#1A1A1A] tabular-nums">{money(estimatedTotal(selected))}</td>
+                      </tr>
+                    </tfoot>
                   </table>
                 </div>
               </div>
 
-              <div className="bg-slate-955/40 border border-white/5 rounded-xl p-4 flex flex-wrap items-center gap-3 text-xs text-slate-350">
-                <p className="text-[9px] uppercase text-slate-500 font-bold tracking-wider mr-2">Override status</p>
+              <div className={`${adminUi.panel} p-4 flex flex-wrap items-center gap-2`}>
+                <p className={`${adminUi.label} mr-2`}>Status</p>
                 {(['pending', 'quoted', 'closed', 'cancelled'] as const).map((s) => {
-                  const style = STATUS_STYLES[s];
                   const active = selected.status === s;
                   return (
                     <button
                       key={s}
                       type="button"
                       onClick={() => handleStatusChange(selected, s)}
-                      className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition-colors ${
-                        active ? style.cls + ' ring-1 ring-teal-500/50 shadow-sm shadow-teal-500/10' : 'bg-slate-800 text-slate-400 border-white/5 hover:bg-slate-800/80 hover:text-white'
+                      className={`px-3 py-1.5 rounded-full text-xs font-medium border ${
+                        active ? 'bg-black text-white border-black' : 'bg-white text-[#393A3D] border-[#C7C7C7] hover:bg-[#F4F5F8]'
                       }`}
                     >
-                      {s.charAt(0).toUpperCase() + s.slice(1)}
+                      {STATUS_STYLES[s].label}
                     </button>
                   );
                 })}
               </div>
             </div>
-            <div className="p-4 border-t border-white/5 bg-slate-950/40 flex flex-wrap items-center justify-between gap-3 text-xs">
-              <p className="text-slate-450 font-medium">Link with customer profiles or draft quotation worksheets.</p>
+
+            <div className="p-4 border-t border-[#E3E5E8] bg-[#FAFAFA] flex flex-wrap items-center justify-between gap-3">
+              <button type="button" onClick={() => handleDelete(selected)} className={`${adminUi.btnGhost} text-[#C81916] hover:text-[#8A100E]`}>
+                <Trash2 className="w-4 h-4" />
+                Delete request
+              </button>
               <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => handleDelete(selected)}
-                  className="inline-flex items-center gap-1.5 px-3.5 py-2 text-rose-455 hover:text-rose-400 border border-rose-500/15 rounded-xl text-xs font-semibold hover:bg-rose-500/5 transition-all"
-                >
-                  <Trash2 className="w-3.5 h-3.5" />
-                  Delete RFQ
-                </button>
+                {selected.quotation_id && (
+                  <button type="button" onClick={() => handleOpenQuotation(selected)} className={adminUi.btnSecondary}>
+                    Open {selected.quotation_number || 'quotation'}
+                  </button>
+                )}
                 <button
                   type="button"
                   onClick={() => handleGenerateQuotation(selected)}
                   disabled={preparing}
-                  className="inline-flex items-center gap-2 px-4 py-2 bg-gradient-to-tr from-teal-600 to-teal-500 hover:from-teal-500 hover:to-teal-400 border border-white/10 text-white rounded-xl text-xs font-bold shadow-sm transition-all"
+                  className={`${adminUi.btnPrimary} disabled:opacity-50`}
                 >
                   <FileSignature className="w-4 h-4" />
-                  Draft Quotation
+                  {preparing ? 'Preparing…' : selected.quotation_id ? 'Draft new quotation' : 'Draft quotation'}
                 </button>
               </div>
             </div>
@@ -511,6 +505,7 @@ export default function AdminRFQPage() {
         isOpen={quotationOpen}
         onClose={handleQuotationClose}
         onSaved={handleQuotationSaved}
+        editId={quotationEditId}
         initialCustomerId={quotationCustomerId}
         initialDocumentType="quotation"
         initialItems={quotationItems}

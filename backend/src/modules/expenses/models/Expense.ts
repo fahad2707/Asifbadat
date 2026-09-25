@@ -7,7 +7,7 @@ export interface IExpense extends Document {
   expense_type: string;
   description?: string;
   amount: number;
-  payment_mode: 'CASH' | 'BANK' | 'UPI' | 'CARD';
+  payment_mode: string;
   vendor_name?: string;
   attachment?: string;
   is_recurring: boolean;
@@ -16,6 +16,9 @@ export interface IExpense extends Document {
   created_at: Date;
   updated_at: Date;
   deleted_at?: Date; // soft delete
+  bank_account_id?: mongoose.Types.ObjectId;
+  deposit_state?: string;
+  deposited_at?: Date;
 }
 
 const ExpenseSchema = new Schema<IExpense>(
@@ -25,13 +28,16 @@ const ExpenseSchema = new Schema<IExpense>(
     expense_type: { type: String, required: true, trim: true },
     description: String,
     amount: { type: Number, required: true, min: 0 },
-    payment_mode: { type: String, enum: ['CASH', 'BANK', 'UPI', 'CARD'], required: true },
+    payment_mode: { type: String, required: true, trim: true },
     vendor_name: String,
     attachment: String,
     is_recurring: { type: Boolean, default: false },
     recurrence_type: { type: String, enum: ['MONTHLY', 'YEARLY', 'NONE'], default: 'NONE' },
     created_by: { type: Schema.Types.ObjectId, ref: 'Admin' },
     deleted_at: { type: Date, default: null },
+    bank_account_id: { type: Schema.Types.ObjectId, ref: 'BankAccount' },
+    deposit_state: { type: String },
+    deposited_at: { type: Date },
   },
   { timestamps: { createdAt: 'created_at', updatedAt: 'updated_at' } }
 );

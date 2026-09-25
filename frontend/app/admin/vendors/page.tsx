@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { Plus, Edit, Search, Trash2, X, MapPin, FolderPlus } from 'lucide-react';
 import adminApi from '@/lib/admin-api';
 import { isAdminAuthRedirectError } from '@/lib/admin-auth-redirect';
@@ -30,6 +30,7 @@ interface Vendor {
 
 export default function VendorsPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [vendors, setVendors] = useState<Vendor[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
@@ -87,6 +88,16 @@ export default function VendorsPage() {
   useEffect(() => {
     fetchVendors();
   }, [search]);
+
+  // Quick command: /admin/vendors?create=1 opens a blank vendor form.
+  useEffect(() => {
+    if (searchParams?.get('create') !== '1') return;
+    setEditing(null);
+    setForm({ supplier_id: '', name: '', contact_name: '', phone: '', email: '', address: '', city: '', state: '', zip: '', payment_terms: '', notes: '' });
+    setShowModal(true);
+    router.replace('/admin/vendors', { scroll: false });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams]);
 
   useEffect(() => {
     if (showModal) {
@@ -163,62 +174,56 @@ export default function VendorsPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-extrabold text-white tracking-tight">Vendors</h1>
-          <p className="text-xs text-slate-400 mt-1">Registry ledger of wholesale merchant suppliers, drop-shippers, and procurement partners.</p>
+      <div className="flex items-center justify-between gap-4">
+        <h1 className="text-[28px] font-normal text-[#1A1A1A] tracking-tight">Vendors</h1>
+        <button
+          type="button"
+          onClick={() => {
+            setEditing(null);
+            setForm({ supplier_id: '', name: '', contact_name: '', phone: '', email: '', address: '', city: '', state: '', zip: '', payment_terms: '', notes: '' });
+            setShowModal(true);
+          }}
+          className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-full bg-black text-white text-sm font-medium hover:bg-[#2C2C2C]"
+        >
+          New vendor
+        </button>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-3">
+        <div className="px-4 py-3 bg-[#E6F7F8]">
+          <p className="text-[28px] font-normal text-[#1A1A1A] tabular-nums">${totalPurchases.toFixed(2)}</p>
+          <p className="text-xs text-[#6B6C72]">Unbilled last 365 days</p>
+          <div className="mt-3 h-1.5 bg-[#2BB3C0] rounded-full" />
+        </div>
+        <div className="px-4 py-3 bg-[#FFF4E5]">
+          <p className="text-[28px] font-normal text-[#1A1A1A] tabular-nums">${totalOpen.toFixed(2)}</p>
+          <p className="text-xs text-[#6B6C72]">Unpaid last 365 days · {suppliersWithBalance} open bills</p>
+          <div className="mt-3 h-1.5 bg-[#F5A623] rounded-full" />
+        </div>
+        <div className="px-4 py-3 bg-[#E5F6E3]">
+          <p className="text-[28px] font-normal text-[#1A1A1A] tabular-nums">${totalPaid.toFixed(2)}</p>
+          <p className="text-xs text-[#6B6C72]">Paid last 30 days</p>
+          <div className="mt-3 h-1.5 bg-[#2CA01C] rounded-full" />
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <div className="bg-slate-900/40 backdrop-blur-lg border border-white/[0.06] border-t-white/[0.18] shadow-[0_12px_40px_rgba(0,0,0,0.25)] rounded-2xl p-5">
-          <p className="text-[10px] text-slate-500 font-bold uppercase tracking-wider mb-1">Purchases Volume</p>
-          <p className="text-2xl font-extrabold text-slate-100 font-mono">${totalPurchases.toFixed(2)}</p>
-          <p className="text-[10px] text-slate-400 mt-1.5 font-medium">Total volume of purchase orders generated.</p>
-        </div>
-        <div className="bg-slate-900/40 backdrop-blur-lg border border-white/[0.06] border-t-white/[0.18] shadow-[0_12px_40px_rgba(0,0,0,0.25)] rounded-2xl p-5">
-          <p className="text-[10px] text-slate-500 font-bold uppercase tracking-wider mb-1">Outstanding Payables</p>
-          <p className="text-2xl font-extrabold text-amber-400 font-mono">${totalOpen.toFixed(2)}</p>
-          <p className="text-[10px] text-slate-405 mt-1.5 font-medium">{suppliersWithBalance} wholesale suppliers with dues.</p>
-        </div>
-        <div className="bg-slate-900/40 backdrop-blur-lg border border-white/[0.06] border-t-white/[0.18] shadow-[0_12px_40px_rgba(0,0,0,0.25)] rounded-2xl p-5">
-          <p className="text-[10px] text-slate-500 font-bold uppercase tracking-wider mb-1">Disbursed (Lifetime)</p>
-          <p className="text-2xl font-extrabold text-teal-400 font-mono">${totalPaid.toFixed(2)}</p>
-          <p className="text-[10px] text-slate-400 mt-1.5 font-medium">Total payments cleared for materials supply.</p>
-        </div>
-      </div>
-
-      <div className="bg-slate-900/40 backdrop-blur-lg border border-white/[0.06] border-t-white/[0.18] shadow-[0_12px_40px_rgba(0,0,0,0.25)] rounded-2xl p-4 flex flex-wrap items-center gap-4">
-        <div className="relative flex-1 min-w-[240px]">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
+      <div className="flex flex-wrap items-center gap-3">
+        <div className="relative flex-1 min-w-[240px] max-w-md">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#8D9096]" />
           <input
             type="text"
-            placeholder="Search suppliers by name, contact, company, state, email..."
+            placeholder="Search"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            className="w-full pl-10 pr-4 py-2 bg-slate-950/60 border border-white/10 rounded-xl text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-teal-500 focus:border-teal-500 focus:bg-slate-950/80 transition-all font-semibold"
+            className="w-full pl-9 pr-4 py-2 bg-white border border-[#C7C7C7] rounded-md text-sm text-[#1A1A1A] placeholder-[#8D9096] focus:outline-none focus:ring-2 focus:ring-[#0077C5]"
           />
         </div>
-        <div className="flex items-center gap-2.5 flex-wrap">
-          <button
-            type="button"
-            onClick={() => {
-              setEditing(null);
-              setForm({ supplier_id: '', name: '', contact_name: '', phone: '', email: '', address: '', city: '', state: '', zip: '', payment_terms: '', notes: '' });
-              setShowModal(true);
-            }}
-            className="inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-gradient-to-tr from-teal-600 to-teal-500 hover:from-teal-500 hover:to-teal-400 border border-white/10 text-white rounded-xl text-xs font-bold shadow-sm transition-all"
-          >
-            <Plus className="w-3.5 h-3.5" />
-            New Supplier
-          </button>
-          <select value={filter} onChange={(e) => setFilter(e.target.value)} className="bg-slate-955/60 border border-white/10 rounded-xl px-3 py-2 text-xs text-slate-200 focus:outline-none focus:ring-1 focus:ring-teal-500">
-            <option value="All">All Suppliers</option>
-          </select>
-        </div>
+        <select value={filter} onChange={(e) => setFilter(e.target.value)} className="border border-[#C7C7C7] rounded-md px-3 py-2 text-sm text-[#1A1A1A] bg-white">
+          <option value="All">All vendors</option>
+        </select>
       </div>
 
-      <div className="bg-slate-900/40 backdrop-blur-lg border border-white/[0.06] border-t-white/[0.18] shadow-[0_12px_40px_rgba(0,0,0,0.25)] rounded-2xl overflow-hidden">
+      <div className="bg-white border border-[#E2E8F0] rounded-lg overflow-hidden">
         {loading ? (
           <div className="flex items-center justify-center py-16">
             <div className="animate-spin rounded-full h-8 w-8 border-2 border-teal-500 border-t-transparent" />
@@ -284,9 +289,9 @@ export default function VendorsPage() {
 
       {showModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-955/80 backdrop-blur-sm p-4">
-          <div className="bg-slate-900 border border-white/10 shadow-[0_24px_50px_rgba(0,0,0,0.4)] rounded-2xl max-w-lg w-full max-h-[90vh] overflow-y-auto">
+          <div className="bg-white border border-[#E2E8F0] rounded-lg text-[#0F172A] max-w-lg w-full max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between p-5 border-b border-white/5">
-              <h2 className="text-lg font-bold text-white">{editing ? 'Edit Supplier' : 'Register Supplier'}</h2>
+              <h2 className="text-lg font-semibold text-[#0F172A]">{editing ? 'Edit Supplier' : 'Register Supplier'}</h2>
               <button type="button" onClick={() => setShowModal(false)} className="p-1.5 hover:bg-white/5 rounded-lg text-slate-400 hover:text-white transition-all">
                 <X className="w-5 h-5" />
               </button>
@@ -404,7 +409,7 @@ export default function VendorsPage() {
                 <button type="button" onClick={() => setShowModal(false)} className="px-4 py-2.5 bg-slate-800 border border-white/5 text-slate-400 hover:text-white rounded-xl text-xs font-semibold">
                   Close
                 </button>
-                <button type="submit" className="px-4 py-2.5 bg-gradient-to-tr from-teal-600 to-teal-500 hover:from-teal-500 hover:to-teal-400 border border-white/10 text-white rounded-xl text-xs font-bold transition-all shadow-sm">
+                <button type="submit" className="px-4 py-2.5 bg-[#0F9F8F] hover:bg-[#0B8275] border-transparent text-white rounded-xl text-xs font-bold transition-all shadow-sm">
                   Save Supplier
                 </button>
               </div>

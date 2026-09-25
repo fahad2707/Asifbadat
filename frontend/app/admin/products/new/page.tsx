@@ -174,12 +174,12 @@ export default function NewProductPage() {
             }}
             onDragOver={(e) => e.preventDefault()}
             onClick={() => fileInputRef.current?.click()}
-            className="border-2 border-dashed border-gray-300 rounded-xl p-8 text-center hover:border-[#0f766e] cursor-pointer transition-colors"
+            className="border-2 border-dashed border-gray-300 rounded-xl p-8 text-center hover:border-[#0F9F8F] cursor-pointer transition-colors"
           >
             <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) handleImageUpload(f); }} />
             {uploading ? (
               <div className="flex flex-col items-center gap-2">
-                <Loader2 className="w-10 h-10 text-[#0f766e] animate-spin" />
+                <Loader2 className="w-10 h-10 text-[#0F9F8F] animate-spin" />
                 <p className="text-sm text-gray-600">Uploading...</p>
               </div>
             ) : imagePreview ? (
@@ -249,7 +249,7 @@ export default function NewProductPage() {
                       }
                     }}
                     placeholder={autoMarginPct != null ? autoMarginPct.toFixed(1) : 'e.g. 20'}
-                    className="w-full px-3 py-1.5 border border-gray-300 rounded-lg text-sm focus:ring-1 focus:ring-[#0f766e] focus:border-[#0f766e]"
+                    className="w-full px-3 py-1.5 border border-gray-300 rounded-lg text-sm focus:ring-1 focus:ring-[#0F9F8F] focus:border-[#0F9F8F]"
                   />
                 </div>
                 <div>
@@ -268,7 +268,7 @@ export default function NewProductPage() {
                       }
                     }}
                     placeholder={autoMarginUsd != null ? autoMarginUsd.toFixed(2) : 'e.g. 5.00'}
-                    className="w-full px-3 py-1.5 border border-gray-300 rounded-lg text-sm focus:ring-1 focus:ring-[#0f766e] focus:border-[#0f766e]"
+                    className="w-full px-3 py-1.5 border border-gray-300 rounded-lg text-sm focus:ring-1 focus:ring-[#0F9F8F] focus:border-[#0F9F8F]"
                   />
                 </div>
               </div>
@@ -325,7 +325,7 @@ export default function NewProductPage() {
           <button
             type="submit"
             disabled={loading}
-            className="px-6 py-2 rounded-lg text-white font-medium bg-[#0f766e] hover:bg-[#0d5d57] disabled:opacity-50"
+            className="px-6 py-2 rounded-lg text-white font-medium bg-[#0F9F8F] hover:bg-[#0B8275] disabled:opacity-50"
           >
             {loading ? 'Saving...' : 'Add Product'}
           </button>

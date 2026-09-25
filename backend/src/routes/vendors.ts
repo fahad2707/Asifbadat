@@ -327,7 +327,7 @@ router.put('/:id', authenticateAdmin, async (req: AuthRequest, res) => {
       name: z.string().min(1).optional(),
       contact_name: z.string().optional(),
       phone: z.string().optional(),
-      email: z.string().email().optional(),
+      email: z.string().email().optional().or(z.literal('')),
       address: z.string().optional(),
       city: z.string().optional(),
       state: z.string().optional(),

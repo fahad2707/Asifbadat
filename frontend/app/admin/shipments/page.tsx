@@ -54,12 +54,12 @@ export default function ShipmentsPage() {
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-extrabold text-white tracking-tight">Shipments</h1>
+          <h1 className="text-2xl font-semibold text-[#0F172A] tracking-tight">Shipments</h1>
           <p className="text-xs text-slate-400 mt-1">Track outbound dispatch shipments, transporter details, vehicle entries, and delivery status logs.</p>
         </div>
       </div>
 
-      <div className="bg-slate-900/40 backdrop-blur-lg border border-white/[0.06] border-t-white/[0.18] shadow-[0_12px_40px_rgba(0,0,0,0.25)] rounded-2xl p-4 flex flex-wrap items-center gap-4">
+      <div className="bg-white border border-[#E2E8F0] rounded-lg p-4 flex flex-wrap items-center gap-4">
         <div className="flex items-center gap-2.5 flex-wrap flex-1">
           <select
             value={typeFilter}
@@ -89,7 +89,7 @@ export default function ShipmentsPage() {
           <button
             type="button"
             onClick={() => fetchList()}
-            className="inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-gradient-to-tr from-teal-600 to-teal-500 hover:from-teal-500 hover:to-teal-400 border border-white/10 text-white rounded-xl text-xs font-bold shadow-sm transition-all"
+            className="inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-[#0F9F8F] hover:bg-[#0B8275] border-transparent text-white rounded-xl text-xs font-bold shadow-sm transition-all"
           >
             <Search className="w-3.5 h-3.5" />
             Refresh Log
@@ -97,7 +97,7 @@ export default function ShipmentsPage() {
         </div>
       </div>
 
-      <div className="bg-slate-900/40 backdrop-blur-lg border border-white/[0.06] border-t-white/[0.18] shadow-[0_12px_40px_rgba(0,0,0,0.25)] rounded-2xl overflow-hidden">
+      <div className="bg-white border border-[#E2E8F0] rounded-lg overflow-hidden">
         {loading ? (
           <div className="flex items-center justify-center py-16">
             <div className="animate-spin rounded-full h-8 w-8 border-2 border-teal-500 border-t-transparent" />

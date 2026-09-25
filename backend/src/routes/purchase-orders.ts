@@ -343,4 +343,23 @@ router.post('/:id/cancel', authenticateAdmin, async (req: AuthRequest, res) => {
   }
 });
 
+// Delete PO (pending / cancelled only — received goods stay in the books)
+router.delete('/:id', authenticateAdmin, async (req: AuthRequest, res) => {
+  try {
+    const po = await PurchaseOrder.findById(req.params.id);
+    if (!po) return res.status(404).json({ error: 'Purchase order not found' });
+    const status = String(po.status || '').toLowerCase();
+    if (status === 'received' || status === 'partial') {
+      return res.status(400).json({
+        error: `${po.po_number || 'This purchase order'} has received goods and cannot be deleted. Export it instead.`,
+      });
+    }
+    await PurchaseOrder.deleteOne({ _id: po._id });
+    res.json({ success: true, id: po._id.toString() });
+  } catch (error) {
+    console.error('Delete PO error:', error);
+    res.status(500).json({ error: 'Failed to delete purchase order' });
+  }
+});
+
 export default router;

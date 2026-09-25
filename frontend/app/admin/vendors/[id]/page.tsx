@@ -6,6 +6,7 @@ import Link from 'next/link';
 import { ArrowLeft, FileText, UploadCloud } from 'lucide-react';
 import adminApi, { uploadApi } from '@/lib/admin-api';
 import toast from 'react-hot-toast';
+import { EditableAddress, EditableField } from '@/components/admin/EditableField';
 
 interface Supplier {
   id: string;
@@ -103,6 +104,17 @@ export default function SupplierDetailPage() {
     }
   };
 
+  const saveSupplierFields = async (patch: Record<string, unknown>) => {
+    try {
+      await adminApi.put(`/vendors/${id}`, patch);
+      setSupplier((prev) => (prev ? { ...prev, ...patch } as Supplier : prev));
+      toast.success('Saved');
+    } catch (e: any) {
+      toast.error(e.response?.data?.error || 'Failed to save');
+      throw e;
+    }
+  };
+
   if (loading || !supplier) {
     return (
       <div className="flex justify-center py-16">
@@ -124,25 +136,42 @@ export default function SupplierDetailPage() {
 
       <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-6">
         <div>
-          <h1 className="text-3xl font-extrabold text-white tracking-tight">{supplier.name}</h1>
+          <EditableField
+            label=""
+            heading
+            value={supplier.name || ''}
+            display={supplier.name}
+            onSave={async (next) => {
+              if (!next.trim()) {
+                toast.error('Name is required');
+                throw new Error('required');
+              }
+              await saveSupplierFields({ name: next.trim() });
+            }}
+          />
           <div className="text-xs text-slate-400 mt-1.5 space-y-1">
             <p>Supplier Unique ID: <span className="font-mono text-slate-350">{supplier.supplier_id || '—'}</span></p>
-            {supplier.contact_name && (
-              <p>Contact Liaison: <span className="text-slate-300 font-semibold">{supplier.contact_name}</span> {supplier.phone ? `• ${supplier.phone}` : ''}</p>
-            )}
-            {supplier.email && (
-              <p>Email: <a href={`mailto:${supplier.email}`} className="text-teal-450 hover:text-teal-350 hover:underline transition-colors">{supplier.email}</a></p>
-            )}
           </div>
         </div>
-        <div className="bg-slate-900/40 backdrop-blur-lg border border-white/[0.06] border-t-white/[0.18] px-4 py-3 min-w-[220px] shadow-[0_12px_40px_rgba(0,0,0,0.25)] rounded-2xl">
+        <div className="bg-white border border-[#E2E8F0] rounded-lg px-4 py-3 min-w-[220px]">
           <p className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">Outstanding Dues Payable</p>
-          <p className="text-2xl font-extrabold text-amber-400 mt-1 font-mono">${openBalance.toFixed(2)}</p>
-          {supplier.credit_limit != null && (
-            <p className="text-[9px] text-slate-500 font-mono font-bold mt-1.5 uppercase tracking-wider">
-              Approved Line Limit: ${supplier.credit_limit.toFixed(2)}
-            </p>
-          )}
+          <p className="text-2xl font-extrabold text-amber-600 mt-1 font-mono">${openBalance.toFixed(2)}</p>
+          <div className="mt-2">
+            <EditableField
+              label="Credit limit"
+              type="number"
+              value={supplier.credit_limit == null ? '' : String(supplier.credit_limit)}
+              display={supplier.credit_limit == null ? '—' : `$${Number(supplier.credit_limit).toLocaleString()}`}
+              onSave={async (next) => {
+                const amount = next.trim() === '' ? 0 : Number(next);
+                if (Number.isNaN(amount) || amount < 0) {
+                  toast.error('Enter a valid credit limit');
+                  throw new Error('invalid');
+                }
+                await saveSupplierFields({ credit_limit: amount });
+              }}
+            />
+          </div>
         </div>
       </div>
 
@@ -179,7 +208,7 @@ export default function SupplierDetailPage() {
       </div>
 
       {activeTab === 'transactions' && (
-        <div className="bg-slate-900/40 backdrop-blur-lg border border-white/[0.06] border-t-white/[0.18] shadow-[0_12px_40px_rgba(0,0,0,0.25)] rounded-2xl overflow-hidden">
+        <div className="bg-white border border-[#E2E8F0] rounded-lg overflow-hidden">
           <div className="flex items-center justify-between px-4 py-3 border-b border-white/5 bg-slate-950/60">
             <div className="flex items-center gap-2">
               <FileText className="w-4 h-4 text-slate-400" />
@@ -223,42 +252,73 @@ export default function SupplierDetailPage() {
       )}
 
       {activeTab === 'details' && (
-        <div className="bg-slate-900/40 backdrop-blur-lg border border-white/[0.06] border-t-white/[0.18] p-5 shadow-[0_12px_40px_rgba(0,0,0,0.25)] rounded-2xl space-y-5 text-xs text-slate-300">
+        <div className="bg-white border border-[#E2E8F0] rounded-lg p-5 space-y-5 text-sm">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div className="bg-slate-950/40 border border-white/5 rounded-xl p-4">
-              <h3 className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-3">Company Channels</h3>
-              <p className="mb-2"><span className="text-slate-500 font-bold uppercase tracking-wider text-[9px] mr-2">Contact Name:</span> <span className="text-slate-200 font-semibold">{supplier.contact_name || '—'}</span></p>
-              <p className="mb-2"><span className="text-slate-500 font-bold uppercase tracking-wider text-[9px] mr-2">Phone Lines:</span> <span className="text-slate-200 font-mono font-semibold">{supplier.phone || '—'}</span></p>
-              <p className="mb-1"><span className="text-slate-500 font-bold uppercase tracking-wider text-[9px] mr-2">Email Inquiries:</span> <span className="text-slate-200 font-semibold">{supplier.email || '—'}</span></p>
+            <div className="space-y-3">
+              <h3 className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Contact</h3>
+              <EditableField label="Contact name" value={supplier.contact_name || ''} onSave={(next) => saveSupplierFields({ contact_name: next.trim() })} />
+              <EditableField label="Phone" type="tel" value={supplier.phone || ''} onSave={(next) => saveSupplierFields({ phone: next.trim() })} />
+              <EditableField label="Email" type="email" value={supplier.email || ''} onSave={(next) => saveSupplierFields({ email: next.trim() })} />
             </div>
-            <div className="bg-slate-950/40 border border-white/5 rounded-xl p-4">
-              <h3 className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-3">Cargo Mailing Address</h3>
-              <p className="text-slate-202 leading-relaxed font-semibold">
-                {supplier.address || '—'}
-                {supplier.city ? `, ${supplier.city}` : ''}
-                {supplier.state ? `, ${supplier.state}` : ''}
-                {supplier.zip ? `, ${supplier.zip}` : ''}
-              </p>
+            <div>
+              <h3 className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-3">Mailing address</h3>
+              <EditableAddress
+                label="Address"
+                address={supplier.address || ''}
+                city={supplier.city || ''}
+                state={supplier.state || ''}
+                zip={supplier.zip || ''}
+                display={[supplier.address, supplier.city, supplier.state, supplier.zip].filter(Boolean).join(', ')}
+                onSave={(next) => saveSupplierFields(next)}
+              />
             </div>
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div className="bg-slate-950/40 border border-white/5 rounded-xl p-4">
-              <h3 className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-2 font-mono">Contractual Payment Dues</h3>
-              <p className="mb-1.5"><span className="text-slate-500 font-bold uppercase tracking-wider text-[9px] mr-2">Terms:</span> <span className="text-slate-200 font-semibold">{supplier.payment_terms || (supplier.payment_terms_days ? `Net ${supplier.payment_terms_days} days` : '—')}</span></p>
-              <p><span className="text-slate-500 font-bold uppercase tracking-wider text-[9px] mr-2">Lead Rating:</span> <span className="text-teal-400 font-bold font-mono">{supplier.rating != null ? `${supplier.rating}/100` : '—'}</span></p>
+            <div className="space-y-3">
+              <h3 className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Payment</h3>
+              <EditableField
+                label="Payment terms"
+                value={supplier.payment_terms_days ? String(supplier.payment_terms_days) : ''}
+                display={supplier.payment_terms || (supplier.payment_terms_days ? `Net ${supplier.payment_terms_days}` : '—')}
+                options={[
+                  { value: '', label: 'Select payment terms' },
+                  { value: '15', label: 'Net 15' },
+                  { value: '30', label: 'Net 30' },
+                  { value: '45', label: 'Net 45' },
+                ]}
+                onSave={(next) => {
+                  const days = next === '15' || next === '30' || next === '45' ? Number(next) : undefined;
+                  return saveSupplierFields({
+                    payment_terms_days: days,
+                    payment_terms: days ? `Net ${days}` : '',
+                  });
+                }}
+              />
+              <EditableField
+                label="Rating"
+                type="number"
+                value={supplier.rating == null ? '' : String(supplier.rating)}
+                display={supplier.rating == null ? '—' : `${supplier.rating}/100`}
+                onSave={async (next) => {
+                  const rating = next.trim() === '' ? 0 : Number(next);
+                  if (Number.isNaN(rating) || rating < 0 || rating > 100) {
+                    toast.error('Rating must be 0–100');
+                    throw new Error('invalid');
+                  }
+                  await saveSupplierFields({ rating });
+                }}
+              />
             </div>
-            <div className="bg-slate-950/40 border border-white/5 rounded-xl p-4 font-mono">
-              <h3 className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-2">Corporate Registry IDs</h3>
-              <p className="mb-1.5"><span className="text-slate-500 font-bold uppercase tracking-wider text-[9px] mr-2">Tax ID:</span> <span className="text-slate-200 font-semibold">{supplier.tax_id || '—'}</span></p>
-              <p><span className="text-slate-500 font-bold uppercase tracking-wider text-[9px] mr-2">GST ID:</span> <span className="text-slate-200 font-semibold">{supplier.gst_number || '—'}</span></p>
+            <div className="space-y-3">
+              <h3 className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Registry IDs</h3>
+              <EditableField label="Tax ID" value={supplier.tax_id || ''} onSave={(next) => saveSupplierFields({ tax_id: next.trim() })} />
+              <EditableField label="GST ID" value={supplier.gst_number || ''} onSave={(next) => saveSupplierFields({ gst_number: next.trim() })} />
             </div>
           </div>
-          {supplier.notes && (
-            <div className="bg-slate-955/40 border border-white/5 p-4 rounded-xl">
-              <h3 className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-2">Supplier Registry Executive Notes</h3>
-              <p className="text-slate-300 leading-relaxed whitespace-pre-line">{supplier.notes}</p>
-            </div>
-          )}
+          <div>
+            <h3 className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-2">Notes</h3>
+            <EditableField label="Notes" value={supplier.notes || ''} multiline onSave={(next) => saveSupplierFields({ notes: next.trim() })} />
+          </div>
         </div>
       )}
 

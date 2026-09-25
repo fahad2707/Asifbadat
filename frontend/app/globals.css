@@ -161,6 +161,359 @@ img {
     0 0 18px rgba(79, 140, 255, 0.18);
 }
 
+/* Unified admin design system — scoped so the storefront is unchanged. */
+.admin-app {
+  --admin-bg: #ffffff;
+  --admin-surface: #ffffff;
+  --admin-text: #1a1a1a;
+  --admin-text-secondary: #6b6c72;
+  --admin-text-muted: #8d9096;
+  --admin-border: #e3e5e8;
+  --admin-border-strong: #c7c7c7;
+  --admin-hover: #f4f5f8;
+  --admin-brand: #000000;
+  --admin-brand-hover: #2c2c2c;
+  --admin-success: #16a34a;
+  --admin-success-fg: #166534;
+  --admin-success-bg: #dcfce7;
+  --admin-warning: #d97706;
+  --admin-warning-fg: #92400e;
+  --admin-warning-bg: #fef3c7;
+  --admin-error: #dc2626;
+  --admin-error-fg: #991b1b;
+  --admin-error-bg: #fee2e2;
+  --admin-info: #2563eb;
+  --admin-info-bg: #dbeafe;
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
+.admin-workspace {
+  background-color: var(--admin-bg);
+  color: var(--admin-text);
+  font-size: 14px;
+  font-weight: 400;
+  line-height: 1.45;
+}
+
+.admin-workspace h1 {
+  color: var(--admin-text) !important;
+  font-size: 28px !important;
+  font-weight: 400 !important;
+  letter-spacing: -0.02em;
+}
+
+.admin-workspace h2,
+.admin-workspace h3 {
+  color: var(--admin-text) !important;
+  font-weight: 600 !important;
+}
+
+.admin-workspace .text-white,
+.admin-workspace .text-slate-100,
+.admin-workspace .text-slate-200,
+.admin-workspace .text-slate-300 {
+  color: var(--admin-text);
+}
+
+.admin-app button.bg-black,
+.admin-app a.bg-black,
+.admin-workspace button.bg-black,
+.admin-workspace a.bg-black {
+  background-color: #000000 !important;
+  color: #ffffff !important;
+}
+
+.admin-app button.bg-black,
+.admin-app button.bg-black *,
+.admin-workspace button.bg-black,
+.admin-workspace button.bg-black *,
+.admin-workspace a.bg-black,
+.admin-workspace a.bg-black * {
+  color: #ffffff !important;
+}
+
+.admin-workspace .text-slate-400,
+.admin-workspace .text-slate-500 {
+  color: var(--admin-text-secondary);
+}
+
+.admin-workspace [class*='backdrop-blur'] {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+.admin-workspace [class*='bg-gradient'] {
+  background-image: none !important;
+}
+
+.admin-workspace [class*='shadow-[0_12px'],
+.admin-workspace [class*='shadow-[0_24px'],
+.admin-workspace .shadow-xl,
+.admin-workspace .shadow-2xl,
+.admin-workspace .shadow-lg,
+.admin-workspace .shadow-md {
+  box-shadow: none !important;
+}
+
+.admin-workspace .bg-slate-800,
+.admin-workspace .bg-slate-900,
+.admin-workspace .bg-slate-950,
+.admin-workspace [class*='bg-slate-80'],
+.admin-workspace [class*='bg-slate-90'],
+.admin-workspace [class*='bg-slate-95'],
+.admin-workspace .bg-purple-950\/20,
+.admin-workspace .bg-amber-950\/20,
+.admin-workspace .bg-teal-950\/20,
+.admin-workspace .bg-red-950\/20 {
+  background-color: var(--admin-surface) !important;
+}
+
+.admin-workspace .border-white\/\[0\.06\],
+.admin-workspace .border-white\/\[0\.08\],
+.admin-workspace .border-white\/\[0\.04\],
+.admin-workspace .border-white\/5,
+.admin-workspace .border-white\/10,
+.admin-workspace .border-t-white\/\[0\.18\],
+.admin-workspace .border-t-white\/\[0\.22\],
+.admin-workspace .border-t-white\/\[0\.12\],
+.admin-workspace .border-t-white\/20,
+.admin-workspace .border-purple-500\/25,
+.admin-workspace .border-amber-500\/25,
+.admin-workspace .border-teal-500\/25,
+.admin-workspace .border-teal-500\/30 {
+  border-color: var(--admin-border) !important;
+}
+
+.admin-workspace thead {
+  background-color: #fafafa !important;
+  color: var(--admin-text-secondary);
+}
+
+.admin-workspace thead th {
+  color: var(--admin-text-secondary) !important;
+  font-size: 12px;
+  font-weight: 500;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.admin-workspace tbody td {
+  color: var(--admin-text);
+  font-size: 13px;
+  border-color: var(--admin-border);
+}
+
+.admin-workspace tbody tr:hover {
+  background-color: var(--admin-bg);
+}
+
+.admin-workspace input:not([type='checkbox']):not([type='radio']),
+.admin-workspace select,
+.admin-workspace textarea {
+  background-color: var(--admin-surface) !important;
+  color: var(--admin-text) !important;
+  border-color: var(--admin-border-strong) !important;
+  border-radius: 6px;
+}
+
+.admin-workspace input::placeholder,
+.admin-workspace textarea::placeholder {
+  color: var(--admin-text-muted) !important;
+}
+
+.admin-workspace button[class*='from-teal'],
+.admin-workspace a[class*='from-teal'],
+.admin-workspace button.bg-teal-600,
+.admin-workspace a.bg-teal-600,
+.admin-workspace button.bg-teal-500,
+.admin-workspace a.bg-teal-500,
+.admin-workspace button.bg-teal-400,
+.admin-workspace .bg-teal-600,
+.admin-workspace .bg-teal-500,
+.admin-workspace .bg-teal-400,
+.admin-workspace [class*='bg-[#0F9F8F]'],
+.admin-workspace [class*='bg-[#0f9f8f]'],
+.admin-workspace [class*='bg-[#0B8275]'],
+.admin-workspace [class*='bg-[#0f766e]'],
+.admin-workspace [class*='bg-[#0d6b63]'],
+.admin-workspace [class*='bg-[#0d5d57]'] {
+  background-color: #000000 !important;
+  background-image: none !important;
+  color: #ffffff !important;
+  border-color: transparent !important;
+  box-shadow: none !important;
+  border-radius: 9999px !important;
+}
+
+.admin-workspace button[class*='from-teal'] svg,
+.admin-workspace button.bg-teal-600 svg,
+.admin-workspace button.bg-teal-500 svg,
+.admin-workspace button.bg-teal-400 svg,
+.admin-workspace [class*='bg-[#0F9F8F]'] svg,
+.admin-workspace [class*='bg-[#0f766e]'] svg {
+  color: #ffffff !important;
+}
+
+.admin-workspace button[class*='from-teal']:hover,
+.admin-workspace a[class*='from-teal']:hover,
+.admin-workspace .bg-teal-600:hover,
+.admin-workspace .bg-teal-500:hover,
+.admin-workspace [class*='bg-[#0F9F8F]']:hover,
+.admin-workspace [class*='bg-[#0f766e]']:hover,
+.admin-workspace button.bg-black:hover {
+  background-color: #2c2c2c !important;
+  color: #ffffff !important;
+}
+
+.admin-workspace button.bg-slate-900,
+.admin-workspace a.bg-slate-900,
+.admin-workspace button.bg-slate-800,
+.admin-workspace a.bg-slate-800,
+.admin-workspace button.bg-gray-600,
+.admin-workspace button.bg-gray-700,
+.admin-workspace button.bg-gray-800,
+.admin-workspace a.bg-gray-600,
+.admin-workspace a.bg-gray-700 {
+  background-color: var(--admin-surface) !important;
+  color: #334155 !important;
+  border: 1px solid var(--admin-border-strong) !important;
+}
+
+.admin-workspace .text-purple-400,
+.admin-workspace .text-purple-300,
+.admin-workspace .text-pink-400,
+.admin-workspace .text-cyan-400,
+.admin-workspace .text-orange-400,
+.admin-workspace .text-yellow-400,
+.admin-workspace .text-violet-400,
+.admin-workspace .text-indigo-400,
+.admin-workspace .text-sky-400,
+.admin-workspace .text-fuchsia-400 {
+  color: var(--admin-text);
+}
+
+.admin-workspace .text-amber-400,
+.admin-workspace .text-amber-500,
+.admin-workspace .text-amber-200 {
+  color: var(--admin-warning);
+}
+
+.admin-workspace .text-teal-300,
+.admin-workspace .text-teal-400,
+.admin-workspace .text-teal-450,
+.admin-workspace .text-teal-350,
+.admin-workspace .text-teal-455 {
+  color: var(--admin-brand);
+}
+
+.admin-workspace .text-slate-105,
+.admin-workspace .text-slate-202,
+.admin-workspace .text-slate-205,
+.admin-workspace .text-slate-250 {
+  color: var(--admin-text);
+}
+
+.admin-workspace .text-slate-350,
+.admin-workspace .text-slate-405,
+.admin-workspace .text-slate-450,
+.admin-workspace .text-slate-455 {
+  color: var(--admin-text-secondary);
+}
+
+.admin-workspace .text-emerald-400,
+.admin-workspace .text-green-400 {
+  color: var(--admin-success);
+}
+
+.admin-workspace .text-rose-400,
+.admin-workspace .text-red-400 {
+  color: var(--admin-error);
+}
+
+.admin-workspace .bg-purple-600 {
+  background-color: var(--admin-error) !important;
+}
+
+.admin-workspace .bg-amber-600 {
+  background-color: var(--admin-warning) !important;
+}
+
+.admin-workspace svg.text-yellow-400,
+.admin-workspace svg.text-purple-400,
+.admin-workspace svg.text-orange-400,
+.admin-workspace svg.text-cyan-400,
+.admin-workspace svg.text-pink-400 {
+  color: var(--admin-text-secondary);
+}
+
+.admin-workspace svg.text-teal-400 {
+  color: var(--admin-brand);
+}
+
+.admin-workspace .uppercase.tracking-wider,
+.admin-workspace .uppercase.tracking-widest {
+  letter-spacing: 0.01em;
+}
+
+.admin-workspace .fixed.inset-0:not(.admin-lightbox) {
+  background-color: rgba(26, 26, 26, 0.45) !important;
+  backdrop-filter: none !important;
+}
+
+.admin-workspace .admin-lightbox {
+  background-color: rgba(26, 26, 26, 0.45) !important;
+}
+
+.admin-workspace .admin-lightbox > div:not(.absolute) {
+  background-color: #ffffff !important;
+  color: #1a1a1a !important;
+  box-shadow: 0 16px 40px rgba(26, 26, 26, 0.16) !important;
+}
+
+.admin-workspace .admin-lightbox > .absolute.inset-0 {
+  background-color: rgba(26, 26, 26, 0.4) !important;
+}
+
+.admin-workspace .admin-lightbox > .absolute.inset-0 > div {
+  background-color: #ffffff !important;
+  color: #1a1a1a !important;
+}
+
+.admin-workspace .admin-lightbox label,
+.admin-workspace .admin-lightbox h1,
+.admin-workspace .admin-lightbox h2,
+.admin-workspace .admin-lightbox h3 {
+  color: #1a1a1a !important;
+}
+
+.admin-workspace .admin-lightbox input,
+.admin-workspace .admin-lightbox select,
+.admin-workspace .admin-lightbox textarea {
+  background-color: #ffffff !important;
+  color: #1a1a1a !important;
+  border-color: #c7c7c7 !important;
+}
+
+.admin-workspace .admin-lightbox button.text-white,
+.admin-workspace .admin-lightbox a.text-white,
+.admin-workspace .admin-lightbox button.bg-black,
+.admin-workspace .admin-lightbox button[class*='bg-[#0F9F8F]'],
+.admin-workspace .admin-lightbox button[class*='bg-[#0B8275]'] {
+  background-color: #000000 !important;
+  color: #ffffff !important;
+  border-radius: 6px !important;
+}
+
+.admin-workspace .admin-lightbox button.bg-white,
+.admin-workspace .admin-lightbox button.bg-white.text-gray-700 {
+  background-color: #ffffff !important;
+  color: #334155 !important;
+}
+
+.admin-workspace .admin-lightbox .flex.rounded-lg.overflow-hidden > button {
+  border-radius: 0 !important;
+}
+
 @media (max-width: 768px) {
   .glass-panel {
     backdrop-filter: blur(18px);

@@ -5,7 +5,7 @@ import {
   ShoppingCart,
   MessageSquare,
   Truck,
-  Wallet,
+  Landmark,
   AlertTriangle,
   RefreshCw,
   Plus,
@@ -15,9 +15,12 @@ import {
   Zap,
   Users,
   ClipboardList,
+  FileText,
+  RotateCcw,
 } from 'lucide-react';
 import Link from 'next/link';
 import adminApi from '@/lib/admin-api';
+import { adminUi } from '@/lib/admin-ui';
 import {
   CALCULATION_UNDER_REVIEW,
   UNAVAILABLE,
@@ -27,8 +30,8 @@ import {
   type DashboardPayload,
 } from '@/lib/dashboard-metrics';
 
-const glassPanelClass = `bg-slate-900/40 backdrop-blur-lg border border-white/[0.06] border-t-white/[0.22] shadow-[0_12px_40px_rgba(0,0,0,0.25),inset_0_1px_0_rgba(255,255,255,0.15)] rounded-2xl p-5 transition-all duration-300`;
-const glassActionBtn = `w-full flex items-center justify-between p-3.5 bg-gradient-to-b from-white/[0.08] to-white/[0.01] hover:bg-white/[0.06] border border-white/[0.04] border-t-white/[0.18] rounded-xl text-xs font-semibold text-slate-100 transition-all active:scale-[0.98] cursor-pointer`;
+const panelClass = `${adminUi.panel} p-5`;
+const quickCmdClass = `${adminUi.btnSecondary} w-full justify-between`;
 
 const PANEL_ICONS: Record<string, typeof ShoppingCart> = {
   'recent-orders': ShoppingCart,
@@ -39,11 +42,23 @@ const PANEL_ICONS: Record<string, typeof ShoppingCart> = {
   feeds: Clock,
 };
 
+/** Order fixed by the business: invoice, quotation, customer, vendor, bank transaction, PO, credit memo. */
+const QUICK_COMMANDS = [
+  { label: 'Create new invoice', href: '/admin/invoices?create=invoice', icon: ShoppingCart, primary: true },
+  { label: 'Create new quotation', href: '/admin/invoices?create=quotation', icon: FileText },
+  { label: 'Create customer', href: '/admin/customers?create=1', icon: Users },
+  { label: 'Create vendor', href: '/admin/vendors?create=1', icon: Truck },
+  { label: 'Create bank transaction', href: '/admin/receipts?create=1', icon: Landmark },
+  { label: 'Create purchase order', href: '/admin/purchase-orders?create=1', icon: ClipboardList },
+  { label: 'Create credit memo', href: '/admin/credit-memos?new=1', icon: RotateCcw },
+] as const;
+
 export default function AdminDashboard() {
   const [data, setData] = useState<DashboardPayload | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [pendingRfqs, setPendingRfqs] = useState<number | null>(null);
 
   const fetchDashboardData = async () => {
     const isRefresh = data !== null;
@@ -59,6 +74,14 @@ export default function AdminDashboard() {
     } finally {
       setLoading(false);
       setRefreshing(false);
+    }
+
+    try {
+      const rfqRes = await adminApi.get('/rfq', { params: { status: 'pending', limit: 1 } });
+      const pending = rfqRes.data?.summary?.pending;
+      setPendingRfqs(typeof pending === 'number' ? pending : null);
+    } catch {
+      setPendingRfqs(null);
     }
   };
 
@@ -82,14 +105,14 @@ export default function AdminDashboard() {
     <div className="max-w-[1400px] mx-auto space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-extrabold text-white tracking-tight">Overview</h1>
-          <p className="text-slate-400 text-xs mt-1">Operational view of Express Distributors</p>
+          <h1 className={adminUi.pageTitle}>Welcome</h1>
+          <p className={`${adminUi.meta} mt-1`}>Sales &amp; Get Paid overview</p>
         </div>
         <button
           type="button"
           onClick={fetchDashboardData}
           disabled={loading || refreshing}
-          className="p-2.5 rounded-xl bg-slate-900 border border-white/5 text-slate-400 hover:text-white transition-colors disabled:opacity-40"
+          className={`${adminUi.btnSecondary} disabled:opacity-40`}
           title="Refresh Workspace"
         >
           <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} />
@@ -98,19 +121,15 @@ export default function AdminDashboard() {
 
       {view.kind === 'loading' && (
         <div className="flex items-center justify-center min-h-[400px]">
-          <div className="animate-spin rounded-full h-10 w-10 border-2 border-teal-500 border-t-transparent" />
+          <div className="animate-spin rounded-full h-10 w-10 border-2 border-black border-t-transparent" />
         </div>
       )}
 
       {view.kind === 'error' && (
-        <div className={`${glassPanelClass} max-w-lg`}>
-          <p className="text-sm font-bold text-white">Failed to load dashboard</p>
-          <p className="text-xs text-slate-400 mt-2">{view.message}</p>
-          <button
-            type="button"
-            onClick={fetchDashboardData}
-            className="mt-4 inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-teal-600 text-white text-xs font-semibold"
-          >
+        <div className={`${panelClass} max-w-lg space-y-3`}>
+          <p className="text-sm font-medium text-[#1A1A1A]">Failed to load dashboard</p>
+          <p className={adminUi.meta}>{view.message}</p>
+          <button type="button" onClick={fetchDashboardData} className={adminUi.btnPrimary}>
             Retry
           </button>
         </div>
@@ -119,42 +138,42 @@ export default function AdminDashboard() {
       {(view.kind === 'ready' || view.kind === 'stale') && (
         <>
           {view.refreshing && view.kind === 'ready' && (
-            <div className="rounded-xl border border-teal-500/30 bg-teal-500/10 px-4 py-2 text-xs font-semibold text-teal-300">
+            <div className={`${adminUi.panel} px-4 py-2 text-sm font-medium text-[#6B6C72]`}>
               Refreshing dashboard…
             </div>
           )}
 
           {view.kind === 'stale' && (
-            <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-xs text-amber-200">
-              <p className="font-bold">Showing stale data</p>
-              <p className="mt-1 text-amber-200/80">{view.message}. Figures below are from the last successful load.</p>
-              {view.refreshing && <p className="mt-1 font-semibold">Retrying…</p>}
-              <button
-                type="button"
-                onClick={fetchDashboardData}
-                className="mt-2 inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-amber-500/20 text-amber-100 font-semibold"
-              >
+            <div className={`${adminUi.panel} px-4 py-3 text-sm`} style={{ background: '#FEF3C7', borderColor: '#FCD34D' }}>
+              <p className="font-semibold text-[#92400E]">Showing stale data</p>
+              <p className="mt-1 text-[#92400E]">{view.message}. Figures below are from the last successful load.</p>
+              {view.refreshing && <p className="mt-1 font-medium">Retrying…</p>}
+              <button type="button" onClick={fetchDashboardData} className={`${adminUi.btnSecondary} mt-2`}>
                 Retry
               </button>
             </div>
           )}
 
-          <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-4">
+          {/* Metric cards: 4 per row on desktop so currency values never clip. */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
             {metricCards.map((card) => {
               const isReview = card.value === CALCULATION_UNDER_REVIEW;
               const isUnavailable = card.value === UNAVAILABLE;
+              const muted = isReview || isUnavailable;
               return (
-                <div key={card.id} className={glassPanelClass}>
-                  <p className="text-[10px] font-bold text-slate-500 tracking-wider uppercase">{card.label}</p>
+                <div key={card.id} className={`${panelClass} min-w-0 min-h-[120px] flex flex-col`}>
+                  <p className={`${adminUi.label} truncate`} title={card.label}>{card.label}</p>
                   <p
-                    className={`mt-1.5 font-black ${
-                      isReview || isUnavailable ? 'text-xs text-slate-400 font-semibold' : 'text-lg text-white'
-                    }`}
+                    className={
+                      muted
+                        ? 'mt-2 text-sm text-[#8D9096] leading-snug break-words'
+                        : 'mt-2 text-[26px] leading-tight font-normal text-[#1A1A1A] tabular-nums break-words'
+                    }
                   >
                     {card.value}
                   </p>
                   {card.caption && (
-                    <span className="inline-block text-[9px] text-slate-400 mt-2 font-semibold">{card.caption}</span>
+                    <span className={`${adminUi.helper} block mt-auto pt-2 leading-snug`}>{card.caption}</span>
                   )}
                 </div>
               );
@@ -176,42 +195,46 @@ export default function AdminDashboard() {
             </div>
 
             <div className="space-y-6">
-              <div className={glassPanelClass}>
-                <div className="pb-3 border-b border-white/5 mb-4">
-                  <h3 className="text-xs font-bold text-white tracking-widest uppercase flex items-center gap-2">
-                    <Zap className="w-4 h-4 text-yellow-400" /> ERP Quick Commands
+              <div className={panelClass}>
+                <div className="pb-3 border-b border-[#E3E5E8] mb-4">
+                  <h3 className={`${adminUi.sectionTitle} flex items-center gap-2`}>
+                    <Zap className={`w-4 h-4 ${adminUi.icon}`} /> Quick commands
                   </h3>
                 </div>
                 <div className="space-y-2">
-                  <Link href="/admin/orders" className={glassActionBtn}>
-                    <span className="flex items-center gap-2.5"><ShoppingCart className="w-4 h-4 text-teal-400" /> Create New Order</span>
-                    <Plus className="w-3.5 h-3.5 text-slate-400" />
-                  </Link>
-                  <Link href="/admin/rfq" className={glassActionBtn}>
-                    <span className="flex items-center gap-2.5"><MessageSquare className="w-4 h-4 text-teal-400" /> Create Quote Request</span>
-                    <Plus className="w-3.5 h-3.5 text-slate-400" />
-                  </Link>
-                  <Link href="/admin/customers" className={glassActionBtn}>
-                    <span className="flex items-center gap-2.5"><Users className="w-4 h-4 text-teal-400" /> Register Customer</span>
-                    <Plus className="w-3.5 h-3.5 text-slate-400" />
-                  </Link>
-                  <Link href="/admin/purchase-orders" className={glassActionBtn}>
-                    <span className="flex items-center gap-2.5"><ClipboardList className="w-4 h-4 text-teal-400" /> Create Purchase Order</span>
-                    <Plus className="w-3.5 h-3.5 text-slate-400" />
-                  </Link>
-                  <Link href="/admin/receipts" className={glassActionBtn}>
-                    <span className="flex items-center gap-2.5"><Wallet className="w-4 h-4 text-teal-400" /> Receive Client Payment</span>
-                    <Plus className="w-3.5 h-3.5 text-slate-400" />
-                  </Link>
-                  <Link
-                    href="/admin/pos"
-                    className="w-full flex items-center justify-between p-3.5 bg-gradient-to-r from-teal-500/20 to-emerald-500/10 hover:from-teal-500/30 hover:to-emerald-500/20 border border-teal-500/30 border-t-white/20 rounded-xl text-xs font-bold text-white transition-all active:scale-[0.98] shadow-md shadow-teal-500/5 cursor-pointer"
-                  >
-                    <span className="flex items-center gap-2.5"><ShoppingCart className="w-4 h-4 text-teal-400" /> Launch POS Terminal</span>
-                    <ChevronRight className="w-3.5 h-3.5 text-teal-400" />
-                  </Link>
+                  {QUICK_COMMANDS.map((cmd) => {
+                    const Icon = cmd.icon;
+                    const primary = 'primary' in cmd && cmd.primary;
+                    return (
+                      <Link
+                        key={cmd.href}
+                        href={cmd.href}
+                        className={primary ? `${adminUi.btnPrimary} w-full justify-between` : quickCmdClass}
+                      >
+                        <span className="flex items-center gap-2.5">
+                          <Icon className={`w-4 h-4 ${primary ? '' : adminUi.icon}`} /> {cmd.label}
+                        </span>
+                        {primary ? <ChevronRight className="w-3.5 h-3.5" /> : <Plus className={`w-3.5 h-3.5 ${adminUi.icon}`} />}
+                      </Link>
+                    );
+                  })}
                 </div>
               </div>
+
+              <Link href="/admin/rfq" className={`${panelClass} block hover:bg-[#F4F5F8]`}>
+                <h3 className={`${adminUi.sectionTitle} mb-3 flex items-center gap-2`}>
+                  <MessageSquare className={`w-4 h-4 ${adminUi.icon}`} /> Quote requests
+                </h3>
+                <p className="text-[26px] leading-tight font-normal text-[#1A1A1A] tabular-nums">
+                  {pendingRfqs === null ? '—' : pendingRfqs}
+                </p>
+                <p className={`${adminUi.meta} mt-1`}>
+                  {pendingRfqs === null ? 'Could not load quote requests' : 'Pending from website customers'}
+                </p>
+                <span className="inline-flex items-center gap-1 mt-3 text-sm text-[#0077C5]">
+                  Open quote requests <ChevronRight className="w-3.5 h-3.5" />
+                </span>
+              </Link>
 
               {activityPanels.slice(5).map((panel) => (
                 <ActivityPanelCard key={panel.id} panel={panel} />
@@ -231,11 +254,11 @@ function ActivityPanelCard({
 }) {
   const Icon = PANEL_ICONS[panel.id] || Clock;
   return (
-    <div className={glassPanelClass}>
-      <h3 className="text-xs font-bold text-white mb-3 flex items-center gap-2">
-        <Icon className="w-4 h-4 text-slate-400" /> {panel.title}
+    <div className={panelClass}>
+      <h3 className={`${adminUi.sectionTitle} mb-3 flex items-center gap-2`}>
+        <Icon className={`w-4 h-4 ${adminUi.icon}`} /> {panel.title}
       </h3>
-      <p className="text-xs text-slate-400">{panel.message}</p>
+      <p className={adminUi.meta}>{panel.message}</p>
     </div>
   );
 }

@@ -100,6 +100,7 @@ export interface ApplyPaymentInput {
   bankAccountId?: string;
   trxId?: string;
   customerName?: string;
+  notes?: string;
 }
 
 export interface AppliedPayment {
@@ -119,6 +120,7 @@ export interface CustomerPaymentInput {
   payment_method?: string;
   bank_account_id?: string;
   trx_id?: string;
+  notes?: string;
 }
 
 export interface ReceiptPatch {
@@ -152,6 +154,7 @@ export interface PaymentApplicationStore {
     invoice_num: string;
     pmt_mode: string;
     amount_received: number;
+    so_id?: string;
   }): Promise<ReceiptSnapshot>;
   updateReceipt(id: string, patch: ReceiptPatch): Promise<ReceiptSnapshot | null>;
   deleteReceiptById(id: string): Promise<boolean>;
@@ -233,9 +236,10 @@ export const mongoosePaymentStore: PaymentApplicationStore = {
       invoice_num: doc.invoice_num,
       pmt_mode: doc.pmt_mode,
       amount_received: doc.amount_received,
+      ...(doc.so_id ? { so_id: doc.so_id } : {}),
       ...(doc.bank_account_id && mongoose.Types.ObjectId.isValid(doc.bank_account_id)
-        ? { bank_account_id: doc.bank_account_id }
-        : {}),
+        ? { bank_account_id: doc.bank_account_id, state: 'deposited', city: doc.trx_date.toISOString() }
+        : { state: 'pending' }),
     });
     const r = created.toObject() as any;
     return toReceiptSnapshot(r);
@@ -317,6 +321,7 @@ export function createPaymentApplicationService(store: PaymentApplicationStore) 
       }
     }
 
+    const note = input.notes ? String(input.notes).trim() : '';
     const receipt = await store.createReceipt({
       trx_id: trxId,
       trx_date: input.paymentDate instanceof Date && !Number.isNaN(input.paymentDate.getTime())
@@ -328,6 +333,7 @@ export function createPaymentApplicationService(store: PaymentApplicationStore) 
       invoice_num: invoice.invoice_number,
       pmt_mode: input.paymentMethod || 'Other',
       amount_received: amount,
+      ...(note ? { so_id: note } : {}),
     });
 
     const nextPaid = roundMoney(invoice.amount_paid + amount);
@@ -428,6 +434,7 @@ export function createPaymentApplicationService(store: PaymentApplicationStore) 
           paymentMethod: input.payment_method,
           bankAccountId: input.bank_account_id,
           trxId: positive.length === 1 ? input.trx_id : undefined,
+          notes: input.notes,
         })
       );
     }

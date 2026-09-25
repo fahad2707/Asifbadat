@@ -82,9 +82,9 @@ router.post('/', authenticateAdmin, async (req: AuthRequest, res) => {
       sale_id: z.string().trim().min(1),
       items: z
         .array(
-          z.object({
+        z.object({
             product_id: z.string().trim().min(1),
-            quantity: z.number().int().positive(),
+          quantity: z.number().int().positive(),
             inventory_disposition: z.enum(POS_RETURN_DISPOSITIONS),
           })
         )

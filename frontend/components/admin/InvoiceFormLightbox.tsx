@@ -6,10 +6,13 @@ import { X, Trash2 } from 'lucide-react';
 import adminApi from '@/lib/admin-api';
 import toast from 'react-hot-toast';
 import { downloadPdfFromResponse, openPdfFromResponse } from '@/lib/download-pdf';
+import { shareDocumentOnWhatsApp, composeEmailWithPdf } from '@/lib/share-document';
 import SearchableProductDropdown, { type ProductOption } from './SearchableProductDropdown';
 
 const LOCATION_OF_SALE = '511 W Germantown Pike, Plymouth Meeting, PA 19462-1303';
 const INITIAL_LINES = 15;
+/** Payment terms offered on invoices/quotations. Stored as plain text (no schema change). */
+export const TERMS_OPTIONS = ['Due on receipt', 'Net 15', 'Net 30', 'Net 60'];
 
 interface Customer {
   id: string;
@@ -53,6 +56,9 @@ export interface InvoiceInitialItem {
   product_name: string;
   category_name?: string;
   quantity: number;
+  /** Known selling price (e.g. captured on the RFQ). Used directly; admin can still edit. */
+  price?: number;
+  cost_price?: number;
 }
 
 interface InvoiceFormLightboxProps {
@@ -159,17 +165,22 @@ export default function InvoiceFormLightbox({ isOpen, onClose, onSaved, editId, 
         setInvoiceNumber(/^INV#\d+|^QTN#\d+/.test(num) ? num : (docType === 'quotation' ? 'QTN#001' : 'INV#001'));
       }).catch(() => setInvoiceNumber(docType === 'quotation' ? 'QTN#001' : 'INV#001'));
       const empty: LineItem[] = Array.from({ length: INITIAL_LINES }, () => ({ product_id: '', product_name: '', category_name: '', quantity: 1, price: 0, subtotal: 0 }));
-      // Pre-fill lines from initialItems (e.g. generated from an RFQ). Product details
-      // (price, cost, stock) are resolved later once the /products fetch finishes.
+      // Pre-fill lines from initialItems (e.g. generated from an RFQ). Prices passed in
+      // are used directly; anything missing is resolved once the /products fetch finishes.
       if (initialItems && initialItems.length > 0) {
-        const prefilled: LineItem[] = initialItems.map((it) => ({
-          product_id: it.product_id || '',
-          product_name: it.product_name || '',
-          category_name: it.category_name || '',
-          quantity: Math.max(1, Number(it.quantity) || 1),
-          price: 0,
-          subtotal: 0,
-        }));
+        const prefilled: LineItem[] = initialItems.map((it) => {
+          const qty = Math.max(1, Number(it.quantity) || 1);
+          const price = Number(it.price) > 0 ? Number(it.price) : 0;
+          return {
+            product_id: it.product_id || '',
+            product_name: it.product_name || '',
+            category_name: it.category_name || '',
+            quantity: qty,
+            price,
+            subtotal: qty * price,
+            cost_price: Number(it.cost_price) > 0 ? Number(it.cost_price) : undefined,
+          };
+        });
         while (prefilled.length < INITIAL_LINES) prefilled.push({ product_id: '', product_name: '', category_name: '', quantity: 1, price: 0, subtotal: 0 });
         setLines(prefilled);
       } else {
@@ -390,6 +401,7 @@ export default function InvoiceFormLightbox({ isOpen, onClose, onSaved, editId, 
   const [showCloseConfirm, setShowCloseConfirm] = useState(false);
   const [showPdfModal, setShowPdfModal] = useState(false);
   const [savedInvoiceId, setSavedInvoiceId] = useState<string | null>(null);
+  const [sharing, setSharing] = useState(false);
   const [addCustomerOpen, setAddCustomerOpen] = useState(false);
   const [newCustomerForm, setNewCustomerForm] = useState({
     name: '', customer_code: '', phone: '', email: '', company: '', address: '', billing_address: '',
@@ -525,15 +537,15 @@ export default function InvoiceFormLightbox({ isOpen, onClose, onSaved, editId, 
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50" onClick={handleClose}>
+    <div className="admin-lightbox fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50" onClick={handleClose}>
       <div className="bg-white rounded-xl shadow-xl max-w-6xl w-full max-h-[90vh] overflow-hidden flex flex-col" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between p-4 border-b border-gray-200">
           <div className="flex items-center gap-3">
             <h2 className="text-xl font-bold text-gray-900">{editId ? (documentType === 'quotation' ? 'Edit Quotation' : 'Edit Invoice') : 'Create document'}</h2>
             {!editId && (
               <div className="flex rounded-lg border border-gray-300 overflow-hidden">
-                <button type="button" onClick={() => switchDocumentType('invoice')} className={`px-4 py-2 text-sm font-medium ${documentType === 'invoice' ? 'bg-[#0f766e] text-white' : 'bg-white text-gray-700 hover:bg-gray-50'}`}>Create invoice</button>
-                <button type="button" onClick={() => switchDocumentType('quotation')} className={`px-4 py-2 text-sm font-medium ${documentType === 'quotation' ? 'bg-[#0f766e] text-white' : 'bg-white text-gray-700 hover:bg-gray-50'}`}>Create quotation</button>
+                <button type="button" onClick={() => switchDocumentType('invoice')} className={`px-4 py-2 text-sm font-medium rounded-none ${documentType === 'invoice' ? 'bg-black text-white' : 'bg-white text-gray-700 hover:bg-gray-50'}`}>Create invoice</button>
+                <button type="button" onClick={() => switchDocumentType('quotation')} className={`px-4 py-2 text-sm font-medium rounded-none ${documentType === 'quotation' ? 'bg-black text-white' : 'bg-white text-gray-700 hover:bg-gray-50'}`}>Create quotation</button>
               </div>
             )}
           </div>
@@ -544,7 +556,7 @@ export default function InvoiceFormLightbox({ isOpen, onClose, onSaved, editId, 
         <div className="flex-1 overflow-y-auto p-4 space-y-4">
           {loading ? (
             <div className="flex justify-center py-12">
-              <div className="animate-spin rounded-full h-10 w-10 border-2 border-[#0f766e] border-t-transparent" />
+              <div className="animate-spin rounded-full h-10 w-10 border-2 border-[#0F9F8F] border-t-transparent" />
             </div>
           ) : (
             <>
@@ -552,7 +564,7 @@ export default function InvoiceFormLightbox({ isOpen, onClose, onSaved, editId, 
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Customer <span className="text-red-600">*</span></label>
                   <div className="flex gap-2">
-                    <button type="button" onClick={() => setAddCustomerOpen(true)} className="shrink-0 inline-flex items-center gap-1 px-3 py-2 border border-[#0f766e] text-[#0f766e] rounded-lg text-sm font-medium hover:bg-teal-50">
+                    <button type="button" onClick={() => setAddCustomerOpen(true)} className="shrink-0 inline-flex items-center gap-1 px-3 py-2 border border-[#0F9F8F] text-[#0F9F8F] rounded-lg text-sm font-medium hover:bg-teal-50">
                       + Add customer
                     </button>
                     <select
@@ -594,8 +606,18 @@ export default function InvoiceFormLightbox({ isOpen, onClose, onSaved, editId, 
               </div>
               <div className="flex gap-4">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Terms</label>
-                  <input type="text" value={terms} onChange={(e) => { setTerms(e.target.value); setDirty(true); }} className="border border-gray-300 rounded-lg px-3 py-2 text-sm w-40" />
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Due terms</label>
+                  <select
+                    value={terms}
+                    onChange={(e) => { setTerms(e.target.value); setDirty(true); }}
+                    className="border border-gray-300 rounded-lg px-3 py-2 text-sm w-52 bg-white"
+                  >
+                    {/* Keep a legacy free-text value selectable when editing an older document. */}
+                    {terms && !TERMS_OPTIONS.includes(terms) && <option value={terms}>{terms}</option>}
+                    {TERMS_OPTIONS.map((t) => (
+                      <option key={t} value={t}>{t}</option>
+                    ))}
+                  </select>
                 </div>
               </div>
 
@@ -612,7 +634,7 @@ export default function InvoiceFormLightbox({ isOpen, onClose, onSaved, editId, 
                       placeholder="Scan barcode / item ID and press Enter"
                       className="flex-1 max-w-xs pl-3 py-1.5 border border-gray-300 rounded-lg text-sm"
                     />
-                    <Link href="/admin/products" className="text-sm text-[#0f766e] font-medium hover:underline">+ Add product</Link>
+                    <Link href="/admin/products/active" className="text-sm text-[#0F9F8F] font-medium hover:underline">+ Add product</Link>
                   </div>
                 </div>
                 <div className="border border-gray-200 rounded-lg overflow-x-auto">
@@ -754,7 +776,7 @@ export default function InvoiceFormLightbox({ isOpen, onClose, onSaved, editId, 
                       </select>
                       {selectedTaxTypeId === '__add_tax__' && (
                         <p className="text-xs text-gray-500 mt-1">
-                          <Link href="/admin/data" className="text-[#0f766e] hover:underline">Go to Master Data</Link> to add tax types, then return here.
+                          <Link href="/admin/data" className="text-[#0F9F8F] hover:underline">Go to Master Data</Link> to add tax types, then return here.
                         </p>
                       )}
                     </div>
@@ -768,7 +790,7 @@ export default function InvoiceFormLightbox({ isOpen, onClose, onSaved, editId, 
         </div>
         <div className="flex justify-end gap-2 p-4 border-t border-gray-200">
           <button type="button" onClick={handleClose} className="px-4 py-2 text-gray-700 hover:bg-gray-100 rounded-lg">Cancel</button>
-          <button type="button" onClick={() => handleSave(false)} disabled={saving} className="px-4 py-2 bg-[#0f766e] text-white rounded-lg hover:bg-[#0d6b63] disabled:opacity-50">
+          <button type="button" onClick={() => handleSave(false)} disabled={saving} className="px-4 py-2 bg-black text-white rounded-lg hover:bg-[#2C2C2C] disabled:opacity-50">
             {saving ? 'Saving...' : 'Save'}
           </button>
         </div>
@@ -830,9 +852,9 @@ export default function InvoiceFormLightbox({ isOpen, onClose, onSaved, editId, 
                 <select value={newCustomerForm.payment_terms} onChange={(e) => setNewCustomerForm((f) => ({ ...f, payment_terms: e.target.value }))} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm">
                   <option value="">Select payment terms</option>
                   <option value="Due on receipt">Due on receipt</option>
-                  <option value="Net 7">Net 7</option>
                   <option value="Net 15">Net 15</option>
                   <option value="Net 30">Net 30</option>
+                  <option value="Net 60">Net 60</option>
                 </select>
               </div>
               <div>
@@ -845,7 +867,7 @@ export default function InvoiceFormLightbox({ isOpen, onClose, onSaved, editId, 
                 <p className="text-xs text-gray-500 mt-1">You can add more documents later on the Customer page.</p>
               </div>
               <div className="flex gap-2 pt-2">
-                <button type="submit" disabled={savingCustomer} className="flex-1 py-2 bg-[#0f766e] text-white rounded-lg font-medium hover:bg-[#0d6b63] disabled:opacity-50">
+                <button type="submit" disabled={savingCustomer} className="flex-1 py-2 bg-black text-white rounded-lg font-medium hover:bg-[#2C2C2C] disabled:opacity-50">
                   {savingCustomer ? 'Saving...' : 'Add customer'}
                 </button>
                 <button type="button" onClick={() => setAddCustomerOpen(false)} className="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50">Cancel</button>
@@ -861,7 +883,7 @@ export default function InvoiceFormLightbox({ isOpen, onClose, onSaved, editId, 
             <p className="text-gray-900 font-medium mb-3">You have unsaved changes.</p>
             <div className="flex gap-2 justify-end">
               <button type="button" onClick={handleCloseWithoutSaving} className="px-3 py-2 text-gray-700 hover:bg-gray-100 rounded-lg">Close without saving</button>
-              <button type="button" onClick={doSaveAndClose} disabled={saving} className="px-3 py-2 bg-[#0f766e] text-white rounded-lg hover:bg-[#0d6b63] disabled:opacity-50">Save and close</button>
+              <button type="button" onClick={doSaveAndClose} disabled={saving} className="px-3 py-2 bg-black text-white rounded-lg hover:bg-[#2C2C2C] disabled:opacity-50">Save and close</button>
             </div>
           </div>
         </div>
@@ -871,21 +893,23 @@ export default function InvoiceFormLightbox({ isOpen, onClose, onSaved, editId, 
         <div className="absolute inset-0 flex items-center justify-center bg-black/40 rounded-xl z-20" onClick={(e) => e.stopPropagation()}>
           <div className="bg-white rounded-xl shadow-xl p-6 max-w-sm w-full mx-4">
             <h3 className="text-lg font-semibold text-gray-900 mb-2">Document saved</h3>
-            <p className="text-gray-600 text-sm mb-4">Download or print the PDF.</p>
+            <p className="text-gray-600 text-sm mb-4">
+              Download the PDF first, then share it. On a computer, WhatsApp and email need you to attach the file from Downloads.
+            </p>
             <div className="flex flex-col gap-2">
               <button
                 type="button"
                 onClick={async () => {
                   try {
-                    const res = await adminApi.get(`/invoices/${savedInvoiceId}/pdf`, { responseType: 'blob' });
-                    if (downloadPdfFromResponse(res.data, `invoice-${savedInvoiceId}.pdf`, res.headers['content-type'])) {
-                      toast.success('PDF downloaded');
+                    const res = await adminApi.get(`/invoices/${savedInvoiceId}/pdf`, { responseType: 'blob', timeout: 60000 });
+                    if (await downloadPdfFromResponse(res.data, `${documentType === 'quotation' ? 'quotation' : 'invoice'}-${invoiceNumber}.pdf`, res.headers['content-type'])) {
+                      toast.success('PDF saved to your Downloads folder — you can attach it in WhatsApp or email below');
                     }
                   } catch {
                     toast.error('Failed to download PDF');
                   }
                 }}
-                className="w-full px-4 py-2.5 rounded-lg font-medium bg-[#0f766e] text-white hover:bg-[#0d6b63]"
+                className="w-full px-4 py-2.5 rounded-lg font-medium bg-black text-white hover:bg-[#2C2C2C]"
               >
                 Download PDF
               </button>
@@ -893,8 +917,8 @@ export default function InvoiceFormLightbox({ isOpen, onClose, onSaved, editId, 
                 type="button"
                 onClick={async () => {
                   try {
-                    const res = await adminApi.get(`/invoices/${savedInvoiceId}/pdf`, { responseType: 'blob' });
-                    if (openPdfFromResponse(res.data, res.headers['content-type'])) {
+                    const res = await adminApi.get(`/invoices/${savedInvoiceId}/pdf`, { responseType: 'blob', timeout: 60000 });
+                    if (await openPdfFromResponse(res.data, res.headers['content-type'])) {
                       toast.success('Opening PDF for print');
                     }
                   } catch {
@@ -904,6 +928,75 @@ export default function InvoiceFormLightbox({ isOpen, onClose, onSaved, editId, 
                 className="w-full px-4 py-2.5 rounded-lg font-medium border border-gray-300 text-gray-700 hover:bg-gray-50"
               >
                 Print PDF
+              </button>
+              <button
+                type="button"
+                disabled={sharing}
+                onClick={async () => {
+                  if (sharing) return;
+                  setSharing(true);
+                  try {
+                    const outcome = await shareDocumentOnWhatsApp(
+                      {
+                        id: savedInvoiceId,
+                        type: documentType,
+                        number: invoiceNumber,
+                        customerName,
+                        customerPhone,
+                        total,
+                      },
+                      async () => {
+                        const res = await adminApi.get(`/invoices/${savedInvoiceId}/pdf`, { responseType: 'blob', timeout: 60000 });
+                        return { data: res.data as BlobPart, contentType: res.headers['content-type'] as string | undefined };
+                      },
+                    );
+                    if (outcome === 'whatsapp-opened') toast.success('WhatsApp opened — attach the downloaded PDF');
+                    else if (outcome === 'shared') toast.success('Shared');
+                    else if (outcome === 'failed') toast.error('Could not open WhatsApp');
+                  } finally {
+                    setSharing(false);
+                  }
+                }}
+                className="w-full px-4 py-2.5 rounded-lg font-medium border border-gray-300 text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+                title={customerPhone ? `WhatsApp ${customerPhone}` : 'Share on WhatsApp'}
+              >
+                Share on WhatsApp
+              </button>
+              <button
+                type="button"
+                disabled={sharing}
+                onClick={async () => {
+                  setSharing(true);
+                  try {
+                    const fetchSavedPdf = async () => {
+                      const res = await adminApi.get(`/invoices/${savedInvoiceId}/pdf`, { responseType: 'blob', timeout: 60000 });
+                      return { data: res.data as BlobPart, contentType: res.headers['content-type'] as string | undefined };
+                    };
+                    if (customerEmail) {
+                      try {
+                        await adminApi.post(`/invoices/${savedInvoiceId}/send-email`);
+                        toast.success(`Emailed to ${customerEmail}`);
+                        return;
+                      } catch {
+                        // SMTP not configured — fall through to the mail app.
+                      }
+                    }
+                    const ok = await composeEmailWithPdf(
+                      { id: savedInvoiceId, type: documentType, number: invoiceNumber, customerName, customerPhone, total },
+                      fetchSavedPdf,
+                      customerEmail,
+                    );
+                    if (ok) toast.success('Mail app opened — attach the downloaded PDF');
+                  } catch (err: any) {
+                    toast.error(err?.response?.data?.error || 'Failed to send email');
+                  } finally {
+                    setSharing(false);
+                  }
+                }}
+                className="w-full px-4 py-2.5 rounded-lg font-medium border border-gray-300 text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+                title={customerEmail ? `Send to ${customerEmail}` : 'No email on file — opens your mail app'}
+              >
+                {customerEmail ? `Email to ${customerEmail}` : 'Email…'}
               </button>
               <button
                 type="button"

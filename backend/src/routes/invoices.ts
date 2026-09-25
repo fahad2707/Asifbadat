@@ -13,6 +13,7 @@ import {
   DOCUMENT_TYPE_INVOICE,
   DOCUMENT_TYPE_QUOTATION,
   isPosSaleInvoiceType,
+  isQuotationType,
   receivableInvoiceMatch,
   shouldAdjustInventoryForDocumentType,
 } from '../utils/documentType';
@@ -26,6 +27,13 @@ import { httpErrorFromPayment, paymentApplication } from '../services/paymentApp
 const router = express.Router();
 
 const LOCATION_OF_SALE = '511 W Germantown Pike, Plymouth Meeting, PA 19462-1303';
+
+function quotationMark(shippingType?: string | null): { quote_status: 'open' | 'rejected' | 'converted'; converted_invoice_number?: string } {
+  const raw = String(shippingType || '');
+  if (raw === 'rejected') return { quote_status: 'rejected' };
+  if (raw.startsWith('converted:')) return { quote_status: 'converted', converted_invoice_number: raw.slice('converted:'.length) };
+  return { quote_status: 'open' };
+}
 
 async function saveCustomerProductPrices(customerId: string | mongoose.Types.ObjectId, items: any[], invoiceId: string | mongoose.Types.ObjectId, invoiceDate: Date) {
   if (!customerId) return;
@@ -150,6 +158,9 @@ router.get('/', authenticateAdmin, async (req: AuthRequest, res) => {
           tax_amount: invoice.tax_amount || 0,
           payment_method: invoice.payment_method,
           payment_status: state.payment_status,
+          shipping_type: invoice.shipping_type,
+          terms: invoice.terms,
+          ...quotationMark(invoice.shipping_type),
           invoice_date: invoice.invoice_date,
           due_date: invoice.due_date,
           created_at: invoice.created_at,
@@ -348,7 +359,10 @@ router.get('/:id', authenticateAdmin, async (req: AuthRequest, res) => {
       tax_amount: doc.tax_amount,
       amount_paid: state.amount_paid,
       terms: doc.terms,
+      payment_method: doc.payment_method,
+      shipping_type: doc.shipping_type,
       payment_status: state.payment_status,
+      ...quotationMark(doc.shipping_type),
       items: doc.items || [],
       created_at: doc.created_at,
       updated_at: doc.updated_at,
@@ -452,16 +466,174 @@ router.put('/:id', authenticateAdmin, async (req: AuthRequest, res) => {
   }
 });
 
+// Delete a quotation, or an unpaid invoice. POS slips and paid invoices stay in the books.
+router.delete('/:id', authenticateAdmin, async (req: AuthRequest, res) => {
+  try {
+    const invoice = await Invoice.findById(req.params.id);
+    if (!invoice) return res.status(404).json({ error: 'Document not found' });
+
+    if (isPosSaleInvoiceType(invoice.invoice_type)) {
+      return res.status(400).json({ error: 'POS sales cannot be deleted.' });
+    }
+
+    const state = invoiceFinancialState(invoice);
+    if (!isQuotationType(invoice.invoice_type) && (state.amount_paid > 0 || state.payment_status === 'paid')) {
+      return res.status(400).json({
+        error: `${invoice.invoice_number || 'This invoice'} has payments recorded and cannot be deleted. Export it instead.`,
+      });
+    }
+
+    // Reverse the same stock move create/edit applied (invoices only; quotations never touch stock).
+    if (shouldAdjustInventoryForDocumentType(invoice.invoice_type)) {
+      const oldItems = (invoice as any).items || [];
+      for (const item of oldItems) {
+        if (!item.product_id || (item.quantity || 0) <= 0) continue;
+        const product = await Product.findById(item.product_id).lean();
+        if (!product) continue;
+        const p = product as any;
+        if (p.product_type === 'service' || p.product_type === 'non_inventory') continue;
+        await Product.findByIdAndUpdate(item.product_id, { $inc: { stock_quantity: Number(item.quantity) || 0 } });
+      }
+    }
+
+    await Invoice.deleteOne({ _id: invoice._id });
+    res.json({ success: true, id: invoice._id.toString() });
+  } catch (error) {
+    console.error('Delete invoice error:', error);
+    res.status(500).json({ error: 'Failed to delete document' });
+  }
+});
+
+// Convert an accepted quotation into a new unpaid invoice (same inventory path as POST /).
+router.post('/:id/convert', authenticateAdmin, async (req: AuthRequest, res) => {
+  try {
+    const quote = await Invoice.findById(req.params.id);
+    if (!quote) return res.status(404).json({ error: 'Quotation not found' });
+    if (!isQuotationType(quote.invoice_type)) {
+      return res.status(400).json({ error: 'Only quotations can be converted to invoices.' });
+    }
+    const mark = quotationMark((quote as any).shipping_type);
+    if (mark.quote_status === 'rejected') {
+      return res.status(400).json({ error: 'This quotation was rejected and cannot be converted.' });
+    }
+    if (mark.quote_status === 'converted') {
+      return res.status(400).json({ error: `This quotation was already converted to ${mark.converted_invoice_number}.` });
+    }
+
+    const items = ((quote as any).items || []).map((i: any) => ({
+      product_id: i.product_id,
+      product_name: i.product_name || '',
+      category_name: i.category_name,
+      quantity: Number(i.quantity) || 0,
+      price: Number(i.price) || 0,
+      subtotal: Number(i.subtotal) || 0,
+    }));
+    const subtotal_amount = items.reduce((s: number, i: any) => s + (i.subtotal || 0), 0);
+    const tax_amount = Number((quote as any).tax_amount) || 0;
+    const total_amount = Number((quote as any).total_amount) || subtotal_amount + tax_amount;
+    const invoice_number = await getNextInvoiceNumber();
+    const invoice_date = new Date();
+    const due_date = (quote as any).due_date || invoice_date;
+
+    if (shouldAdjustInventoryForDocumentType(DOCUMENT_TYPE_INVOICE)) {
+      for (const item of items) {
+        if (!item.product_id || (item.quantity || 0) <= 0) continue;
+        const product = await Product.findById(item.product_id);
+        if (!product) continue;
+        if ((product as any).product_type === 'service' || (product as any).product_type === 'non_inventory') continue;
+        const qty = Number(item.quantity) || 0;
+        const currentQty = (product as any).stock_quantity ?? 0;
+        if (currentQty - qty < 0) {
+          return res.status(400).json({ error: `Product "${product.name}" is out of stock. Please restock before invoicing.` });
+        }
+      }
+    }
+
+    const inv = await Invoice.create({
+      invoice_number,
+      customer_id: (quote as any).customer_id,
+      customer_name: (quote as any).customer_name,
+      customer_phone: (quote as any).customer_phone,
+      customer_email: (quote as any).customer_email,
+      customer_address: (quote as any).customer_address,
+      location_of_sale: (quote as any).location_of_sale || LOCATION_OF_SALE,
+      invoice_type: DOCUMENT_TYPE_INVOICE,
+      invoice_date,
+      due_date,
+      subtotal_amount,
+      tax_amount,
+      total_amount,
+      amount_paid: 0,
+      terms: (quote as any).terms,
+      payment_status: 'unpaid',
+      items,
+    });
+
+    if (shouldAdjustInventoryForDocumentType(DOCUMENT_TYPE_INVOICE)) {
+      for (const item of items) {
+        if (!item.product_id || (item.quantity || 0) <= 0) continue;
+        const product = await Product.findById(item.product_id);
+        if (!product) continue;
+        if ((product as any).product_type === 'service' || (product as any).product_type === 'non_inventory') continue;
+        await Product.findByIdAndUpdate(item.product_id, { $inc: { stock_quantity: -(Number(item.quantity) || 0) } });
+      }
+    }
+
+    await saveCustomerProductPrices((quote as any).customer_id, items, inv._id, invoice_date);
+
+    (quote as any).shipping_type = `converted:${invoice_number}`;
+    await quote.save();
+
+    const doc = inv.toObject() as any;
+    res.status(201).json({
+      id: doc._id.toString(),
+      invoice_number: doc.invoice_number,
+      quotation_id: quote._id.toString(),
+      quotation_number: (quote as any).invoice_number,
+      total_amount: doc.total_amount,
+      payment_status: doc.payment_status,
+    });
+  } catch (error) {
+    console.error('Convert quotation error:', error);
+    res.status(500).json({ error: 'Failed to convert quotation' });
+  }
+});
+
+router.post('/:id/reject', authenticateAdmin, async (req: AuthRequest, res) => {
+  try {
+    const quote = await Invoice.findById(req.params.id);
+    if (!quote) return res.status(404).json({ error: 'Quotation not found' });
+    if (!isQuotationType(quote.invoice_type)) {
+      return res.status(400).json({ error: 'Only quotations can be marked rejected.' });
+    }
+    const mark = quotationMark((quote as any).shipping_type);
+    if (mark.quote_status === 'converted') {
+      return res.status(400).json({ error: `This quotation was already converted to ${mark.converted_invoice_number}.` });
+    }
+    if (mark.quote_status === 'rejected') {
+      return res.json({ success: true, id: quote._id.toString(), quote_status: 'rejected' });
+    }
+    (quote as any).shipping_type = 'rejected';
+    await quote.save();
+    res.json({ success: true, id: quote._id.toString(), quote_status: 'rejected' });
+  } catch (error) {
+    console.error('Reject quotation error:', error);
+    res.status(500).json({ error: 'Failed to reject quotation' });
+  }
+});
+
 // Receive payment: thin HTTP layer. Application lives in paymentApplication.
 router.post('/receive-payment', authenticateAdmin, async (req: AuthRequest, res) => {
   try {
-    const { amount_received, payment_date, payment_method, deposit_to, bank_account_id, allocations } = req.body as {
+    const { amount_received, payment_date, payment_method, deposit_to, bank_account_id, allocations, notes, reference_no } = req.body as {
       amount_received?: number;
       payment_date?: string;
       payment_method?: string;
       deposit_to?: string;
       bank_account_id?: string;
       allocations: { invoice_id: string; amount: number }[];
+      notes?: string;
+      reference_no?: string;
     };
 
     const result = await paymentApplication.applyCustomerPayment({
@@ -470,6 +642,7 @@ router.post('/receive-payment', authenticateAdmin, async (req: AuthRequest, res)
       payment_date: payment_date ? new Date(payment_date) : undefined,
       payment_method,
       bank_account_id: bank_account_id || deposit_to || undefined,
+      notes: notes || reference_no,
     });
 
     res.json({

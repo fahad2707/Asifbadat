@@ -130,7 +130,7 @@ export default function SearchableProductDropdown({
           onFocus={() => setOpen(true)}
           onKeyDown={handleKeyDown}
           placeholder={placeholder}
-          className="w-full border border-gray-300 rounded px-2 py-1 text-sm focus:border-[#0f766e] focus:ring-1 focus:ring-[#0f766e] outline-none"
+          className="w-full border border-gray-300 rounded px-2 py-1 text-sm focus:border-[#0F9F8F] focus:ring-1 focus:ring-[#0F9F8F] outline-none"
           autoComplete="off"
         />
       )}
@@ -138,7 +138,7 @@ export default function SearchableProductDropdown({
         <div className="absolute z-50 left-0 right-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-lg max-h-60 overflow-y-auto">
           <Link
             href="/admin/products/new"
-            className="flex items-center gap-2 px-3 py-2 text-sm text-[#0f766e] font-medium hover:bg-teal-50 border-b border-gray-100 sticky top-0 bg-white"
+            className="flex items-center gap-2 px-3 py-2 text-sm text-[#0F9F8F] font-medium hover:bg-teal-50 border-b border-gray-100 sticky top-0 bg-white"
             onClick={() => setOpen(false)}
           >
             + Add a product
@@ -156,7 +156,7 @@ export default function SearchableProductDropdown({
                   setOpen(false);
                 }}
                 className={`w-full text-left px-3 py-2 text-sm hover:bg-gray-50 flex items-center justify-between gap-2 ${
-                  p.id === value ? 'bg-teal-50 text-[#0f766e] font-medium' : 'text-gray-900'
+                  p.id === value ? 'bg-[#F1F5F9] text-[#0F172A] font-medium' : 'text-[#0F172A]'
                 }${p.stock_quantity != null && p.stock_quantity <= 0 ? ' opacity-50' : ''}`}
               >
                 <span className="truncate">

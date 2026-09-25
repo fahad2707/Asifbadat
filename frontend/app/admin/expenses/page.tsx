@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { Plus, Edit, Trash2, X, Wallet, TrendingUp, Tag, Award, Search } from 'lucide-react';
 import adminApi from '@/lib/admin-api';
+import { adminUi } from '@/lib/admin-ui';
 import toast from 'react-hot-toast';
 
 interface Expense {
@@ -18,6 +19,26 @@ interface Expense {
   is_recurring: boolean;
   recurrence_type: string;
   created_at: string;
+}
+
+const DEFAULT_PAYMENT_MODES = [
+  { value: 'CASH', label: 'Cash' },
+  { value: 'CHEQUE', label: 'Cheque' },
+  { value: 'CREDIT_CARD', label: 'Credit card' },
+];
+
+const ADD_PAYMENT_MODE = '__add_payment_mode__';
+
+function paymentModeKey(name: string): string {
+  return name.trim().toUpperCase().replace(/\s+/g, '_');
+}
+
+function paymentModeLabel(value: string): string {
+  const found = DEFAULT_PAYMENT_MODES.find((m) => m.value === value);
+  if (found) return found.label;
+  if (value === 'CARD') return 'Credit card';
+  if (value === 'CHECK') return 'Cheque';
+  return value;
 }
 
 export default function ExpensesPage() {
@@ -44,7 +65,10 @@ export default function ExpensesPage() {
   });
   const [filters, setFilters] = useState({ start: '', end: '', expense_type: '', payment_mode: '' });
   const [submitting, setSubmitting] = useState(false);
-  const [paymentModes, setPaymentModes] = useState<string[]>([]);
+  const [paymentModes, setPaymentModes] = useState<string[]>(DEFAULT_PAYMENT_MODES.map((m) => m.value));
+  const [addingPaymentMode, setAddingPaymentMode] = useState(false);
+  const [newPaymentMode, setNewPaymentMode] = useState('');
+  const [savingPaymentMode, setSavingPaymentMode] = useState(false);
   const [search, setSearch] = useState('');
 
   const thisMonthStart = () => {
@@ -85,9 +109,34 @@ export default function ExpensesPage() {
     try {
       const res = await adminApi.get('/payment-methods');
       const list = Array.isArray(res.data) ? res.data : [];
-      setPaymentModes(list.map((p: any) => p.name));
+      const extras = list
+        .map((p: any) => String(p.name || '').trim())
+        .filter(Boolean)
+        .filter((name: string) => !DEFAULT_PAYMENT_MODES.some((d) => paymentModeKey(d.value) === paymentModeKey(name) || paymentModeKey(d.label) === paymentModeKey(name)));
+      setPaymentModes([...DEFAULT_PAYMENT_MODES.map((m) => m.value), ...extras]);
     } catch {
-      setPaymentModes([]);
+      setPaymentModes(DEFAULT_PAYMENT_MODES.map((m) => m.value));
+    }
+  };
+
+  const handleAddPaymentMode = async () => {
+    const name = newPaymentMode.trim();
+    if (!name) {
+      toast.error('Enter a payment mode name');
+      return;
+    }
+    setSavingPaymentMode(true);
+    try {
+      await adminApi.post('/payment-methods', { name });
+      toast.success('Payment mode added');
+      setNewPaymentMode('');
+      setAddingPaymentMode(false);
+      await fetchPaymentModes();
+      setForm((f) => ({ ...f, payment_mode: name }));
+    } catch (err: any) {
+      toast.error(err.response?.data?.error || 'Failed to add payment mode');
+    } finally {
+      setSavingPaymentMode(false);
     }
   };
 
@@ -117,6 +166,8 @@ export default function ExpensesPage() {
       is_recurring: false,
       recurrence_type: 'NONE',
     });
+    setAddingPaymentMode(false);
+    setNewPaymentMode('');
     setShowModal(true);
   };
 
@@ -133,6 +184,8 @@ export default function ExpensesPage() {
       is_recurring: e.is_recurring || false,
       recurrence_type: e.recurrence_type || 'NONE',
     });
+    setAddingPaymentMode(false);
+    setNewPaymentMode('');
     setShowModal(true);
   };
 
@@ -206,12 +259,12 @@ export default function ExpensesPage() {
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-extrabold text-white tracking-tight">Expenses</h1>
+          <h1 className={adminUi.pageTitle}>Expenses</h1>
           <p className="text-xs text-slate-400 mt-1">Manage, categorize, register and audit daily operating expenses (OPEX) and capital expenses (CAPEX).</p>
         </div>
       </div>
 
-      <div className="bg-slate-900/40 backdrop-blur-lg border border-white/[0.06] border-t-white/[0.18] shadow-[0_12px_40px_rgba(0,0,0,0.25)] rounded-2xl p-4 flex flex-wrap items-center gap-4">
+      <div className="bg-white border border-[#E2E8F0] rounded-lg p-4 flex flex-wrap items-center gap-4">
         <div className="relative flex-1 min-w-[240px]">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
           <input
@@ -232,7 +285,7 @@ export default function ExpensesPage() {
         <>
           {/* Top cards */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-            <div className="bg-slate-900/40 backdrop-blur-lg border border-white/[0.06] border-t-white/[0.18] shadow-[0_12px_40px_rgba(0,0,0,0.25)] rounded-2xl p-5">
+            <div className="bg-white border border-[#E2E8F0] rounded-lg p-5">
               <div className="flex items-center gap-3">
                 <div className="w-10 h-10 rounded-xl bg-teal-500/10 border border-teal-500/20 flex items-center justify-center">
                   <Wallet className="w-5 h-5 text-teal-400" />
@@ -243,7 +296,7 @@ export default function ExpensesPage() {
                 </div>
               </div>
             </div>
-            <div className="bg-slate-900/40 backdrop-blur-lg border border-white/[0.06] border-t-white/[0.18] shadow-[0_12px_40px_rgba(0,0,0,0.25)] rounded-2xl p-5">
+            <div className="bg-white border border-[#E2E8F0] rounded-lg p-5">
               <div className="flex items-center gap-3">
                 <div className="w-10 h-10 rounded-xl bg-blue-500/10 border border-blue-500/20 flex items-center justify-center">
                   <Tag className="w-5 h-5 text-blue-400" />
@@ -254,7 +307,7 @@ export default function ExpensesPage() {
                 </div>
               </div>
             </div>
-            <div className="bg-slate-900/40 backdrop-blur-lg border border-white/[0.06] border-t-white/[0.18] shadow-[0_12px_40px_rgba(0,0,0,0.25)] rounded-2xl p-5">
+            <div className="bg-white border border-[#E2E8F0] rounded-lg p-5">
               <div className="flex items-center gap-3">
                 <div className="w-10 h-10 rounded-xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center">
                   <TrendingUp className="w-5 h-5 text-amber-400" />
@@ -265,7 +318,7 @@ export default function ExpensesPage() {
                 </div>
               </div>
             </div>
-            <div className="bg-slate-900/40 backdrop-blur-lg border border-white/[0.06] border-t-white/[0.18] shadow-[0_12px_40px_rgba(0,0,0,0.25)] rounded-2xl p-5">
+            <div className="bg-white border border-[#E2E8F0] rounded-lg p-5">
               <div className="flex items-center gap-3">
                 <div className="w-10 h-10 rounded-xl bg-purple-500/10 border border-purple-500/20 flex items-center justify-center">
                   <Award className="w-5 h-5 text-purple-400" />
@@ -288,15 +341,15 @@ export default function ExpensesPage() {
             <select value={filters.payment_mode} onChange={(e) => setFilters((f) => ({ ...f, payment_mode: e.target.value }))} className="bg-slate-950/60 border border-white/10 rounded-xl px-3 py-2 text-xs text-slate-205 focus:outline-none focus:ring-1 focus:ring-teal-500">
               <option value="">All payment modes</option>
               {paymentModes.map((m) => (
-                <option key={m} value={m}>{m}</option>
+                <option key={m} value={m}>{paymentModeLabel(m)}</option>
               ))}
             </select>
-            <button onClick={openAdd} className="bg-gradient-to-tr from-teal-600 to-teal-500 hover:from-teal-500 hover:to-teal-400 border border-white/10 text-white px-4 py-2.5 rounded-xl text-xs font-bold transition-all shadow-sm flex items-center gap-2">
+            <button onClick={openAdd} className="bg-[#0F9F8F] hover:bg-[#0B8275] border-transparent text-white px-4 py-2.5 rounded-xl text-xs font-bold transition-all shadow-sm flex items-center gap-2">
               <Plus className="w-4 h-4" /> Add Expense
             </button>
           </div>
 
-          <div className="bg-slate-900/40 backdrop-blur-lg border border-white/[0.06] border-t-white/[0.18] shadow-[0_12px_40px_rgba(0,0,0,0.25)] rounded-2xl overflow-hidden">
+          <div className="bg-white border border-[#E2E8F0] rounded-lg overflow-hidden">
             <div className="overflow-x-auto">
               <table className="w-full border-collapse">
                 <thead className="bg-slate-950/60 text-slate-400 border-b border-white/5">
@@ -324,7 +377,7 @@ export default function ExpensesPage() {
                         <td className="py-3 px-4 text-xs text-slate-400 max-w-xs truncate">{e.description || '—'}</td>
                         <td className="py-3 px-4 text-xs text-right font-extrabold text-slate-100 font-mono">${Number(e.amount).toLocaleString(undefined, {minimumFractionDigits: 2})}</td>
                         <td className="py-3 px-4 text-xs">
-                          <span className="inline-flex px-2 py-0.5 rounded text-[10px] font-bold border border-white/10 bg-slate-800/80 text-slate-350">{e.payment_mode}</span>
+                          <span className="inline-flex px-2 py-0.5 rounded text-[10px] font-bold border border-white/10 bg-slate-800/80 text-slate-350">{paymentModeLabel(e.payment_mode)}</span>
                         </td>
                         <td className="py-3 px-4 text-right text-xs">
                           <div className="flex items-center justify-end gap-1.5">
@@ -348,7 +401,7 @@ export default function ExpensesPage() {
 
       {showModal && (
         <div className="fixed inset-0 bg-slate-955/80 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <div className="bg-slate-900 border border-white/10 shadow-[0_24px_50px_rgba(0,0,0,0.4)] rounded-2xl max-w-lg w-full max-h-[90vh] overflow-y-auto">
+          <div className="bg-white border border-[#E2E8F0] rounded-lg text-[#0F172A] max-w-lg w-full max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between p-5 border-b border-white/5">
               <h2 className="text-lg font-bold text-white">{editing ? 'Edit Corporate Expense' : 'Log Corporate Expense'}</h2>
               <button type="button" onClick={() => setShowModal(false)} className="p-1.5 hover:bg-white/5 rounded-lg text-slate-400 hover:text-white transition-all">
@@ -373,12 +426,43 @@ export default function ExpensesPage() {
                 <input type="number" min={0} step={0.01} value={form.amount} onChange={(e) => setForm((f) => ({ ...f, amount: e.target.value }))} className="w-full bg-slate-955/65 border border-white/10 rounded-xl px-4 py-2 text-xs text-slate-100 font-mono font-semibold focus:outline-none focus:ring-1 focus:ring-teal-500" required />
               </div>
               <div>
-                <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">Payment Mode *</label>
-                <select value={form.payment_mode} onChange={(e) => setForm((f) => ({ ...f, payment_mode: e.target.value }))} className="w-full bg-slate-955/60 border border-white/10 rounded-xl px-4 py-2 text-xs text-slate-250 focus:outline-none focus:ring-1 focus:ring-teal-500">
-                  {paymentModes.map((m) => (
-                    <option key={m} value={m}>{m}</option>
-                  ))}
-                </select>
+                <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">Mode of payment *</label>
+                {!addingPaymentMode ? (
+                  <select
+                    value={form.payment_mode}
+                    onChange={(e) => {
+                      if (e.target.value === ADD_PAYMENT_MODE) {
+                        setAddingPaymentMode(true);
+                        setNewPaymentMode('');
+                        return;
+                      }
+                      setForm((f) => ({ ...f, payment_mode: e.target.value }));
+                    }}
+                    className="w-full bg-slate-955/60 border border-white/10 rounded-xl px-4 py-2 text-xs text-slate-250 focus:outline-none focus:ring-1 focus:ring-teal-500"
+                  >
+                    {Array.from(new Set([...paymentModes, form.payment_mode].filter(Boolean))).map((m) => (
+                      <option key={m} value={m}>{paymentModeLabel(m)}</option>
+                    ))}
+                    <option value={ADD_PAYMENT_MODE}>+ Add payment mode</option>
+                  </select>
+                ) : (
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="text"
+                      value={newPaymentMode}
+                      onChange={(e) => setNewPaymentMode(e.target.value)}
+                      placeholder="e.g. Wire transfer"
+                      className="flex-1 bg-slate-955/60 border border-white/10 rounded-xl px-4 py-2 text-xs text-slate-200 focus:outline-none focus:ring-1 focus:ring-teal-500"
+                      autoFocus
+                    />
+                    <button type="button" onClick={handleAddPaymentMode} disabled={savingPaymentMode} className="px-3 py-2 bg-[#0F9F8F] text-white rounded-xl text-xs font-bold disabled:opacity-40">
+                      {savingPaymentMode ? 'Saving…' : 'Save'}
+                    </button>
+                    <button type="button" onClick={() => { setAddingPaymentMode(false); setNewPaymentMode(''); }} className="px-3 py-2 bg-slate-800 text-slate-300 rounded-xl text-xs font-semibold">
+                      Cancel
+                    </button>
+                  </div>
+                )}
               </div>
               <div>
                 <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">Vendor recipient name</label>
@@ -402,7 +486,7 @@ export default function ExpensesPage() {
               </div>
               <div className="flex justify-end gap-2.5 pt-4 border-t border-white/5">
                 <button type="button" onClick={() => setShowModal(false)} className="px-4 py-2.5 bg-slate-800 border border-white/5 text-slate-400 hover:text-white rounded-xl text-xs font-semibold">Cancel</button>
-                <button type="submit" disabled={submitting} className="flex-1 px-4 py-2.5 bg-gradient-to-tr from-teal-600 to-teal-500 hover:from-teal-500 hover:to-teal-400 border border-white/10 text-white rounded-xl text-xs font-bold shadow-sm transition-all disabled:opacity-40">Save Expense</button>
+                <button type="submit" disabled={submitting} className="flex-1 px-4 py-2.5 bg-[#0F9F8F] hover:bg-[#0B8275] border-transparent text-white rounded-xl text-xs font-bold shadow-sm transition-all disabled:opacity-40">Save Expense</button>
               </div>
             </form>
           </div>

@@ -25,6 +25,7 @@ import {
   RefreshCw,
 } from 'lucide-react';
 import adminApi from '@/lib/admin-api';
+import { EditableAddress, EditableField } from '@/components/admin/EditableField';
 import toast from 'react-hot-toast';
 import InvoiceFormLightbox from '@/components/admin/InvoiceFormLightbox';
 import ReceivePaymentLightbox from '@/components/admin/ReceivePaymentLightbox';
@@ -62,12 +63,15 @@ interface Customer {
   city?: string;
   state?: string;
   zip?: string;
+  tax_id?: string;
   payment_terms?: string;
   notes?: string;
   documents?: CustomerDoc[];
   credit_limit?: number;
   outstanding_balance?: number;
+  created_at?: string;
 }
+
 
 export default function Customer360Page() {
   const params = useParams();
@@ -84,10 +88,7 @@ export default function Customer360Page() {
   // Interactive follow-up logging states
   const [commNote, setCommNote] = useState('');
   const [commType, setCommType] = useState<'Call' | 'WhatsApp' | 'Meeting'>('Call');
-  const [clientComms, setClientComms] = useState<any[]>([
-    { type: 'Call', note: 'Agreed to clear outstanding balance by next Monday.', date: new Date(Date.now() - 3600000 * 24).toLocaleString() },
-    { type: 'WhatsApp', note: 'Sent catalog quote for upcoming PO request.', date: new Date(Date.now() - 3600000 * 48).toLocaleString() },
-  ]);
+  const [clientComms, setClientComms] = useState<any[]>([]);
 
   // Modals
   const [invoiceLightboxOpen, setInvoiceLightboxOpen] = useState(false);
@@ -139,6 +140,35 @@ export default function Customer360Page() {
     .filter((i) => (i.payment_status || '').toLowerCase() === 'paid')
     .reduce((s, i) => s + (i.total_amount || 0), 0);
 
+  const overdueDays = (() => {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    let maxDays = 0;
+    let hasDue = false;
+    for (const inv of saleInvoices) {
+      if ((inv.payment_status || '').toLowerCase() === 'paid') continue;
+      if (!inv.due_date) continue;
+      const due = new Date(inv.due_date);
+      if (Number.isNaN(due.getTime())) continue;
+      due.setHours(0, 0, 0, 0);
+      hasDue = true;
+      maxDays = Math.max(maxDays, Math.floor((today.getTime() - due.getTime()) / 86400000));
+    }
+    return hasDue ? Math.max(0, maxDays) : null;
+  })();
+
+  const headerMeta = customer
+    ? [
+        customer.customer_code ? `Code: ${customer.customer_code}` : null,
+        customer.created_at ? `Registered: ${new Date(customer.created_at).toLocaleDateString()}` : null,
+        customer.payment_terms || null,
+      ].filter(Boolean).join(' | ')
+    : '';
+
+  const billingLine = customer
+    ? [customer.billing_address || customer.address, customer.city, customer.state, customer.zip].filter(Boolean).join(', ')
+    : '';
+
   const handleDocumentUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file || !id) return;
@@ -168,6 +198,17 @@ export default function Customer360Page() {
     toast.success('Communication note recorded in CRM log.');
   };
 
+  const saveCustomerFields = async (patch: Record<string, unknown>) => {
+    try {
+      await adminApi.put(`/customers/${id}`, patch);
+      setCustomer((prev) => (prev ? { ...prev, ...patch } as Customer : prev));
+      toast.success('Saved');
+    } catch (err: any) {
+      toast.error(err.response?.data?.error || 'Failed to save');
+      throw err;
+    }
+  };
+
   if (loading || !customer) {
     return (
       <div className="flex items-center justify-center min-h-[400px]">
@@ -177,9 +218,9 @@ export default function Customer360Page() {
   }
 
   // Visual iOS Styling tokens
-  const glassPanelClass = `bg-slate-900/40 backdrop-blur-lg border border-white/[0.06] border-t-white/[0.18] shadow-[0_12px_40px_rgba(0,0,0,0.25),inset_0_1px_0_rgba(255,255,255,0.1)] rounded-2xl p-5`;
+  const glassPanelClass = `bg-white border border-[#E2E8F0] rounded-lg p-5`;
   const glassCardClass = `bg-slate-950/40 border border-white/[0.04] border-t-white/[0.12] rounded-xl p-4`;
-  const glassButtonClass = `inline-flex items-center gap-2 px-3.5 py-2.5 bg-gradient-to-b from-white/[0.10] to-white/[0.02] border border-white/[0.08] hover:bg-white/[0.06] active:scale-[0.98] rounded-xl text-xs font-semibold text-white transition-all cursor-pointer`;
+  const glassButtonClass = `inline-flex items-center gap-2 px-3.5 py-2.5 bg-white border border-[#CBD5E1] hover:bg-[#F1F5F9] rounded-md text-sm font-medium text-[#334155] transition-all cursor-pointer`;
 
   return (
     <div className="max-w-[1400px] mx-auto space-y-6">
@@ -192,7 +233,7 @@ export default function Customer360Page() {
         <div className="flex items-center gap-2">
           <button
             onClick={() => setInvoiceLightboxOpen(true)}
-            className="inline-flex items-center gap-2 px-3.5 py-2.5 bg-gradient-to-tr from-teal-600 to-teal-500 hover:from-teal-500 hover:to-teal-400 border border-white/10 active:scale-[0.98] rounded-xl text-xs font-bold text-white transition-all shadow-md shadow-teal-500/10 cursor-pointer"
+            className="inline-flex items-center gap-2 px-3.5 py-2.5 bg-[#0F9F8F] hover:bg-[#0B8275] border-transparent active:scale-[0.98] rounded-xl text-xs font-bold text-white transition-all shadow-md shadow-teal-500/10 cursor-pointer"
           >
             <PlusCircle className="w-4 h-4" /> Raise POS Invoice
           </button>
@@ -214,27 +255,37 @@ export default function Customer360Page() {
             </div>
             <div>
               <div className="flex items-center gap-2 flex-wrap">
-                <h1 className="text-2xl font-black text-white">{customer.name}</h1>
-                <span className="text-[9px] bg-emerald-500/10 text-emerald-400 border border-emerald-500/25 px-2 py-0.5 rounded-full font-bold uppercase tracking-wider">
-                  ✓ GST Verified
-                </span>
-                <span className="text-[9px] bg-teal-500/10 text-teal-400 border border-teal-500/25 px-2 py-0.5 rounded-full font-bold uppercase tracking-wider flex items-center gap-1">
-                  <Award className="w-3 h-3" /> Gold Dealer
-                </span>
+                <EditableField
+                  label=""
+                  heading
+                  value={customer.name || ''}
+                  display={customer.name}
+                  onSave={async (next) => {
+                    if (!next.trim()) {
+                      toast.error('Name is required');
+                      throw new Error('required');
+                    }
+                    await saveCustomerFields({ name: next.trim() });
+                  }}
+                />
               </div>
-              <p className="text-xs text-slate-500 mt-1">CRM Code: {customer.customer_code || 'GUST-802'} | Registered: Net 30 Terms</p>
+              {headerMeta && <p className="text-xs text-slate-500 mt-1">{headerMeta}</p>}
               
               {/* Action shortcuts */}
               <div className="flex items-center gap-3 mt-4 text-[11px] text-slate-400">
-                <a href={`tel:${customer.phone}`} className="flex items-center gap-1.5 hover:text-white transition-colors">
-                  <Phone className="w-3.5 h-3.5 text-teal-400" /> Call Client
-                </a>
-                <span className="text-slate-700">|</span>
-                <a href={`https://wa.me/${customer.phone.replace(/[^\d]/g, '')}`} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1.5 hover:text-white transition-colors">
-                  <MessageSquare className="w-3.5 h-3.5 text-emerald-400" /> WhatsApp
-                </a>
-                <span className="text-slate-700">|</span>
-                <span className="text-slate-400">Rep Account Manager: <span className="font-semibold text-slate-200">Asif</span></span>
+                {customer.phone && (
+                  <a href={`tel:${customer.phone}`} className="flex items-center gap-1.5 hover:text-white transition-colors">
+                    <Phone className="w-3.5 h-3.5 text-teal-400" /> Call Client
+                  </a>
+                )}
+                {customer.phone && (
+                  <>
+                    <span className="text-slate-700">|</span>
+                    <a href={`https://wa.me/${customer.phone.replace(/[^\d]/g, '')}`} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1.5 hover:text-white transition-colors">
+                      <MessageSquare className="w-3.5 h-3.5 text-emerald-400" /> WhatsApp
+                    </a>
+                  </>
+                )}
               </div>
             </div>
           </div>
@@ -250,12 +301,26 @@ export default function Customer360Page() {
               <span className="text-lg font-black text-rose-400 block mt-1">${openBalance.toLocaleString('en-US', { maximumFractionDigits: 0 })}</span>
             </div>
             <div>
-              <span className="text-[10px] font-bold text-slate-500 tracking-wider block uppercase">Credit Limit</span>
-              <span className="text-lg font-black text-slate-300 block mt-1">${customer.credit_limit ? customer.credit_limit.toLocaleString() : '15,000'}</span>
+              <EditableField
+                label="Credit Limit"
+                type="number"
+                value={customer.credit_limit == null ? '' : String(customer.credit_limit)}
+                display={customer.credit_limit == null ? '—' : `$${Number(customer.credit_limit).toLocaleString()}`}
+                onSave={async (next) => {
+                  const amount = next.trim() === '' ? undefined : Number(next);
+                  if (amount !== undefined && Number.isNaN(amount)) {
+                    toast.error('Enter a valid credit limit');
+                    throw new Error('invalid');
+                  }
+                  await saveCustomerFields({ credit_limit: amount ?? 0 });
+                }}
+              />
             </div>
             <div>
               <span className="text-[10px] font-bold text-slate-500 tracking-wider block uppercase">Overdue Days</span>
-              <span className="text-lg font-black text-yellow-400 block mt-1">12 Days</span>
+              <span className="text-lg font-black text-yellow-400 block mt-1">
+                {overdueDays == null ? '—' : `${overdueDays} Day${overdueDays === 1 ? '' : 's'}`}
+              </span>
             </div>
           </div>
         </div>
@@ -299,25 +364,72 @@ export default function Customer360Page() {
         {activeTab === 'overview' && (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-8 text-sm">
             <div className="space-y-4">
-              <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest pb-1.5 border-b border-white/5">Corporate Demographics</h3>
+              <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest pb-1.5 border-b border-white/5">Customer details</h3>
               <div className="grid grid-cols-2 gap-4">
-                <div><span className="text-slate-500 block text-[11px]">B2B Company</span><span className="font-semibold text-slate-200">{customer.company || customer.name}</span></div>
-                <div><span className="text-slate-500 block text-[11px]">Primary Contact</span><span className="font-semibold text-slate-200">{customer.name}</span></div>
-                <div><span className="text-slate-500 block text-[11px]">PAN Card</span><span className="font-mono text-xs text-slate-200">AROPB8291K</span></div>
-                <div><span className="text-slate-500 block text-[11px]">GST Identification</span><span className="font-mono text-xs text-slate-200">{customer.customer_code ? '23AABCC821' : '33AAAAA1111A1Z1'}</span></div>
+                <EditableField label="Company" value={customer.company || ''} onSave={(next) => saveCustomerFields({ company: next.trim() })} />
+                <EditableField
+                  label="Primary contact"
+                  value={customer.name || ''}
+                  onSave={async (next) => {
+                    if (!next.trim()) {
+                      toast.error('Name is required');
+                      throw new Error('required');
+                    }
+                    await saveCustomerFields({ name: next.trim() });
+                  }}
+                />
+                <EditableField
+                  label="Phone"
+                  type="tel"
+                  value={customer.phone || ''}
+                  onSave={async (next) => {
+                    if (!next.trim()) {
+                      toast.error('Phone is required');
+                      throw new Error('required');
+                    }
+                    await saveCustomerFields({ phone: next.trim() });
+                  }}
+                />
+                <EditableField
+                  label="Email"
+                  type="email"
+                  value={customer.email || ''}
+                  onSave={(next) => saveCustomerFields({ email: next.trim() })}
+                />
+                <EditableField label="Tax ID" value={customer.tax_id || ''} onSave={(next) => saveCustomerFields({ tax_id: next.trim() })} />
+                <EditableField
+                  label="Payment terms"
+                  value={customer.payment_terms || ''}
+                  options={[
+                    { value: '', label: 'Select payment terms' },
+                    { value: 'Due on receipt', label: 'Due on receipt' },
+                    { value: 'Net 7', label: 'Net 7' },
+                    { value: 'Net 15', label: 'Net 15' },
+                    { value: 'Net 30', label: 'Net 30' },
+                  ]}
+                  onSave={(next) => saveCustomerFields({ payment_terms: next })}
+                />
+                <EditableField label="Customer code" value={customer.customer_code || ''} onSave={(next) => saveCustomerFields({ customer_code: next.trim() })} />
               </div>
-              <div className="pt-2"><span className="text-slate-500 block text-[11px]">Corporate Billing Head</span><span className="text-slate-200 font-semibold">{[customer.billing_address || customer.address, customer.city, customer.state, customer.zip].filter(Boolean).join(', ')}</span></div>
+              <EditableAddress
+                label="Billing address"
+                address={customer.billing_address || customer.address || ''}
+                city={customer.city || ''}
+                state={customer.state || ''}
+                zip={customer.zip || ''}
+                display={billingLine}
+                onSave={(next) => saveCustomerFields({ billing_address: next.address, address: next.address, city: next.city, state: next.state, zip: next.zip })}
+              />
             </div>
 
             <div className="space-y-4">
-              <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest pb-1.5 border-b border-white/5">Fulfillment Logistics</h3>
-              <div className="grid grid-cols-2 gap-4">
-                <div><span className="text-slate-500 block text-[11px]">Preferred Transporter</span><span className="font-semibold text-slate-200">Universal Freight Logistics</span></div>
-                <div><span className="text-slate-500 block text-[11px]">Warehouse Source</span><span className="font-semibold text-slate-200">Philadelphia Center A</span></div>
-                <div><span className="text-slate-500 block text-[11px]">Payment Terms</span><span className="font-semibold text-teal-400">{customer.payment_terms || 'Net 30 Days'}</span></div>
-                <div><span className="text-slate-500 block text-[11px]">Shipping Method</span><span className="font-semibold text-slate-200">Local Truck Dispatch</span></div>
-              </div>
-              <div className="pt-2"><span className="text-slate-500 block text-[11px]">Special Driver Instructions</span><span className="text-slate-200 text-xs italic">{customer.notes || 'Deliver to loading bay doors 4-6 during standard morning hours.'}</span></div>
+              <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest pb-1.5 border-b border-white/5">Notes</h3>
+              <EditableField
+                label="Notes"
+                value={customer.notes || ''}
+                multiline
+                onSave={(next) => saveCustomerFields({ notes: next.trim() })}
+              />
             </div>
           </div>
         )}
@@ -551,32 +663,9 @@ export default function Customer360Page() {
         {activeTab === 'products' && (
           <div className="space-y-4">
             <div className="flex justify-between items-center text-xs pb-1 border-b border-white/5">
-              <span className="text-slate-400">Regular Contract Pricing List</span>
-              <span className="text-[10px] text-teal-400 font-bold bg-[#0f766e]/10 px-2 py-0.5 rounded">Active B2B Contract</span>
+              <span className="text-slate-400">Negotiated prices</span>
             </div>
-            
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="p-3.5 bg-slate-950/40 rounded-xl border border-white/5 flex justify-between items-center text-xs">
-                <div>
-                  <p className="font-semibold text-slate-200">Commercial Grade Cable Roll</p>
-                  <p className="text-[10px] text-slate-500">Retail MSRP: $84.00</p>
-                </div>
-                <div className="text-right">
-                  <p className="font-bold text-teal-400">$68.00</p>
-                  <p className="text-[9px] font-semibold text-slate-500">19% Margin Discount</p>
-                </div>
-              </div>
-              <div className="p-3.5 bg-slate-950/40 rounded-xl border border-white/5 flex justify-between items-center text-xs">
-                <div>
-                  <p className="font-semibold text-slate-200">Industrial Electrical Conduits (Pack/10)</p>
-                  <p className="text-[10px] text-slate-500">Retail MSRP: $120.00</p>
-                </div>
-                <div className="text-right">
-                  <p className="font-bold text-teal-400">$95.00</p>
-                  <p className="text-[9px] font-semibold text-slate-500">20.8% Margin Discount</p>
-                </div>
-              </div>
-            </div>
+            <p className="text-center py-6 text-slate-500">No negotiated prices recorded for this customer yet.</p>
           </div>
         )}
 
@@ -618,6 +707,9 @@ export default function Customer360Page() {
 
             {/* Timeline history */}
             <div className="relative border-l border-white/5 ml-3 space-y-4">
+              {clientComms.length === 0 && (
+                <p className="pl-6 text-xs text-slate-500">No follow-up notes yet.</p>
+              )}
               {clientComms.map((c, idx) => (
                 <div key={idx} className="relative pl-6">
                   {/* Dots marker overlay */}
@@ -641,19 +733,25 @@ export default function Customer360Page() {
         {/* Tab 10: Activity Log */}
         {activeTab === 'activity' && (
           <div className="relative border-l border-white/5 ml-3 space-y-4 text-xs font-semibold">
-            
-            <div className="relative pl-6">
-              <div className="absolute top-1 -left-1 bg-slate-900 w-2.5 h-2.5 border border-teal-500 rounded-full" />
-              <p className="text-slate-400">Invoice Generated <span className="text-white">INV-{invoices[0]?.invoice_number || '001'}</span></p>
-              <p className="text-[10px] text-slate-500 font-medium">Recorded by Admin on {new Date().toLocaleDateString()}</p>
-            </div>
-
-            <div className="relative pl-6">
-              <div className="absolute top-1 -left-1 bg-slate-900 w-2.5 h-2.5 border border-teal-500 rounded-full" />
-              <p className="text-slate-400">Account status set to <span className="text-teal-400">Active</span></p>
-              <p className="text-[10px] text-slate-500 font-medium">B2B review approved by Asif</p>
-            </div>
-
+            {customer.created_at && (
+              <div className="relative pl-6">
+                <div className="absolute top-1 -left-1 bg-slate-900 w-2.5 h-2.5 border border-teal-500 rounded-full" />
+                <p className="text-slate-400">Customer created</p>
+                <p className="text-[10px] text-slate-500 font-medium">{new Date(customer.created_at).toLocaleString()}</p>
+              </div>
+            )}
+            {saleInvoices.slice(0, 8).map((inv) => (
+              <div key={inv.id || inv.invoice_number} className="relative pl-6">
+                <div className="absolute top-1 -left-1 bg-slate-900 w-2.5 h-2.5 border border-teal-500 rounded-full" />
+                <p className="text-slate-400">Invoice {inv.invoice_number}</p>
+                <p className="text-[10px] text-slate-500 font-medium">
+                  {inv.invoice_date || inv.created_at ? new Date(inv.invoice_date || inv.created_at).toLocaleDateString() : '—'}
+                </p>
+              </div>
+            ))}
+            {!customer.created_at && saleInvoices.length === 0 && (
+              <p className="pl-6 text-slate-500">No activity recorded yet.</p>
+            )}
           </div>
         )}
 

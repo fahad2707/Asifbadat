@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState, useCallback, useRef } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { FolderTree, Layers, Percent, CreditCard, Landmark, Plus, Edit, Trash2, X, FileDown, Package, ImagePlus, Loader2 } from 'lucide-react';
 import adminApi, { uploadApi } from '@/lib/admin-api';
 import toast from 'react-hot-toast';
@@ -62,6 +63,10 @@ const TABS: { id: TabId; label: string; icon: typeof FolderTree }[] = [
   { id: 'bank', label: 'Bank Accounts', icon: Landmark },
 ];
 
+function isTabId(value: string | null): value is TabId {
+  return !!value && TABS.some((t) => t.id === value);
+}
+
 function downloadCSV(filename: string, rows: string[][]) {
   const csv = rows.map((row) => row.map((cell) => `"${String(cell).replace(/"/g, '""')}"`).join(',')).join('\n');
   const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
@@ -73,7 +78,22 @@ function downloadCSV(filename: string, rows: string[][]) {
 }
 
 export default function CatalogPage() {
-  const [activeTab, setActiveTab] = useState<TabId>('categories');
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const [activeTab, setActiveTab] = useState<TabId>(() => {
+    const t = searchParams.get('tab');
+    return isTabId(t) ? t : 'categories';
+  });
+
+  useEffect(() => {
+    const t = searchParams.get('tab');
+    if (isTabId(t)) setActiveTab(t);
+  }, [searchParams]);
+
+  const selectTab = (id: TabId) => {
+    setActiveTab(id);
+    router.replace(`/admin/catalog?tab=${id}`);
+  };
   const [categories, setCategories] = useState<Category[]>([]);
   const [subcategories, setSubcategories] = useState<SubCategory[]>([]);
   const [taxTypes, setTaxTypes] = useState<TaxType[]>([]);
@@ -99,6 +119,8 @@ export default function CatalogPage() {
   const [addProductIdSub, setAddProductIdSub] = useState<string>('');
 
   const categoryImageInputRef = useRef<HTMLInputElement>(null);
+  const categoryProductsRef = useRef<HTMLDivElement>(null);
+  const subcategoryProductsRef = useRef<HTMLDivElement>(null);
   const [categoryImageBusy, setCategoryImageBusy] = useState(false);
   const [categoryImageDragging, setCategoryImageDragging] = useState(false);
 
@@ -183,7 +205,7 @@ export default function CatalogPage() {
   const fetchProductsByCategory = useCallback(async (categoryId: string) => {
     setProductsLoading(true);
     try {
-      const res = await adminApi.get('/products', { params: { category_id: categoryId, limit: 500, visibility: 'all' } });
+      const res = await adminApi.get('/products', { params: { category_id: categoryId, limit: 2000, visibility: 'all' } });
       setProductsInCategory(res.data?.products || []);
     } catch {
       setProductsInCategory([]);
@@ -215,7 +237,8 @@ export default function CatalogPage() {
 
   useEffect(() => {
     fetchAll();
-  }, [fetchAll]);
+    fetchAllProducts();
+  }, [fetchAll, fetchAllProducts]);
 
   useEffect(() => {
     if (selectedCategoryId) {
@@ -235,17 +258,44 @@ export default function CatalogPage() {
     }
   }, [selectedSubcategoryId, fetchProductsBySubcategory, fetchAllProducts]);
 
+  useEffect(() => {
+    if (!selectedCategoryId) return;
+    const frame = window.requestAnimationFrame(() => {
+      categoryProductsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [selectedCategoryId]);
+
+  useEffect(() => {
+    if (!selectedSubcategoryId) return;
+    const frame = window.requestAnimationFrame(() => {
+      subcategoryProductsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [selectedSubcategoryId]);
+
   const openAdd = (type: TabId) => {
-    if (type === 'categories') setForm({ name: '', description: '', image_url: '', display_order: 0 });
+    if (type === 'categories') setForm({ name: '', description: '', image_url: '' });
     if (type === 'subcategories') setForm({ name: '', category_id: categories[0]?.id || '', display_order: 0 });
-    if (type === 'tax') setForm({ name: '', rate: 0, rate_type: 'percent' });
-    if (type === 'payment') setForm({ name: '', display_order: 0 });
-    if (type === 'bank') setForm({ name: '', account_number: '' });
+    if (type === 'tax') setForm({ name: '', rate: '', rate_type: 'percent' });
+    if (type === 'payment') setForm({ name: '' });
+    if (type === 'bank') setForm({ name: '', account_number: '', account_number_confirm: '' });
     setModal({ type });
   };
 
+  useEffect(() => {
+    if (searchParams.get('create') !== '1') return;
+    const t = searchParams.get('tab');
+    const tab = isTabId(t) ? t : 'categories';
+    openAdd(tab);
+    router.replace(`/admin/catalog?tab=${tab}`, { scroll: false });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams]);
+
   const openEdit = (type: TabId, row: any) => {
-    setForm({ ...row });
+    if (type === 'tax') setForm({ ...row, rate: row.rate === 0 || row.rate ? String(row.rate) : '' });
+    else if (type === 'bank') setForm({ ...row, account_number_confirm: row.account_number || '' });
+    else setForm({ ...row });
     setModal({ type, edit: row });
   };
 
@@ -255,25 +305,41 @@ export default function CatalogPage() {
     const { type, edit } = modal;
     try {
       if (type === 'categories') {
-        const catPayload = { name: form.name, description: form.description, image_url: form.image_url || '', display_order: form.display_order };
+        const catPayload = {
+          name: form.name,
+          description: form.description,
+          image_url: form.image_url || '',
+          display_order: edit?.display_order ?? 0,
+        };
         if (edit) await adminApi.put(`/categories/${edit.id}`, catPayload);
-        else await adminApi.post('/categories', { ...catPayload, display_order: form.display_order ?? 0 });
+        else await adminApi.post('/categories', catPayload);
       }
       if (type === 'subcategories') {
         if (edit) await adminApi.put(`/sub-categories/${edit.id}`, { name: form.name, category_id: form.category_id, display_order: form.display_order });
         else await adminApi.post('/sub-categories', { name: form.name, category_id: form.category_id, display_order: form.display_order ?? 0 });
       }
       if (type === 'tax') {
-        if (edit) await adminApi.put(`/tax-types/${edit.id}`, { name: form.name, rate: form.rate, rate_type: form.rate_type || 'percent' });
-        else await adminApi.post('/tax-types', { name: form.name, rate: form.rate, rate_type: form.rate_type || 'percent' });
+        const rate = Number(form.rate);
+        if (form.rate === '' || Number.isNaN(rate) || rate < 0) {
+          toast.error('Enter a tax bracket percentage');
+          return;
+        }
+        if (edit) await adminApi.put(`/tax-types/${edit.id}`, { name: form.name, rate, rate_type: form.rate_type || 'percent' });
+        else await adminApi.post('/tax-types', { name: form.name, rate, rate_type: form.rate_type || 'percent' });
       }
       if (type === 'payment') {
-        if (edit) await adminApi.put(`/payment-methods/${edit.id}`, { name: form.name, display_order: form.display_order });
-        else await adminApi.post('/payment-methods', { name: form.name, display_order: form.display_order ?? 0 });
+        if (edit) await adminApi.put(`/payment-methods/${edit.id}`, { name: form.name, display_order: edit.display_order ?? 0 });
+        else await adminApi.post('/payment-methods', { name: form.name, display_order: 0 });
       }
       if (type === 'bank') {
-        if (edit) await adminApi.put(`/bank-accounts/${edit.id}`, { name: form.name, account_number: form.account_number });
-        else await adminApi.post('/bank-accounts', { name: form.name, account_number: form.account_number || undefined });
+        const account = String(form.account_number || '').trim();
+        const confirmAccount = String(form.account_number_confirm || '').trim();
+        if (account && account !== confirmAccount) {
+          toast.error('Bank account numbers do not match');
+          return;
+        }
+        if (edit) await adminApi.put(`/bank-accounts/${edit.id}`, { name: form.name, account_number: account });
+        else await adminApi.post('/bank-accounts', { name: form.name, account_number: account || undefined });
       }
       toast.success(edit ? 'Updated' : 'Created');
       setModal(null);
@@ -422,10 +488,45 @@ export default function CatalogPage() {
     }
   };
 
-  const handleExportCategoriesCSV = () => {
+  const productCountForCategory = (categoryId: string, products = allProducts) =>
+    products.filter((p) => String(p.category_id || '') === String(categoryId)).length;
+
+  const handleExportCategoriesCSV = async () => {
+    let products = allProducts;
+    if (products.length === 0) {
+      try {
+        const res = await adminApi.get('/products', { params: { limit: 2000, visibility: 'all' } });
+        products = res.data?.products || [];
+        setAllProducts(products);
+      } catch {
+        products = [];
+      }
+    }
     const toExport = selectedCategoryIds.size > 0 ? categories.filter((c) => selectedCategoryIds.has(c.id)) : categories;
-    const rows = [['Name', 'Slug', 'Description', 'Display order'], ...toExport.map((c) => [c.name, c.slug, c.description || '', String(c.display_order ?? 0)])];
+    const rows = [
+      ['Name', 'Slug', 'Description', 'Product count'],
+      ...toExport.map((c) => [c.name, c.slug, c.description || '', String(productCountForCategory(c.id, products))]),
+    ];
     downloadCSV(`categories-${new Date().toISOString().slice(0, 10)}.csv`, rows);
+    toast.success('CSV downloaded');
+  };
+
+  const handleExportCategoryProductsCSV = () => {
+    const cat = categories.find((c) => c.id === selectedCategoryId);
+    if (!cat || productsInCategory.length === 0) {
+      toast.error('No products to export for this category');
+      return;
+    }
+    const rows = [
+      ['Name', 'SKU', 'Price', 'Status'],
+      ...productsInCategory.map((p) => [
+        p.name,
+        p.sku || '',
+        p.price != null ? String(p.price) : '',
+        p.is_active === false ? 'Inactive' : 'Active',
+      ]),
+    ];
+    downloadCSV(`${cat.slug || 'category'}-products-${new Date().toISOString().slice(0, 10)}.csv`, rows);
     toast.success('CSV downloaded');
   };
 
@@ -545,7 +646,7 @@ export default function CatalogPage() {
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-extrabold text-white tracking-tight">Catalog Configuration</h1>
+          <h1 className="text-[28px] font-normal text-[#1A1A1A] tracking-tight">Catalog</h1>
           <p className="text-xs text-slate-400 mt-1">Configure retail tax rate brackets, homepage category carousels, sub-categories, dynamic payment gates, and store bank accounts.</p>
         </div>
       </div>
@@ -557,7 +658,7 @@ export default function CatalogPage() {
           return (
             <button
               key={tab.id}
-              onClick={() => setActiveTab(tab.id)}
+              onClick={() => selectTab(tab.id)}
               className={`flex items-center gap-2 px-4 py-2.5 rounded-xl font-bold text-xs transition-all ${
                 isAct
                   ? 'bg-gradient-to-tr from-teal-600 to-teal-500 hover:from-teal-500 hover:to-teal-400 border border-white/10 text-white shadow-sm'
@@ -599,9 +700,10 @@ export default function CatalogPage() {
                     </button>
                   </div>
                 </div>
-                <div className="overflow-x-auto">
+                <div className="grid lg:grid-cols-2 gap-4 items-start">
+                <div className="max-h-[min(70vh,640px)] overflow-auto border border-white/5 rounded-xl">
                   <table className="w-full border-collapse">
-                    <thead className="bg-slate-950/60 text-slate-400 border-b border-white/5">
+                    <thead className="bg-slate-950/60 text-slate-400 border-b border-white/5 sticky top-0 z-10">
                       <tr>
                         <th className="w-10 py-3.5 px-4 text-center">
                           <input type="checkbox" checked={categories.length > 0 && selectedCategoryIds.size === categories.length} onChange={selectAllCategories} className="rounded border-white/10 bg-slate-950 text-teal-600 focus:ring-0 focus:ring-offset-0" />
@@ -609,7 +711,6 @@ export default function CatalogPage() {
                         <th className="text-left py-3.5 px-4 text-[10px] font-bold uppercase tracking-wider w-16">Wheel Image</th>
                         <th className="text-left py-3.5 px-4 text-[10px] font-bold uppercase tracking-wider">Category Name</th>
                         <th className="text-left py-3.5 px-4 text-[10px] font-bold uppercase tracking-wider">Slug Token</th>
-                        <th className="text-left py-3.5 px-4 text-[10px] font-bold uppercase tracking-wider">Description</th>
                         <th className="text-right py-3.5 px-4 text-[10px] font-bold uppercase tracking-wider w-24">Actions</th>
                       </tr>
                     </thead>
@@ -617,8 +718,8 @@ export default function CatalogPage() {
                       {categories.map((c) => (
                         <tr
                           key={c.id}
-                          className={`border-b border-white/5 hover:bg-white/[0.01] cursor-pointer transition-colors ${selectedCategoryId === c.id ? 'bg-teal-500/[0.03]' : ''}`}
-                          onClick={() => setSelectedCategoryId(selectedCategoryId === c.id ? null : c.id)}
+                          className={`border-b border-white/5 hover:bg-white/[0.04] cursor-pointer transition-colors ${selectedCategoryId === c.id ? 'bg-teal-500/20 ring-2 ring-inset ring-teal-400/70' : ''}`}
+                          onClick={() => setSelectedCategoryId(c.id)}
                         >
                           <td className="py-3 px-4 text-center" onClick={(e) => e.stopPropagation()}>
                             <input type="checkbox" checked={selectedCategoryIds.has(c.id)} onChange={() => toggleCategorySelect(c.id)} className="rounded border-white/10 bg-slate-950 text-teal-600 focus:ring-0 focus:ring-offset-0" />
@@ -632,7 +733,6 @@ export default function CatalogPage() {
                           </td>
                           <td className="py-3 px-4 font-semibold text-slate-205">{c.name}</td>
                           <td className="py-3 px-4 text-xs font-mono text-slate-400">{c.slug}</td>
-                          <td className="py-3 px-4 text-xs text-slate-402">{c.description || '—'}</td>
                           <td className="py-3 px-4 text-right" onClick={(e) => e.stopPropagation()}>
                             <div className="flex items-center justify-end gap-1">
                               <button onClick={() => openEdit('categories', c)} className="p-2 text-teal-450 hover:bg-teal-500/10 rounded-xl transition-all" title="Edit">
@@ -647,8 +747,90 @@ export default function CatalogPage() {
                       ))}
                     </tbody>
                   </table>
+                  {categories.length === 0 && <p className="text-center py-16 text-slate-500 text-xs font-semibold">No categories registered yet.</p>}
                 </div>
-                {categories.length === 0 && <p className="text-center py-16 text-slate-500 text-xs font-semibold">No categories registered yet.</p>}
+                <div ref={categoryProductsRef} className="lg:sticky lg:top-0 border border-white/10 rounded-xl bg-slate-950/40 p-4 space-y-4 min-h-[280px]">
+                  {selectedCategoryId ? (
+                    <>
+                      <div className="flex items-start justify-between gap-3">
+                        <h3 className="text-sm font-bold text-white uppercase tracking-wider flex items-center gap-2">
+                          <Package className="w-4 h-4 text-teal-400" />
+                          Products in {categories.find((c) => c.id === selectedCategoryId)?.name}
+                        </h3>
+                        <div className="flex items-center gap-1">
+                          <button
+                            type="button"
+                            onClick={handleExportCategoryProductsCSV}
+                            disabled={productsLoading || productsInCategory.length === 0}
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-slate-350 bg-slate-800 border border-white/5 hover:text-white text-[11px] font-bold transition-all disabled:opacity-40"
+                          >
+                            <FileDown className="w-3.5 h-3.5" /> Export products
+                          </button>
+                          <button type="button" onClick={() => setSelectedCategoryId(null)} className="p-1.5 text-slate-400 hover:text-white hover:bg-white/5 rounded-lg" aria-label="Close products">
+                            <X className="w-4 h-4" />
+                          </button>
+                        </div>
+                      </div>
+                      <p className="text-[11px] text-slate-300 font-medium">
+                        {productsLoading ? 'Loading products…' : `${productsInCategory.length} product${productsInCategory.length === 1 ? '' : 's'} in this category.`}
+                      </p>
+                      <div className="flex flex-wrap gap-2.5 items-center">
+                        <select value={addProductId} onChange={(e) => setAddProductId(e.target.value)} className="bg-slate-955/65 border border-white/10 rounded-xl px-3 py-2 text-xs text-slate-250 focus:outline-none min-w-[200px] font-semibold">
+                          <option value="">Select product to assign...</option>
+                          {productsNotInCategory.map((p) => (
+                            <option key={p.id} value={p.id}>{p.name} {p.sku ? `(${p.sku})` : ''}</option>
+                          ))}
+                        </select>
+                        <button onClick={addProductToCategory} disabled={!addProductId} className="inline-flex items-center justify-center px-4 py-2.5 bg-gradient-to-tr from-teal-600 to-teal-500 hover:from-teal-500 border border-white/10 text-white rounded-xl text-xs font-bold transition-all shadow-sm disabled:opacity-40">
+                          Link Product
+                        </button>
+                      </div>
+                      {productsLoading ? (
+                        <div className="flex justify-center py-8"><div className="animate-spin rounded-full h-6 w-6 border-2 border-teal-500 border-t-transparent" /></div>
+                      ) : (
+                        <div className="overflow-x-auto border border-white/5 rounded-xl bg-slate-950/20 max-h-[min(52vh,480px)] overflow-y-auto">
+                          <table className="w-full border-collapse text-xs">
+                            <thead className="bg-slate-950/60 text-slate-400 border-b border-white/5 sticky top-0">
+                              <tr>
+                                <th className="text-left py-2.5 px-4 text-[9px] font-bold uppercase tracking-wider">Product Name</th>
+                                <th className="text-left py-2.5 px-4 text-[9px] font-bold uppercase tracking-wider font-mono">SKU</th>
+                                <th className="text-right py-2.5 px-4 text-[9px] font-bold uppercase tracking-wider font-mono">Price</th>
+                                <th className="text-right py-2.5 px-4 text-[9px] font-bold uppercase tracking-wider w-28">Actions</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {productsInCategory.map((p) => (
+                                <tr key={p.id} className="border-t border-white/5 hover:bg-white/[0.01]">
+                                  <td className="py-2.5 px-4 font-semibold text-slate-205">
+                                    <span className="inline-flex flex-wrap items-center gap-2">
+                                      {p.name}
+                                      {p.is_active === false && (
+                                        <span className="text-[9px] font-bold text-amber-400 bg-amber-500/10 border border-amber-500/20 px-2 py-0.5 rounded">Inactive</span>
+                                      )}
+                                    </span>
+                                  </td>
+                                  <td className="py-2.5 px-4 font-mono text-slate-400">{p.sku || '—'}</td>
+                                  <td className="py-2.5 px-4 text-right font-mono font-semibold text-slate-200">${p.price != null ? Number(p.price).toLocaleString(undefined, {minimumFractionDigits: 2}) : '—'}</td>
+                                  <td className="py-2.5 px-4 text-right">
+                                    <button onClick={() => removeProductFromCategory(p.id)} className="text-rose-450 hover:text-rose-350 hover:underline font-bold text-[11px] transition-all">Remove</button>
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
+                      {!productsLoading && productsInCategory.length === 0 && <p className="text-slate-500 text-xs py-4 text-center bg-slate-955/20 rounded-xl font-medium">No products in this category yet.</p>}
+                    </>
+                  ) : (
+                    <div className="h-full min-h-[240px] flex flex-col items-center justify-center text-center px-6">
+                      <Package className="w-8 h-8 text-teal-400 mb-3" />
+                      <p className="text-sm font-semibold text-white">Click a category to see its products</p>
+                      <p className="text-xs text-slate-400 mt-1.5">The product list opens here immediately — no need to scroll the category table.</p>
+                    </div>
+                  )}
+                </div>
+                </div>
               </div>
             )}
 
@@ -668,9 +850,10 @@ export default function CatalogPage() {
                     </button>
                   </div>
                 </div>
-                <div className="overflow-x-auto">
+                <div className="grid lg:grid-cols-2 gap-4 items-start">
+                <div className="max-h-[min(70vh,640px)] overflow-auto border border-white/5 rounded-xl">
                   <table className="w-full border-collapse">
-                    <thead className="bg-slate-950/60 text-slate-400 border-b border-white/5">
+                    <thead className="bg-slate-950/60 text-slate-400 border-b border-white/5 sticky top-0 z-10">
                       <tr>
                         <th className="w-10 py-3.5 px-4 text-center">
                           <input type="checkbox" checked={subcategories.length > 0 && selectedSubcategoryIds.size === subcategories.length} onChange={selectAllSubcategories} className="rounded border-white/10 bg-slate-950 text-teal-600 focus:ring-0 focus:ring-offset-0" />
@@ -684,8 +867,8 @@ export default function CatalogPage() {
                       {subcategories.map((s) => (
                         <tr
                           key={s.id}
-                          className={`border-b border-white/5 hover:bg-white/[0.01] cursor-pointer transition-colors ${selectedSubcategoryId === s.id ? 'bg-teal-500/[0.03]' : ''}`}
-                          onClick={() => setSelectedSubcategoryId(selectedSubcategoryId === s.id ? null : s.id)}
+                          className={`border-b border-white/5 hover:bg-white/[0.04] cursor-pointer transition-colors ${selectedSubcategoryId === s.id ? 'bg-teal-500/20 ring-2 ring-inset ring-teal-400/70' : ''}`}
+                          onClick={() => setSelectedSubcategoryId(s.id)}
                         >
                           <td className="py-3 px-4 text-center" onClick={(e) => e.stopPropagation()}>
                             <input type="checkbox" checked={selectedSubcategoryIds.has(s.id)} onChange={() => toggleSubcategorySelect(s.id)} className="rounded border-white/10 bg-slate-950 text-teal-600 focus:ring-0 focus:ring-offset-0" />
@@ -706,8 +889,80 @@ export default function CatalogPage() {
                       ))}
                     </tbody>
                   </table>
+                  {subcategories.length === 0 && <p className="text-center py-16 text-slate-500 text-xs font-semibold">No sub-categories registered yet.</p>}
                 </div>
-                {subcategories.length === 0 && <p className="text-center py-16 text-slate-500 text-xs font-semibold">No sub-categories registered yet.</p>}
+                <div ref={subcategoryProductsRef} className="lg:sticky lg:top-0 border border-white/10 rounded-xl bg-slate-950/40 p-4 space-y-4 min-h-[280px]">
+                  {selectedSubcategoryId ? (
+                    <>
+                      <div className="flex items-start justify-between gap-3">
+                        <h3 className="text-sm font-bold text-white uppercase tracking-wider flex items-center gap-2">
+                          <Package className="w-4 h-4 text-teal-400" />
+                          Products in {subcategories.find((s) => s.id === selectedSubcategoryId)?.name}
+                        </h3>
+                        <button type="button" onClick={() => setSelectedSubcategoryId(null)} className="p-1.5 text-slate-400 hover:text-white hover:bg-white/5 rounded-lg" aria-label="Close products">
+                          <X className="w-4 h-4" />
+                        </button>
+                      </div>
+                      <p className="text-[11px] text-slate-300 font-medium">
+                        {productsLoading ? 'Loading products…' : `${productsInSubcategory.length} product${productsInSubcategory.length === 1 ? '' : 's'} in this subcategory.`}
+                      </p>
+                      <div className="flex flex-wrap gap-2.5 items-center">
+                        <select value={addProductIdSub} onChange={(e) => setAddProductIdSub(e.target.value)} className="bg-slate-955/65 border border-white/10 rounded-xl px-3 py-2 text-xs text-slate-250 focus:outline-none min-w-[200px] font-semibold">
+                          <option value="">Select product to assign...</option>
+                          {productsNotInSubcategory.map((p) => (
+                            <option key={p.id} value={p.id}>{p.name} {p.sku ? `(${p.sku})` : ''}</option>
+                          ))}
+                        </select>
+                        <button onClick={addProductToSubcategory} disabled={!addProductIdSub} className="inline-flex items-center justify-center px-4 py-2.5 bg-gradient-to-tr from-teal-600 to-teal-500 hover:from-teal-500 border border-white/10 text-white rounded-xl text-xs font-bold transition-all shadow-sm disabled:opacity-40">
+                          Link Product
+                        </button>
+                      </div>
+                      {productsLoading ? (
+                        <div className="flex justify-center py-8"><div className="animate-spin rounded-full h-6 w-6 border-2 border-teal-500 border-t-transparent" /></div>
+                      ) : (
+                        <div className="overflow-x-auto border border-white/5 rounded-xl bg-slate-950/20 max-h-[min(52vh,480px)] overflow-y-auto">
+                          <table className="w-full border-collapse text-xs">
+                            <thead className="bg-slate-950/60 text-slate-400 border-b border-white/5 sticky top-0">
+                              <tr>
+                                <th className="text-left py-2.5 px-4 text-[9px] font-bold uppercase tracking-wider">Product Name</th>
+                                <th className="text-left py-2.5 px-4 text-[9px] font-bold uppercase tracking-wider font-mono">SKU</th>
+                                <th className="text-right py-2.5 px-4 text-[9px] font-bold uppercase tracking-wider font-mono">Price</th>
+                                <th className="text-right py-2.5 px-4 text-[9px] font-bold uppercase tracking-wider w-28">Actions</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {productsInSubcategory.map((p) => (
+                                <tr key={p.id} className="border-t border-white/5 hover:bg-white/[0.01]">
+                                  <td className="py-2.5 px-4 font-semibold text-slate-205">
+                                    <span className="inline-flex flex-wrap items-center gap-2">
+                                      {p.name}
+                                      {p.is_active === false && (
+                                        <span className="text-[9px] font-bold text-amber-400 bg-amber-500/10 border border-amber-500/20 px-2 py-0.5 rounded">Inactive</span>
+                                      )}
+                                    </span>
+                                  </td>
+                                  <td className="py-2.5 px-4 font-mono text-slate-400">{p.sku || '—'}</td>
+                                  <td className="py-2.5 px-4 text-right font-mono font-semibold text-slate-200">${p.price != null ? Number(p.price).toLocaleString(undefined, {minimumFractionDigits: 2}) : '—'}</td>
+                                  <td className="py-2.5 px-4 text-right">
+                                    <button onClick={() => removeProductFromSubcategory(p.id)} className="text-rose-455 hover:text-rose-350 hover:underline font-bold text-[11px] transition-all">Remove</button>
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
+                      {!productsLoading && productsInSubcategory.length === 0 && <p className="text-slate-500 text-xs py-4 text-center bg-slate-955/20 rounded-xl font-medium">No products in this subcategory yet.</p>}
+                    </>
+                  ) : (
+                    <div className="h-full min-h-[240px] flex flex-col items-center justify-center text-center px-6">
+                      <Package className="w-8 h-8 text-teal-400 mb-3" />
+                      <p className="text-sm font-semibold text-white">Click a subcategory to see its products</p>
+                      <p className="text-xs text-slate-400 mt-1.5">The product list opens here immediately — no need to scroll the subcategory table.</p>
+                    </div>
+                  )}
+                </div>
+                </div>
               </div>
             )}
 
@@ -880,127 +1135,12 @@ export default function CatalogPage() {
               </div>
             )}
           </div>
-
-          {/* Products mapping drawer sub-panels */}
-          {activeTab === 'categories' && selectedCategoryId && (
-            <div className="bg-slate-900/40 backdrop-blur-lg border border-white/[0.06] border-t-white/[0.18] p-6 shadow-[0_12px_40px_rgba(0,0,0,0.25)] rounded-2xl space-y-4">
-              <h3 className="text-sm font-bold text-white uppercase tracking-wider flex items-center gap-2">
-                <Package className="w-4 h-4 text-teal-400" />
-                Products Inside Category: &quot;{categories.find((c) => c.id === selectedCategoryId)?.name}&quot;
-              </h3>
-              <p className="text-[10px] text-slate-400 font-medium">Link products from the wholesale index below to list them inside this category wheel namespace.</p>
-              <div className="flex flex-wrap gap-2.5 items-center">
-                <select value={addProductId} onChange={(e) => setAddProductId(e.target.value)} className="bg-slate-955/65 border border-white/10 rounded-xl px-3 py-2 text-xs text-slate-250 focus:outline-none min-w-[200px] font-semibold">
-                  <option value="">Select product to assign...</option>
-                  {productsNotInCategory.map((p) => (
-                    <option key={p.id} value={p.id}>{p.name} {p.sku ? `(${p.sku})` : ''}</option>
-                  ))}
-                </select>
-                <button onClick={addProductToCategory} disabled={!addProductId} className="inline-flex items-center justify-center px-4 py-2.5 bg-gradient-to-tr from-teal-600 to-teal-500 hover:from-teal-500 border border-white/10 text-white rounded-xl text-xs font-bold transition-all shadow-sm disabled:opacity-40">
-                  Link Product
-                </button>
-              </div>
-              {productsLoading ? (
-                <div className="flex justify-center py-8"><div className="animate-spin rounded-full h-6 w-6 border-2 border-teal-500 border-t-transparent" /></div>
-              ) : (
-                <div className="overflow-x-auto border border-white/5 rounded-xl bg-slate-950/20">
-                  <table className="w-full border-collapse text-xs">
-                    <thead className="bg-slate-950/60 text-slate-400 border-b border-white/5">
-                      <tr>
-                        <th className="text-left py-2.5 px-4 text-[9px] font-bold uppercase tracking-wider">Product Name</th>
-                        <th className="text-left py-2.5 px-4 text-[9px] font-bold uppercase tracking-wider font-mono">SKU</th>
-                        <th className="text-right py-2.5 px-4 text-[9px] font-bold uppercase tracking-wider font-mono">Price</th>
-                        <th className="text-right py-2.5 px-4 text-[9px] font-bold uppercase tracking-wider w-28">Actions</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {productsInCategory.map((p) => (
-                        <tr key={p.id} className="border-t border-white/5 hover:bg-white/[0.01]">
-                          <td className="py-2.5 px-4 font-semibold text-slate-205">
-                            <span className="inline-flex flex-wrap items-center gap-2">
-                              {p.name}
-                              {p.is_active === false && (
-                                <span className="text-[9px] font-bold text-amber-400 bg-amber-500/10 border border-amber-500/20 px-2 py-0.5 rounded">Inactive</span>
-                              )}
-                            </span>
-                          </td>
-                          <td className="py-2.5 px-4 font-mono text-slate-400">{p.sku || '—'}</td>
-                          <td className="py-2.5 px-4 text-right font-mono font-semibold text-slate-200">${p.price != null ? Number(p.price).toLocaleString(undefined, {minimumFractionDigits: 2}) : '—'}</td>
-                          <td className="py-2.5 px-4 text-right">
-                            <button onClick={() => removeProductFromCategory(p.id)} className="text-rose-450 hover:text-rose-350 hover:underline font-bold text-[11px] transition-all">Remove</button>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-              {!productsLoading && productsInCategory.length === 0 && <p className="text-slate-500 text-xs py-4 text-center bg-slate-955/20 rounded-xl font-medium">No products mapped into category stack.</p>}
-            </div>
-          )}
-
-          {activeTab === 'subcategories' && selectedSubcategoryId && (
-            <div className="bg-slate-900/40 backdrop-blur-lg border border-white/[0.06] border-t-white/[0.18] p-6 shadow-[0_12px_40px_rgba(0,0,0,0.25)] rounded-2xl space-y-4">
-              <h3 className="text-sm font-bold text-white uppercase tracking-wider flex items-center gap-2">
-                <Package className="w-4 h-4 text-teal-400" />
-                Products Inside Subcategory: &quot;{subcategories.find((s) => s.id === selectedSubcategoryId)?.name}&quot;
-              </h3>
-              <p className="text-[10px] text-slate-400 font-medium">Link products from the wholesale index below to list them inside this subcategory namespace.</p>
-              <div className="flex flex-wrap gap-2.5 items-center">
-                <select value={addProductIdSub} onChange={(e) => setAddProductIdSub(e.target.value)} className="bg-slate-955/65 border border-white/10 rounded-xl px-3 py-2 text-xs text-slate-250 focus:outline-none min-w-[200px] font-semibold">
-                  <option value="">Select product to assign...</option>
-                  {productsNotInSubcategory.map((p) => (
-                    <option key={p.id} value={p.id}>{p.name} {p.sku ? `(${p.sku})` : ''}</option>
-                  ))}
-                </select>
-                <button onClick={addProductToSubcategory} disabled={!addProductIdSub} className="inline-flex items-center justify-center px-4 py-2.5 bg-gradient-to-tr from-teal-600 to-teal-500 hover:from-teal-500 border border-white/10 text-white rounded-xl text-xs font-bold transition-all shadow-sm disabled:opacity-40">
-                  Link Product
-                </button>
-              </div>
-              {productsLoading ? (
-                <div className="flex justify-center py-8"><div className="animate-spin rounded-full h-6 w-6 border-2 border-teal-500 border-t-transparent" /></div>
-              ) : (
-                <div className="overflow-x-auto border border-white/5 rounded-xl bg-slate-950/20">
-                  <table className="w-full border-collapse text-xs">
-                    <thead className="bg-slate-950/60 text-slate-400 border-b border-white/5">
-                      <tr>
-                        <th className="text-left py-2.5 px-4 text-[9px] font-bold uppercase tracking-wider">Product Name</th>
-                        <th className="text-left py-2.5 px-4 text-[9px] font-bold uppercase tracking-wider font-mono">SKU</th>
-                        <th className="text-right py-2.5 px-4 text-[9px] font-bold uppercase tracking-wider font-mono">Price</th>
-                        <th className="text-right py-2.5 px-4 text-[9px] font-bold uppercase tracking-wider w-28">Actions</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {productsInSubcategory.map((p) => (
-                        <tr key={p.id} className="border-t border-white/5 hover:bg-white/[0.01]">
-                          <td className="py-2.5 px-4 font-semibold text-slate-205">
-                            <span className="inline-flex flex-wrap items-center gap-2">
-                              {p.name}
-                              {p.is_active === false && (
-                                <span className="text-[9px] font-bold text-amber-400 bg-amber-500/10 border border-amber-500/20 px-2 py-0.5 rounded">Inactive</span>
-                              )}
-                            </span>
-                          </td>
-                          <td className="py-2.5 px-4 font-mono text-slate-400">{p.sku || '—'}</td>
-                          <td className="py-2.5 px-4 text-right font-mono font-semibold text-slate-200">${p.price != null ? Number(p.price).toLocaleString(undefined, {minimumFractionDigits: 2}) : '—'}</td>
-                          <td className="py-2.5 px-4 text-right">
-                            <button onClick={() => removeProductFromSubcategory(p.id)} className="text-rose-455 hover:text-rose-350 hover:underline font-bold text-[11px] transition-all">Remove</button>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-              {!productsLoading && productsInSubcategory.length === 0 && <p className="text-slate-500 text-xs py-4 text-center bg-slate-955/20 rounded-xl font-medium">No products mapped into subcategory stack.</p>}
-            </div>
-          )}
         </div>
       )}
 
       {modal && (
         <div className="fixed inset-0 bg-slate-955/80 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <div className="bg-slate-900 border border-white/10 shadow-[0_24px_50px_rgba(0,0,0,0.4)] rounded-2xl max-w-md w-full max-h-[90vh] overflow-y-auto">
+          <div className="bg-white border border-[#E2E8F0] rounded-lg text-[#0F172A] max-w-md w-full max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between p-5 border-b border-white/5">
               <h2 className="text-md font-bold text-white uppercase tracking-wider">
                 {modal.edit ? 'Edit' : 'Add'} {TABS.find((t) => t.id === modal!.type)?.label}
@@ -1080,42 +1220,15 @@ export default function CatalogPage() {
                     {form.image_url ? (
                       <div className="mt-3.5 flex items-start gap-3.5">
                         <img src={form.image_url} alt="Category preview" className="h-24 w-24 object-cover rounded-xl border border-white/10 shadow-sm bg-slate-950/40" />
-                        <div className="flex-1 space-y-2">
-                          <button
-                            type="button"
-                            className="text-xs text-rose-450 hover:text-rose-405 font-bold transition-colors"
-                            onClick={() => setForm((f) => ({ ...f, image_url: '' }))}
-                          >
-                            Remove Artwork
-                          </button>
-                          <div>
-                            <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Paste Direct Image URL</label>
-                            <input
-                              type="url"
-                              value={form.image_url || ''}
-                              onChange={(e) => setForm((f) => ({ ...f, image_url: e.target.value }))}
-                              className="w-full bg-slate-950/60 border border-white/10 rounded-xl px-3 py-1.5 text-xs text-slate-200 focus:outline-none"
-                              placeholder="https://..."
-                            />
-                          </div>
-                        </div>
+                        <button
+                          type="button"
+                          className="text-xs text-rose-450 hover:text-rose-405 font-bold transition-colors"
+                          onClick={() => setForm((f) => ({ ...f, image_url: '' }))}
+                        >
+                          Remove Artwork
+                        </button>
                       </div>
-                    ) : (
-                      <div className="mt-2.5">
-                        <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Public Image URL (Optional)</label>
-                        <input
-                          type="url"
-                          value={form.image_url || ''}
-                          onChange={(e) => setForm((f) => ({ ...f, image_url: e.target.value }))}
-                          className="mt-1.5 w-full bg-slate-950/60 border border-white/10 rounded-xl px-4 py-2 text-xs text-slate-205 focus:outline-none"
-                          placeholder="https://host/wheel-category.png"
-                        />
-                      </div>
-                    )}
-                  </div>
-                  <div>
-                    <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">Display order</label>
-                    <input type="number" min={0} value={form.display_order ?? 0} onChange={(e) => setForm({ ...form, display_order: parseInt(e.target.value, 10) || 0 })} className="w-full bg-slate-955/60 border border-white/10 rounded-xl px-4 py-2 text-xs text-slate-200 focus:outline-none font-mono font-bold" />
+                    ) : null}
                   </div>
                 </>
               )}
@@ -1156,7 +1269,7 @@ export default function CatalogPage() {
                   </div>
                   <div>
                     <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">{form.rate_type === 'amount' ? 'Flat Dollar Surcharge *' : 'Tax Bracket Percentage *'}</label>
-                    <input type="number" min={0} step={0.01} value={form.rate ?? ''} onChange={(e) => setForm({ ...form, rate: parseFloat(e.target.value) || 0 })} className="w-full bg-slate-950/60 border border-white/10 rounded-xl px-4 py-2 text-xs text-slate-200 focus:outline-none font-mono font-bold" required />
+                    <input type="number" min={0} step={0.01} value={form.rate ?? ''} onChange={(e) => setForm({ ...form, rate: e.target.value })} className="w-full bg-slate-950/60 border border-white/10 rounded-xl px-4 py-2 text-xs text-slate-200 focus:outline-none font-mono font-bold" placeholder="e.g. 8.25" required />
                   </div>
                 </>
               )}
@@ -1165,10 +1278,6 @@ export default function CatalogPage() {
                   <div>
                     <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">Tender Method Name *</label>
                     <input type="text" value={form.name || ''} onChange={(e) => setForm({ ...form, name: e.target.value })} className="w-full bg-slate-955/60 border border-white/10 rounded-xl px-4 py-2 text-xs text-slate-200 focus:outline-none" placeholder="e.g. Cheque, Card, Swift Bank Transfer" required />
-                  </div>
-                  <div>
-                    <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">Display order</label>
-                    <input type="number" min={0} value={form.display_order ?? 0} onChange={(e) => setForm({ ...form, display_order: parseInt(e.target.value, 10) || 0 })} className="w-full bg-slate-950/60 border border-white/10 rounded-xl px-4 py-2 text-xs text-slate-200 focus:outline-none font-mono font-bold" />
                   </div>
                 </>
               )}
@@ -1180,7 +1289,11 @@ export default function CatalogPage() {
                   </div>
                   <div>
                     <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">Account Number</label>
-                    <input type="text" value={form.account_number || ''} onChange={(e) => setForm({ ...form, account_number: e.target.value })} className="w-full bg-slate-950/60 border border-white/10 rounded-xl px-4 py-2 text-xs text-slate-200 focus:outline-none font-mono" placeholder="Account designation number" />
+                    <input type="text" autoComplete="off" value={form.account_number || ''} onChange={(e) => setForm({ ...form, account_number: e.target.value })} className="w-full bg-slate-950/60 border border-white/10 rounded-xl px-4 py-2 text-xs text-slate-200 focus:outline-none font-mono" placeholder="Account designation number" />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">Re-enter bank account number</label>
+                    <input type="text" autoComplete="off" value={form.account_number_confirm || ''} onChange={(e) => setForm({ ...form, account_number_confirm: e.target.value })} className="w-full bg-slate-950/60 border border-white/10 rounded-xl px-4 py-2 text-xs text-slate-200 focus:outline-none font-mono" placeholder="Type the account number again" />
                   </div>
                 </>
               )}

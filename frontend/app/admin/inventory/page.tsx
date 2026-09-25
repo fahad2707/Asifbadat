@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { Package, Search, Edit, Trash2, X } from 'lucide-react';
 import adminApi from '@/lib/admin-api';
 import toast from 'react-hot-toast';
+import { StockAttentionBanner } from '@/components/admin/StockAttentionBanner';
 
 interface InventoryItem {
   id: string;
@@ -35,6 +36,7 @@ export default function InventoryPage() {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState('All');
+  const [stockFilter, setStockFilter] = useState<'all' | 'low_stock' | 'out_of_stock'>('all');
   const [showItemModal, setShowItemModal] = useState(false);
   const [showTypeModal, setShowTypeModal] = useState(false);
   const [showCategoryModal, setShowCategoryModal] = useState(false);
@@ -55,7 +57,7 @@ export default function InventoryPage() {
 
   const fetchProducts = async () => {
     try {
-      const res = await adminApi.get('/products', { params: { limit: 500 } });
+      const res = await adminApi.get('/products', { params: { limit: 5000 } });
       const list = (res.data.products || []).map((p: any) => ({
         id: p.id,
         sku: p.sku,
@@ -126,12 +128,27 @@ export default function InventoryPage() {
     }
   };
 
-  const filtered = items.filter(
-    (p) =>
-      !search ||
-      p.name.toLowerCase().includes(search.toLowerCase()) ||
-      (p.sku && p.sku.toLowerCase().includes(search.toLowerCase()))
-  );
+  const outOfStockCount = items.filter((p) => (p.stock_quantity ?? 0) <= 0).length;
+  const lowStockCount = items.filter((p) => {
+    const qty = p.stock_quantity ?? 0;
+    return qty > 0 && qty <= (p.low_stock_threshold || 10);
+  }).length;
+
+  const filtered = items
+    .filter(
+      (p) =>
+        !search ||
+        p.name.toLowerCase().includes(search.toLowerCase()) ||
+        (p.sku && p.sku.toLowerCase().includes(search.toLowerCase()))
+    )
+    .filter((p) => {
+      if (stockFilter === 'out_of_stock') return (p.stock_quantity ?? 0) <= 0;
+      if (stockFilter === 'low_stock') {
+        const qty = p.stock_quantity ?? 0;
+        return qty > 0 && qty <= (p.low_stock_threshold || 10);
+      }
+      return true;
+    });
 
   const handleSaveItem = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -197,12 +214,27 @@ export default function InventoryPage() {
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-extrabold text-white tracking-tight">Inventory management</h1>
+          <h1 className="text-2xl font-semibold text-[#0F172A] tracking-tight">Inventory management</h1>
           <p className="text-xs text-slate-400 mt-1">Track units purchased versus units sold, control buffer stock margins, and log adjustments.</p>
         </div>
       </div>
 
-      <div className="bg-slate-900/40 backdrop-blur-lg border border-white/[0.06] border-t-white/[0.18] shadow-[0_12px_40px_rgba(0,0,0,0.25)] rounded-2xl p-4 flex flex-wrap items-center gap-4">
+      <StockAttentionBanner
+        outOfStockCount={outOfStockCount}
+        lowStockCount={lowStockCount}
+        onSeeOutOfStock={() => setStockFilter('out_of_stock')}
+        onSeeLowStock={() => setStockFilter('low_stock')}
+      />
+      {stockFilter !== 'all' && (
+        <p className="text-sm text-[#6B6C72] -mt-3">
+          Showing {stockFilter === 'low_stock' ? 'low stock' : 'out of stock'} items.{' '}
+          <button type="button" onClick={() => setStockFilter('all')} className="text-[#0077C5] hover:underline font-medium">
+            Show all
+          </button>
+        </p>
+      )}
+
+      <div className="bg-white border border-[#E2E8F0] rounded-lg p-4 flex flex-wrap items-center gap-4">
         <div className="relative flex-1 min-w-[240px]">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
           <input
@@ -232,7 +264,7 @@ export default function InventoryPage() {
         </div>
       </div>
 
-      <div className="bg-slate-900/40 backdrop-blur-lg border border-white/[0.06] border-t-white/[0.18] shadow-[0_12px_40px_rgba(0,0,0,0.25)] rounded-2xl overflow-hidden">
+      <div className="bg-white border border-[#E2E8F0] rounded-lg overflow-hidden">
         {loading ? (
           <div className="flex items-center justify-center py-16">
             <div className="animate-spin rounded-full h-8 w-8 border-2 border-teal-500 border-t-transparent" />
@@ -307,7 +339,7 @@ export default function InventoryPage() {
 
       {showAdjustModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-955/80 backdrop-blur-sm p-4">
-          <div className="bg-slate-900 border border-white/10 shadow-[0_24px_50px_rgba(0,0,0,0.4)] rounded-2xl max-w-md w-full max-h-[90vh] overflow-y-auto">
+          <div className="bg-white border border-[#E2E8F0] rounded-lg text-[#0F172A] max-w-md w-full max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between p-5 border-b border-white/5">
               <h2 className="text-lg font-bold text-white">Adjust Stock Quantity</h2>
               <button type="button" onClick={() => setShowAdjustModal(false)} className="p-1.5 hover:bg-white/5 rounded-lg text-slate-400 hover:text-white transition-all">
@@ -376,7 +408,7 @@ export default function InventoryPage() {
                 <button type="button" onClick={() => setShowAdjustModal(false)} className="px-4 py-2.5 bg-slate-800 border border-white/5 text-slate-400 hover:text-white rounded-xl text-xs font-semibold">
                   Cancel
                 </button>
-                <button type="submit" className="px-4 py-2.5 bg-gradient-to-tr from-teal-600 to-teal-500 hover:from-teal-500 hover:to-teal-400 border border-white/10 text-white rounded-xl text-xs font-bold transition-all shadow-sm">
+                <button type="submit" className="px-4 py-2.5 bg-[#0F9F8F] hover:bg-[#0B8275] border-transparent text-white rounded-xl text-xs font-bold transition-all shadow-sm">
                   Save Adjustment
                 </button>
               </div>
@@ -387,7 +419,7 @@ export default function InventoryPage() {
 
       {showItemModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-955/80 backdrop-blur-sm p-4">
-          <div className="bg-slate-900 border border-white/10 shadow-[0_24px_50px_rgba(0,0,0,0.4)] rounded-2xl max-w-lg w-full max-h-[90vh] overflow-y-auto">
+          <div className="bg-white border border-[#E2E8F0] rounded-lg text-[#0F172A] max-w-lg w-full max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between p-5 border-b border-white/5">
               <h2 className="text-lg font-bold text-white">{editing ? 'Edit Inventory Item' : 'New Inventory Item'}</h2>
               <button type="button" onClick={() => setShowItemModal(false)} className="p-1.5 hover:bg-white/5 rounded-lg text-slate-400 hover:text-white transition-all">
@@ -445,7 +477,7 @@ export default function InventoryPage() {
                 <button type="button" onClick={() => setShowItemModal(false)} className="px-4 py-2.5 bg-slate-800 border border-white/5 text-slate-400 hover:text-white rounded-xl text-xs font-semibold">
                   Close
                 </button>
-                <button type="submit" className="px-4 py-2.5 bg-gradient-to-tr from-teal-600 to-teal-500 hover:from-teal-500 hover:to-teal-400 border border-white/10 text-white rounded-xl text-xs font-bold transition-all shadow-sm">
+                <button type="submit" className="px-4 py-2.5 bg-[#0F9F8F] hover:bg-[#0B8275] border-transparent text-white rounded-xl text-xs font-bold transition-all shadow-sm">
                   Save Item
                 </button>
               </div>
@@ -456,10 +488,10 @@ export default function InventoryPage() {
 
       {showTypeModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-955/80 backdrop-blur-sm p-4">
-          <div className="bg-slate-900 border border-white/10 shadow-[0_24px_50px_rgba(0,0,0,0.4)] rounded-2xl max-w-sm w-full p-6">
+          <div className="bg-white border border-[#E2E8F0] rounded-lg text-[#0F172A] max-w-sm w-full p-6">
             <h3 className="text-sm font-bold text-white mb-3 uppercase tracking-wider text-slate-400 text-[10px]">Add Item Type</h3>
             <p className="text-slate-450 text-xs mb-5">Create a parent category type list to associate inventory assets.</p>
-            <button type="button" onClick={() => { setShowTypeModal(false); setShowCategoryModal(true); }} className="w-full px-4 py-2.5 bg-gradient-to-tr from-teal-600 to-teal-500 text-white rounded-xl text-xs font-bold shadow-sm transition-all">
+            <button type="button" onClick={() => { setShowTypeModal(false); setShowCategoryModal(true); }} className="w-full px-4 py-2.5 bg-[#0F9F8F] hover:bg-[#0B8275] text-white rounded-xl text-xs font-bold shadow-sm transition-all">
               Go to Category Registry
             </button>
             <button type="button" onClick={() => setShowTypeModal(false)} className="w-full mt-2 px-4 py-2.5 bg-slate-800 border border-white/5 text-slate-400 hover:text-white rounded-xl text-xs font-semibold transition-all">
@@ -513,13 +545,13 @@ function AddCategoryModal({ onClose, onSaved }: { onClose: () => void; onSaved: 
   };
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-955/80 backdrop-blur-sm p-4">
-      <div className="bg-slate-900 border border-white/10 shadow-[0_24px_50px_rgba(0,0,0,0.4)] rounded-2xl max-w-sm w-full p-6">
+      <div className="bg-white border border-[#E2E8F0] rounded-lg text-[#0F172A] max-w-sm w-full p-6">
         <h3 className="text-sm font-bold text-white mb-4 uppercase tracking-wider text-slate-400 text-[10px]">+ Create Item Category</h3>
         <form onSubmit={handleSubmit}>
           <input type="text" value={name} onChange={(e) => setName(e.target.value)} placeholder="Category title..." className="w-full bg-slate-950/60 border border-white/10 rounded-xl px-4 py-2 text-xs text-slate-205 focus:outline-none mb-4" autoFocus />
           <div className="flex justify-end gap-2.5">
             <button type="button" onClick={onClose} className="px-4 py-2.5 bg-slate-800 border border-white/5 text-slate-400 hover:text-white rounded-xl text-xs font-semibold">Cancel</button>
-            <button type="submit" disabled={loading} className="px-4 py-2.5 bg-gradient-to-tr from-teal-600 to-teal-500 text-white rounded-xl hover:from-teal-500 text-xs font-bold shadow-sm disabled:opacity-40">Save Category</button>
+            <button type="submit" disabled={loading} className="px-4 py-2.5 bg-[#0F9F8F] hover:bg-[#0B8275] text-white rounded-xl text-xs font-bold shadow-sm disabled:opacity-40">Save Category</button>
           </div>
         </form>
       </div>
@@ -549,7 +581,7 @@ function AddSubcategoryModal({ categories, onClose, onSaved }: { categories: Cat
   };
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-955/80 backdrop-blur-sm p-4">
-      <div className="bg-slate-900 border border-white/10 shadow-[0_24px_50px_rgba(0,0,0,0.4)] rounded-2xl max-w-sm w-full p-6">
+      <div className="bg-white border border-[#E2E8F0] rounded-lg text-[#0F172A] max-w-sm w-full p-6">
         <h3 className="text-sm font-bold text-white mb-4 uppercase tracking-wider text-slate-400 text-[10px]">+ Create Item Subcategory</h3>
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
@@ -567,7 +599,7 @@ function AddSubcategoryModal({ categories, onClose, onSaved }: { categories: Cat
           </div>
           <div className="flex justify-end gap-2.5">
             <button type="button" onClick={onClose} className="px-4 py-2.5 bg-slate-800 border border-white/5 text-slate-400 hover:text-white rounded-xl text-xs font-semibold">Cancel</button>
-            <button type="submit" disabled={loading} className="px-4 py-2.5 bg-gradient-to-tr from-teal-600 to-teal-500 text-white rounded-xl hover:from-teal-500 text-xs font-bold shadow-sm disabled:opacity-40">Save Subcategory</button>
+            <button type="submit" disabled={loading} className="px-4 py-2.5 bg-[#0F9F8F] hover:bg-[#0B8275] text-white rounded-xl text-xs font-bold shadow-sm disabled:opacity-40">Save Subcategory</button>
           </div>
         </form>
       </div>

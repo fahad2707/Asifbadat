@@ -1,12 +1,15 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { Plus, Eye, FileText, Truck, Search, X, Trash2, Download } from 'lucide-react';
 import adminApi from '@/lib/admin-api';
 import toast from 'react-hot-toast';
 import { downloadPdfFromResponse, openPdfFromResponse } from '@/lib/download-pdf';
 import Link from 'next/link';
 import SearchableProductDropdown from '@/components/admin/SearchableProductDropdown';
+import { adminUi } from '@/lib/admin-ui';
+import { exportPurchaseOrdersToExcel } from '@/lib/export-purchase-orders-excel';
 
 interface POItem {
   product_id: string;
@@ -57,6 +60,8 @@ interface CreateRow {
 }
 
 export default function PurchaseOrdersPage() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
   const [pos, setPos] = useState<PurchaseOrder[]>([]);
   const [vendors, setVendors] = useState<Vendor[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
@@ -75,10 +80,13 @@ export default function PurchaseOrdersPage() {
   const [showAddVendor, setShowAddVendor] = useState(false);
   const [newVendorName, setNewVendorName] = useState('');
   const [savingVendor, setSavingVendor] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [exporting, setExporting] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   const fetchPOs = async () => {
     try {
-      const res = await adminApi.get('/purchase-orders', { params: search ? { search } : {} });
+      const res = await adminApi.get('/purchase-orders', { params: { limit: 1000, ...(search ? { search } : {}) } });
       setPos(res.data.purchase_orders || []);
     } catch {
       toast.error('Failed to load purchase orders');
@@ -108,6 +116,31 @@ export default function PurchaseOrdersPage() {
   useEffect(() => {
     fetchPOs();
   }, [search]);
+
+  const openCreatePo = () => {
+    const emptyRow = (): CreateRow => ({
+      product_id: '',
+      product_name: '',
+      category_name: '',
+      qty: 1,
+      unit_cost: 0,
+    });
+    setShowCreate(true);
+    setPoNumber('');
+    setPoDate(new Date().toISOString().slice(0, 10));
+    setVendorId('');
+    setBillNum('');
+    setShippingCost(0);
+    setRows(Array.from({ length: 15 }, emptyRow));
+  };
+
+  // Quick command: /admin/purchase-orders?create=1 opens a blank PO form.
+  useEffect(() => {
+    if (searchParams?.get('create') !== '1') return;
+    openCreatePo();
+    router.replace('/admin/purchase-orders', { scroll: false });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams]);
 
   useEffect(() => {
     if (showCreate) {
@@ -203,6 +236,67 @@ export default function PurchaseOrdersPage() {
     }
   };
 
+  const allVisibleSelected = pos.length > 0 && pos.every((p) => selectedIds.has(p.id));
+  const someVisibleSelected = pos.some((p) => selectedIds.has(p.id));
+  const selectedRows = pos.filter((p) => selectedIds.has(p.id));
+
+  const toggleOne = (id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const toggleAllVisible = () => {
+    setSelectedIds((prev) => {
+      if (allVisibleSelected) {
+        const next = new Set(prev);
+        pos.forEach((p) => next.delete(p.id));
+        return next;
+      }
+      const next = new Set(prev);
+      pos.forEach((p) => next.add(p.id));
+      return next;
+    });
+  };
+
+  const handleExport = async (rows: PurchaseOrder[]) => {
+    if (rows.length === 0 || exporting) return;
+    setExporting(true);
+    try {
+      await exportPurchaseOrdersToExcel(rows);
+      toast.success(`Exported ${rows.length} ${rows.length === 1 ? 'purchase order' : 'purchase orders'} to Excel`);
+    } catch {
+      toast.error('Export failed');
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  const handleDeleteSelected = async () => {
+    if (selectedRows.length === 0 || deleting) return;
+    const n = selectedRows.length;
+    if (!confirm(`Delete ${n} selected ${n === 1 ? 'purchase order' : 'purchase orders'}?\n\nReceived POs stay in the books — export those instead.`)) return;
+    setDeleting(true);
+    let ok = 0;
+    const failures: string[] = [];
+    for (const po of selectedRows) {
+      try {
+        await adminApi.delete(`/purchase-orders/${po.id}`);
+        ok += 1;
+      } catch (error: any) {
+        failures.push(error?.response?.data?.error || `Could not delete ${po.po_number}`);
+      }
+    }
+    setDeleting(false);
+    if (ok) toast.success(`Deleted ${ok} ${ok === 1 ? 'purchase order' : 'purchase orders'}`);
+    if (failures.length) toast.error(failures.slice(0, 3).join(' · '));
+    setSelectedIds(new Set());
+    fetchPOs();
+  };
+
   const pmtStatus = (po: PurchaseOrder) => {
     if (po.status === 'received') return 'Paid';
     if (po.status === 'partial') return 'Partial PMT';
@@ -219,12 +313,12 @@ export default function PurchaseOrdersPage() {
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-extrabold text-white tracking-tight">Purchase order</h1>
+          <h1 className="text-2xl font-semibold text-[#0F172A] tracking-tight">Purchase order</h1>
           <p className="text-xs text-slate-400 mt-1">Issue procurement order sheets to wholesale vendors, track inventory shipments and balances.</p>
         </div>
       </div>
 
-      <div className="bg-slate-900/40 backdrop-blur-lg border border-white/[0.06] border-t-white/[0.18] shadow-[0_12px_40px_rgba(0,0,0,0.25)] rounded-2xl p-4 flex flex-wrap items-center gap-4">
+      <div className="bg-white border border-[#E2E8F0] rounded-lg p-4 flex flex-wrap items-center gap-4">
         <div className="relative flex-1 min-w-[240px]">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
           <input
@@ -238,23 +332,8 @@ export default function PurchaseOrdersPage() {
         <div className="flex items-center gap-2.5 flex-wrap">
           <button
             type="button"
-            onClick={() => {
-              const emptyRow = (): CreateRow => ({
-                product_id: '',
-                product_name: '',
-                category_name: '',
-                qty: 1,
-                unit_cost: 0,
-              });
-              setShowCreate(true);
-              setPoNumber('');
-              setPoDate(new Date().toISOString().slice(0, 10));
-              setVendorId('');
-              setBillNum('');
-              setShippingCost(0);
-              setRows(Array.from({ length: 15 }, emptyRow));
-            }}
-            className="inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-gradient-to-tr from-teal-600 to-teal-500 hover:from-teal-500 hover:to-teal-400 border border-white/10 text-white rounded-xl text-xs font-bold shadow-sm transition-all"
+            onClick={openCreatePo}
+            className="inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-[#0F9F8F] hover:bg-[#0B8275] border-transparent text-white rounded-xl text-xs font-bold shadow-sm transition-all"
           >
             <Plus className="w-3.5 h-3.5" />
             New PO
@@ -262,10 +341,36 @@ export default function PurchaseOrdersPage() {
           <select value={filter} onChange={(e) => setFilter(e.target.value)} className="bg-slate-955/60 border border-white/10 rounded-xl px-3 py-2 text-xs text-slate-200 focus:outline-none focus:ring-1 focus:ring-teal-500">
             <option value="All">All Statuses</option>
           </select>
+          <button
+            type="button"
+            onClick={() => handleExport(pos)}
+            disabled={exporting || pos.length === 0}
+            className={`${adminUi.btnSecondary} disabled:opacity-50`}
+          >
+            <Download className="w-4 h-4" />
+            Export all ({pos.length})
+          </button>
         </div>
       </div>
 
-      <div className="bg-slate-900/40 backdrop-blur-lg border border-white/[0.06] border-t-white/[0.18] shadow-[0_12px_40px_rgba(0,0,0,0.25)] rounded-2xl overflow-hidden">
+      {selectedIds.size > 0 && (
+        <div className="flex flex-wrap items-center gap-3 rounded-md border border-[#E3E5E8] bg-[#F4F5F8] px-4 py-2.5">
+          <span className="text-sm font-medium text-[#1A1A1A]">{selectedIds.size} selected</span>
+          <button type="button" onClick={() => handleExport(selectedRows)} disabled={exporting} className={`${adminUi.btnPrimary} disabled:opacity-50`}>
+            <Download className="w-4 h-4" />
+            {exporting ? 'Exporting…' : 'Export selected to Excel'}
+          </button>
+          <button type="button" onClick={handleDeleteSelected} disabled={deleting} className={`${adminUi.btnDanger} disabled:opacity-50`}>
+            <Trash2 className="w-4 h-4" />
+            {deleting ? 'Deleting…' : 'Delete selected'}
+          </button>
+          <button type="button" onClick={() => setSelectedIds(new Set())} className={adminUi.btnGhost}>
+            Clear selection
+          </button>
+        </div>
+      )}
+
+      <div className="bg-white border border-[#E2E8F0] rounded-lg overflow-hidden">
         {loading ? (
           <div className="flex items-center justify-center py-16">
             <div className="animate-spin rounded-full h-8 w-8 border-2 border-teal-500 border-t-transparent" />
@@ -275,6 +380,16 @@ export default function PurchaseOrdersPage() {
             <table className="w-full border-collapse">
               <thead className="bg-slate-950/60 text-slate-400 border-b border-white/5">
                 <tr>
+                  <th className="w-10 px-4 py-3">
+                    <input
+                      type="checkbox"
+                      aria-label="Select all"
+                      checked={allVisibleSelected}
+                      ref={(el) => { if (el) el.indeterminate = !allVisibleSelected && someVisibleSelected; }}
+                      onChange={toggleAllVisible}
+                      className="h-4 w-4 rounded border-[#C7C7C7] accent-black cursor-pointer"
+                    />
+                  </th>
                   <th className="text-left py-3.5 px-4 text-[10px] font-bold uppercase tracking-wider">Date</th>
                   <th className="text-left py-3.5 px-4 text-[10px] font-bold uppercase tracking-wider">PO ID</th>
                   <th className="text-left py-3.5 px-4 text-[10px] font-bold uppercase tracking-wider">Supplier ID</th>
@@ -293,7 +408,7 @@ export default function PurchaseOrdersPage() {
               <tbody>
                 {pos.length === 0 ? (
                   <tr>
-                    <td colSpan={13} className="py-16 text-center text-slate-500 text-xs font-semibold">
+                    <td colSpan={14} className="py-16 text-center text-slate-500 text-xs font-semibold">
                       No purchase orders yet. Click Draft PO to register imports.
                     </td>
                   </tr>
@@ -302,7 +417,16 @@ export default function PurchaseOrdersPage() {
                     const paySt = pmtStatus(po);
                     const shipSt = shippingStatus(po);
                     return (
-                      <tr key={po.id} className="border-b border-white/5 hover:bg-white/[0.02] transition-colors">
+                      <tr key={po.id} className={`border-b border-white/5 hover:bg-white/[0.02] transition-colors ${selectedIds.has(po.id) ? 'bg-[#F4F5F8]' : ''}`}>
+                        <td className="py-3 px-4" onClick={(e) => e.stopPropagation()}>
+                          <input
+                            type="checkbox"
+                            aria-label={`Select ${po.po_number}`}
+                            checked={selectedIds.has(po.id)}
+                            onChange={() => toggleOne(po.id)}
+                            className="h-4 w-4 rounded border-[#C7C7C7] accent-black cursor-pointer"
+                          />
+                        </td>
                         <td className="py-3 px-4 text-xs text-slate-350">{po.created_at ? new Date(po.created_at).toLocaleDateString('en-US', { month: 'short', day: '2-digit', year: 'numeric' }) : '—'}</td>
                         <td className="py-3 px-4 text-xs font-mono font-bold text-teal-450">{po.po_number}</td>
                         <td className="py-3 px-4 text-xs text-slate-300 font-mono">{po.supplier_id || '—'}</td>
@@ -330,7 +454,7 @@ export default function PurchaseOrdersPage() {
                               onClick={async () => {
                                 try {
                                   const res = await adminApi.get(`/purchase-orders/${po.id}/pdf`, { responseType: 'blob' });
-                                  if (downloadPdfFromResponse(res.data, `po-${po.po_number || po.id}.pdf`, res.headers['content-type'])) {
+                                  if (await downloadPdfFromResponse(res.data, `po-${po.po_number || po.id}.pdf`, res.headers['content-type'])) {
                                     toast.success('PDF downloaded');
                                   }
                                 } catch {
@@ -356,178 +480,161 @@ export default function PurchaseOrdersPage() {
       </div>
 
       {showCreate && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-sm p-4 overflow-y-auto">
-          <div className="bg-slate-900 border border-white/10 shadow-[0_24px_50px_rgba(0,0,0,0.4)] rounded-2xl max-w-5xl w-full my-8 max-h-[90vh] overflow-y-auto">
-            <div className="p-5 border-b border-white/5 flex items-center justify-between">
-              <h2 className="text-lg font-bold text-white">Create Purchase Order</h2>
-              <button type="button" onClick={() => setShowCreate(false)} className="p-1.5 hover:bg-white/5 rounded-lg text-slate-400 hover:text-white transition-all" aria-label="Close">
+        <div className="admin-lightbox fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50" onClick={() => setShowCreate(false)}>
+          <div className="bg-white rounded-xl shadow-xl max-w-6xl w-full max-h-[90vh] overflow-hidden flex flex-col" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between p-4 border-b border-gray-200">
+              <h2 className="text-xl font-bold text-gray-900">New purchase order</h2>
+              <button type="button" onClick={() => setShowCreate(false)} className="p-2 rounded-lg hover:bg-gray-100 text-gray-600" aria-label="Close">
                 <X className="w-5 h-5" />
               </button>
             </div>
 
-            <form onSubmit={handleSavePO} className="p-6 space-y-6">
-              <section className="space-y-4">
-                <h3 className="text-[10px] font-bold text-slate-400 uppercase tracking-wider pb-1.5 border-b border-white/5">PO Metadata</h3>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                  <div className="flex gap-2 items-end">
-                    <div className="flex-1">
-                      <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">PO ID *</label>
-                      <input type="text" value={poNumber} onChange={(e) => setPoNumber(e.target.value)} className="w-full bg-slate-950/60 border border-white/10 rounded-xl px-4 py-2 text-xs text-slate-205 focus:outline-none placeholder-slate-500" placeholder="e.g. P087684" />
-                    </div>
-                    <div>
-                      <button type="button" onClick={generatePoId} className="px-3.5 py-2.5 bg-slate-800 border border-white/5 text-slate-350 hover:text-white rounded-xl text-xs font-semibold shadow-sm transition-all">
-                        Generate
-                      </button>
-                    </div>
-                  </div>
+            <form onSubmit={handleSavePO} className="flex-1 min-h-0 flex flex-col">
+              <div className="flex-1 overflow-y-auto p-4 space-y-4">
+                <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">PO Date *</label>
-                    <input type="date" value={poDate} onChange={(e) => setPoDate(e.target.value)} className="w-full bg-slate-955/60 border border-white/10 rounded-xl px-4 py-2 text-xs text-slate-202 focus:outline-none" />
-                  </div>
-                  <div>
-                    <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">Supplier Name *</label>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Supplier <span className="text-red-600">*</span></label>
                     <select
                       value={vendorId}
                       onChange={(e) => {
                         if (e.target.value === '__add_new__') { setShowAddVendor(true); return; }
                         setVendorId(e.target.value);
                       }}
-                      className="w-full bg-slate-955/60 border border-white/10 rounded-xl px-4 py-2 text-xs text-slate-250 focus:outline-none"
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
                       required
                     >
                       <option value="">Select supplier</option>
-                      <option value="__add_new__">+ Add New Supplier</option>
+                      <option value="__add_new__">+ Add new supplier</option>
                       {vendors.map((v) => (
                         <option key={v.id} value={v.id}>{v.name}</option>
                       ))}
                     </select>
                   </div>
                   <div>
-                    <label className="block text-[10px] font-bold text-slate-450 uppercase tracking-wider mb-2">Supplier ID</label>
-                    <input type="text" value={selectedVendor?.supplier_id ?? ''} readOnly className="w-full bg-slate-955/20 border border-white/5 rounded-xl px-4 py-2 text-xs text-slate-450" />
+                    <label className="block text-sm font-medium text-gray-700 mb-1">PO no.</label>
+                    <div className="flex gap-2">
+                      <input type="text" value={poNumber} onChange={(e) => setPoNumber(e.target.value)} className="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm bg-gray-50" placeholder="e.g. P087684" />
+                      <button type="button" onClick={generatePoId} className="px-3 py-2 border border-gray-300 rounded-lg text-sm hover:bg-gray-50">
+                        Generate
+                      </button>
+                    </div>
                   </div>
                   <div>
-                    <label className="block text-[10px] font-bold text-slate-455 uppercase tracking-wider mb-2">State</label>
-                    <input type="text" value={selectedVendor?.state ?? ''} readOnly className="w-full bg-slate-955/20 border border-white/5 rounded-xl px-4 py-2 text-xs text-slate-450" />
+                    <label className="block text-sm font-medium text-gray-700 mb-1">PO date</label>
+                    <input type="date" value={poDate} onChange={(e) => setPoDate(e.target.value)} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" />
                   </div>
                   <div>
-                    <label className="block text-[10px] font-bold text-slate-455 uppercase tracking-wider mb-2">City</label>
-                    <input type="text" value={selectedVendor?.city ?? ''} readOnly className="w-full bg-slate-955/20 border border-white/5 rounded-xl px-4 py-2 text-xs text-slate-455" />
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Bill reference</label>
+                    <input type="text" value={billNum} onChange={(e) => setBillNum(e.target.value)} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" placeholder="Invoice bill number" />
                   </div>
                   <div>
-                    <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">Bill Reference</label>
-                    <input type="text" value={billNum} onChange={(e) => setBillNum(e.target.value)} className="w-full bg-slate-950/60 border border-white/10 rounded-xl px-4 py-2 text-xs text-slate-205 focus:outline-none" placeholder="Invoice bill number" />
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Supplier ID</label>
+                    <input type="text" value={selectedVendor?.supplier_id ?? ''} readOnly className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-gray-50" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">State / City</label>
+                    <p className="text-sm text-gray-600 bg-gray-50 p-2 rounded-lg">{[selectedVendor?.state, selectedVendor?.city].filter(Boolean).join(', ') || '—'}</p>
                   </div>
                 </div>
-              </section>
 
-              <section className="space-y-4">
-                <div className="flex items-center justify-between pb-1.5 border-b border-white/5">
-                  <h3 className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Purchase Items</h3>
-                  <button type="button" onClick={addRow} className="inline-flex items-center justify-center gap-1.5 px-3 py-1.5 bg-slate-800 border border-white/5 text-slate-300 hover:text-white rounded-lg text-xs font-semibold transition-all">
-                    <Plus className="w-3.5 h-3.5" />
-                    Add Row
-                  </button>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Product or service</label>
+                  <div className="border border-gray-200 rounded-lg overflow-x-auto">
+                    <table className="w-full text-sm min-w-[640px]">
+                      <thead className="bg-gray-50">
+                        <tr>
+                          <th className="text-left py-3 px-4 w-10">#</th>
+                          <th className="text-left py-3 px-4 min-w-[200px]">Product</th>
+                          <th className="text-left py-3 px-4 min-w-[120px]">Category</th>
+                          <th className="text-right py-3 px-4 w-20">Qty</th>
+                          <th className="text-right py-3 px-4 w-28">Unit cost</th>
+                          <th className="text-right py-3 px-4 w-28">Amount</th>
+                          <th className="w-12 px-4" />
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {rows.map((r, idx) => {
+                          const hasProduct = !!(r.product_id || r.product_name);
+                          return (
+                            <tr key={idx} className="border-t border-gray-100 hover:bg-gray-50/50">
+                              <td className="py-2 px-4">{idx + 1}</td>
+                              <td className="py-2 px-4">
+                                <SearchableProductDropdown
+                                  products={products}
+                                  value={r.product_id}
+                                  displayName={r.product_name || undefined}
+                                  onSelect={(p) => updateRow(idx, 'product_id', p.id)}
+                                  placeholder="Search product or scan barcode…"
+                                  showPrice={false}
+                                />
+                              </td>
+                              <td className="py-2 px-4 text-gray-600">{r.category_name || ''}</td>
+                              <td className="py-2 px-4 text-right">
+                                {hasProduct ? (
+                                  <input type="number" min={1} value={r.qty} onChange={(e) => updateRow(idx, 'qty', e.target.value)} className="w-16 text-right border border-gray-300 rounded px-2 py-1" />
+                                ) : (
+                                  <span className="text-gray-400">—</span>
+                                )}
+                              </td>
+                              <td className="py-2 px-4 text-right">
+                                {hasProduct ? (
+                                  <input type="number" min={0} step={0.01} value={r.unit_cost || ''} onChange={(e) => updateRow(idx, 'unit_cost', e.target.value)} className="w-20 text-right border border-gray-300 rounded px-2 py-1" />
+                                ) : (
+                                  <span className="text-gray-400">—</span>
+                                )}
+                              </td>
+                              <td className="py-2 px-4 text-right font-medium">{hasProduct ? `$${(Number(r.qty) * Number(r.unit_cost)).toFixed(2)}` : ''}</td>
+                              <td className="py-2 px-4">
+                                {hasProduct && (
+                                  <button type="button" onClick={() => removeRow(idx)} className="text-red-600 hover:bg-red-50 p-1 rounded" title="Remove row">
+                                    <Trash2 className="w-4 h-4" />
+                                  </button>
+                                )}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                  <div className="mt-3 flex items-center justify-between">
+                    <p className="text-xs text-gray-500">Click any empty row to search or scan a barcode. Amount fills automatically.</p>
+                    <button type="button" onClick={addRow} className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg border border-gray-300 text-xs font-medium text-gray-700 hover:bg-gray-50">
+                      + Add line
+                    </button>
+                  </div>
                 </div>
-                <div className="overflow-x-auto border border-white/5 rounded-xl bg-slate-955/20">
-                  <table className="w-full text-xs min-w-[700px] border-collapse">
-                    <thead className="bg-slate-950/60 text-slate-400 border-b border-white/5">
-                      <tr>
-                        <th className="text-center py-2.5 px-3 w-12 font-bold uppercase tracking-wider text-[9px]">#</th>
-                        <th className="text-left py-2.5 px-4 font-bold uppercase tracking-wider text-[9px]">Product Item</th>
-                        <th className="text-left py-2.5 px-4 font-bold uppercase tracking-wider text-[9px]">Category</th>
-                        <th className="text-right py-2.5 px-4 font-bold uppercase tracking-wider text-[9px]">Quantity</th>
-                        <th className="text-right py-2.5 px-4 font-bold uppercase tracking-wider text-[9px]">Unit Cost</th>
-                        <th className="text-right py-2.5 px-4 font-bold uppercase tracking-wider text-[9px]">Subtotal</th>
-                        <th className="w-10 text-center font-bold uppercase tracking-wider text-[9px]" />
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {rows.map((r, idx) => (
-                        <tr key={idx} className="border-t border-white/5 hover:bg-white/[0.01]">
-                          <td className="py-2.5 px-3 text-center text-xs text-slate-500 font-mono">{idx + 1}</td>
-                          <td className="py-2 px-4">
-                            <SearchableProductDropdown
-                              products={products}
-                              value={r.product_id}
-                              displayName={r.product_name || undefined}
-                              onSelect={(p) => updateRow(idx, 'product_id', p.id)}
-                              placeholder="Search products or scan barcode..."
-                              showPrice={false}
-                            />
-                          </td>
-                          <td className="py-2.5 px-4 text-slate-400">{r.category_name || '—'}</td>
-                          <td className="py-2 px-4 text-right">
-                            <input
-                              type="number"
-                              min={1}
-                              value={r.qty}
-                              onChange={(e) => updateRow(idx, 'qty', e.target.value)}
-                              className="w-16 bg-slate-950/60 border border-white/10 rounded px-2 py-1 text-xs text-right text-slate-200"
-                            />
-                          </td>
-                          <td className="py-2 px-4 text-right">
+
+                <div className="border-t border-gray-200 pt-4">
+                  <div className="flex flex-wrap items-start justify-end gap-8">
+                    {(() => {
+                      const itemSubtotal = rows.reduce((s, r) => s + Number(r.qty) * Number(r.unit_cost), 0);
+                      const grandTotal = itemSubtotal + Number(shippingCost);
+                      return (
+                        <div className="space-y-2 min-w-[200px]">
+                          <p className="text-sm text-gray-600">Subtotal: <span className="font-medium text-gray-900">${itemSubtotal.toFixed(2)}</span></p>
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">Shipping</label>
                             <input
                               type="number"
                               min={0}
                               step={0.01}
-                              value={r.unit_cost || ''}
-                              onChange={(e) => updateRow(idx, 'unit_cost', e.target.value)}
-                              className="w-24 bg-slate-955/60 border border-white/10 rounded px-2 py-1 text-xs text-right text-slate-200 font-mono font-semibold"
+                              value={shippingCost || ''}
+                              onChange={(e) => setShippingCost(Number(e.target.value) || 0)}
+                              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                              placeholder="0.00"
                             />
-                          </td>
-                          <td className="py-2.5 px-4 text-right font-bold text-slate-350 font-mono">${(Number(r.qty) * Number(r.unit_cost)).toFixed(2)}</td>
-                          <td className="py-2 px-4 text-center">
-                            <button type="button" onClick={() => removeRow(idx)} className="p-1 text-slate-405 hover:text-rose-455 hover:bg-rose-500/10 rounded-lg transition-colors" title="Remove row">
-                              <Trash2 className="w-4 h-4" />
-                            </button>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                          </div>
+                          <p className="font-semibold text-gray-900 text-base">Total: ${grandTotal.toFixed(2)}</p>
+                        </div>
+                      );
+                    })()}
+                  </div>
                 </div>
-
-                {/* Subtotal & Shipping */}
-                {(() => {
-                  const itemSubtotal = rows.reduce((s, r) => s + Number(r.qty) * Number(r.unit_cost), 0);
-                  const grandTotal = itemSubtotal + Number(shippingCost);
-                  return (
-                    <div className="flex justify-end mt-4">
-                      <div className="w-80 bg-slate-955/40 border border-white/5 rounded-xl p-4 space-y-2 text-xs text-slate-350">
-                        <div className="flex justify-between">
-                          <span className="text-slate-500 font-bold uppercase text-[9px] tracking-wider">Subtotal</span>
-                          <span className="font-bold text-slate-205 font-mono">${itemSubtotal.toFixed(2)}</span>
-                        </div>
-                        <div className="flex justify-between items-center text-xs">
-                          <span className="text-slate-500 font-bold uppercase text-[9px] tracking-wider">Shipping/Freight Cost</span>
-                          <input
-                            type="number"
-                            min={0}
-                            step={0.01}
-                            value={shippingCost || ''}
-                            onChange={(e) => setShippingCost(Number(e.target.value) || 0)}
-                            className="w-28 bg-slate-950/60 border border-white/10 rounded px-2 py-1 text-xs text-right text-slate-200"
-                            placeholder="0.00"
-                          />
-                        </div>
-                        <div className="flex justify-between border-t border-dashed border-white/10 pt-2 font-bold text-slate-200">
-                          <span className="text-[10px] uppercase font-bold tracking-wider">Grand Total Billing</span>
-                          <span className="text-teal-400 font-mono text-sm">${grandTotal.toFixed(2)}</span>
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })()}
-              </section>
-
-              <div className="flex justify-end gap-2.5 pt-4 border-t border-white/5">
-                <button type="button" onClick={() => setShowCreate(false)} className="px-4 py-2.5 bg-slate-800 border border-white/5 text-slate-400 hover:text-white rounded-xl text-xs font-semibold">
-                  Close
-                </button>
-                <button type="submit" className="px-4 py-2.5 bg-gradient-to-tr from-teal-600 to-teal-500 hover:from-teal-500 hover:to-teal-400 border border-white/10 text-white rounded-xl text-xs font-bold transition-all shadow-sm">
-                  Save Purchase Order
-                </button>
+              </div>
+              <div className="flex justify-end gap-2 p-4 border-t border-gray-200">
+                <button type="button" onClick={() => setShowCreate(false)} className="px-4 py-2 text-gray-700 hover:bg-gray-100 rounded-lg">Cancel</button>
+                <button type="submit" className="px-4 py-2 bg-black text-white rounded-lg hover:bg-[#2C2C2C]">Save</button>
               </div>
             </form>
           </div>
@@ -535,10 +642,14 @@ export default function PurchaseOrdersPage() {
       )}
 
       {showAddVendor && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-955/80 backdrop-blur-sm p-4">
-          <div className="bg-slate-900 border border-white/10 shadow-[0_24px_50px_rgba(0,0,0,0.4)] rounded-2xl max-w-sm w-full p-6" onClick={(e) => e.stopPropagation()}>
-            <h3 className="text-sm font-bold text-white mb-4 uppercase tracking-wider text-slate-400 text-[10px]">+ Register Supplier Vendor</h3>
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/40" onClick={() => { setShowAddVendor(false); setNewVendorName(''); }}>
+          <div className="bg-white rounded-xl shadow-xl max-w-lg w-full" onClick={(e) => e.stopPropagation()}>
+            <div className="p-4 border-b border-gray-200 flex items-center justify-between">
+              <h3 className="text-lg font-bold text-gray-900">Add supplier</h3>
+              <button type="button" onClick={() => { setShowAddVendor(false); setNewVendorName(''); }} className="p-2 rounded-lg hover:bg-gray-100 text-gray-600"><X className="w-5 h-5" /></button>
+            </div>
             <form
+              className="p-4 space-y-3"
               onSubmit={async (e) => {
                 e.preventDefault();
                 if (!newVendorName.trim()) return;
@@ -557,18 +668,21 @@ export default function PurchaseOrdersPage() {
                 }
               }}
             >
-              <input
-                type="text"
-                value={newVendorName}
-                onChange={(e) => setNewVendorName(e.target.value)}
-                placeholder="Supplier business name"
-                className="w-full bg-slate-950/60 border border-white/10 rounded-xl px-4 py-2 text-xs text-slate-200 placeholder-slate-600 focus:outline-none mb-4"
-                autoFocus
-                required
-              />
-              <div className="flex justify-end gap-2.5">
-                <button type="button" onClick={() => { setShowAddVendor(false); setNewVendorName(''); }} className="px-4 py-2 bg-slate-800 border border-white/5 text-slate-450 hover:text-white rounded-xl text-xs font-semibold">Cancel</button>
-                <button type="submit" disabled={savingVendor} className="px-4 py-2 bg-gradient-to-tr from-teal-600 to-teal-500 text-white rounded-xl hover:from-teal-500 text-xs font-bold shadow-sm disabled:opacity-40">{savingVendor ? 'Saving...' : 'Add Supplier'}</button>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Supplier name *</label>
+                <input
+                  type="text"
+                  value={newVendorName}
+                  onChange={(e) => setNewVendorName(e.target.value)}
+                  placeholder="Supplier business name"
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                  autoFocus
+                  required
+                />
+              </div>
+              <div className="flex gap-2 pt-2">
+                <button type="submit" disabled={savingVendor} className="flex-1 py-2 bg-black text-white rounded-lg font-medium hover:bg-[#2C2C2C] disabled:opacity-50">{savingVendor ? 'Saving...' : 'Add supplier'}</button>
+                <button type="button" onClick={() => { setShowAddVendor(false); setNewVendorName(''); }} className="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50">Cancel</button>
               </div>
             </form>
           </div>
@@ -576,24 +690,24 @@ export default function PurchaseOrdersPage() {
       )}
 
       {showPdfModal && savedPoId && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-955/80 backdrop-blur-sm p-4">
-          <div className="bg-slate-900 border border-white/10 shadow-[0_24px_50px_rgba(0,0,0,0.4)] rounded-2xl p-6 max-w-sm w-full" onClick={(e) => e.stopPropagation()}>
-            <h3 className="text-lg font-bold text-white mb-2">Purchase Order Saved</h3>
-            <p className="text-slate-450 text-xs mb-5">Procurement saved. Retrieve or print PO document sheet.</p>
+        <div className="admin-lightbox fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50" onClick={() => { setShowPdfModal(false); setSavedPoId(null); }}>
+          <div className="bg-white rounded-xl shadow-xl p-6 max-w-sm w-full" onClick={(e) => e.stopPropagation()}>
+            <h3 className="text-lg font-semibold text-gray-900 mb-2">Document saved</h3>
+            <p className="text-gray-600 text-sm mb-4">Download or print the purchase order PDF.</p>
             <div className="flex flex-col gap-2">
               <button
                 type="button"
                 onClick={async () => {
                   try {
                     const res = await adminApi.get(`/purchase-orders/${savedPoId}/pdf`, { responseType: 'blob' });
-                    if (downloadPdfFromResponse(res.data, `po-${savedPoId}.pdf`, res.headers['content-type'])) {
+                    if (await downloadPdfFromResponse(res.data, `po-${savedPoId}.pdf`, res.headers['content-type'])) {
                       toast.success('PDF downloaded');
                     }
                   } catch {
                     toast.error('Failed to download PDF');
                   }
                 }}
-                className="w-full px-4 py-2.5 bg-gradient-to-tr from-teal-600 to-teal-500 hover:from-teal-500 border border-white/10 text-white rounded-xl text-xs font-bold transition-all shadow-sm"
+                className="w-full px-4 py-2.5 rounded-lg font-medium bg-black text-white hover:bg-[#2C2C2C]"
               >
                 Download PDF
               </button>
@@ -602,16 +716,16 @@ export default function PurchaseOrdersPage() {
                 onClick={async () => {
                   try {
                     const res = await adminApi.get(`/purchase-orders/${savedPoId}/pdf`, { responseType: 'blob' });
-                    if (openPdfFromResponse(res.data, res.headers['content-type'])) {
+                    if (await openPdfFromResponse(res.data, res.headers['content-type'])) {
                       toast.success('Opening PDF for print');
                     }
                   } catch {
                     toast.error('Failed to open PDF for printing');
                   }
                 }}
-                className="w-full px-4 py-2.5 bg-slate-800 border border-white/5 text-slate-350 hover:text-white rounded-xl text-xs font-semibold transition-all"
+                className="w-full px-4 py-2.5 rounded-lg font-medium border border-gray-300 text-gray-700 hover:bg-gray-50"
               >
-                Print PO PDF
+                Print PDF
               </button>
               <button
                 type="button"
@@ -619,9 +733,9 @@ export default function PurchaseOrdersPage() {
                   setShowPdfModal(false);
                   setSavedPoId(null);
                 }}
-                className="w-full px-4 py-2.5 bg-slate-900 border border-white/5 text-slate-500 hover:text-slate-400 rounded-xl text-xs font-semibold transition-all"
+                className="w-full px-4 py-2.5 rounded-lg font-medium text-gray-600 hover:bg-gray-100"
               >
-                Finish
+                Done
               </button>
             </div>
           </div>

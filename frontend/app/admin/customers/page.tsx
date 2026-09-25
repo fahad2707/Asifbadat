@@ -6,6 +6,7 @@ import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Plus, Edit, Search, User, Trash2, FileDown, X, FileText, DollarSign, ChevronDown } from 'lucide-react';
 import adminApi from '@/lib/admin-api';
+import { adminUi } from '@/lib/admin-ui';
 import toast from 'react-hot-toast';
 import ReceivePaymentLightbox from '@/components/admin/ReceivePaymentLightbox';
 
@@ -146,6 +147,17 @@ export default function CustomersPage() {
     fetchSummary();
     fetchBalances();
   }, []);
+
+  // Quick command: /admin/customers?create=1 opens a blank customer form.
+  useEffect(() => {
+    if (searchParams?.get('create') !== '1') return;
+    setEditing(null);
+    setCustomerFormDirty(false);
+    setForm({ name: '', phone: '', email: '', company: '', address: '', billing_address: '', city: '', state: '', zip: '', payment_terms: '', notes: '', customer_code: '' });
+    setShowModal(true);
+    router.replace('/admin/customers', { scroll: false });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams]);
 
   useEffect(() => {
     if (!editIdFromUrl || customers.length === 0) return;
@@ -317,12 +329,11 @@ export default function CustomersPage() {
 
   const getOpenBalance = (customerId: string) => balances[customerId] ?? 0;
 
-  // Liquid Glass Aesthetic Classes
-  const glassPanelClass = `bg-slate-900/40 backdrop-blur-lg border border-white/[0.06] border-t-white/[0.18] shadow-[0_12px_40px_rgba(0,0,0,0.25),inset_0_1px_0_rgba(255,255,255,0.1)] rounded-2xl p-5`;
-  const glassCardClass = `bg-slate-950/40 border border-white/[0.04] border-t-white/[0.12] rounded-xl p-4`;
-  const glassInputClass = `w-full bg-slate-950/60 border border-white/10 rounded-xl px-4 py-2.5 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-teal-500`;
-  const glassButtonClass = `inline-flex items-center gap-2 px-3.5 py-2.5 bg-gradient-to-b from-white/[0.10] to-white/[0.02] border border-white/[0.08] hover:bg-white/[0.06] active:scale-[0.98] rounded-xl text-xs font-semibold text-white transition-all cursor-pointer`;
-  const glassPrimaryBtn = `inline-flex items-center gap-2 px-5 py-3 bg-gradient-to-tr from-teal-600 to-teal-500 hover:from-teal-500 hover:to-teal-400 border border-white/10 active:scale-[0.98] rounded-xl text-xs font-bold text-white transition-all shadow-md shadow-teal-500/10 cursor-pointer`;
+  const glassPanelClass = `${adminUi.panel} p-5`;
+  const glassCardClass = `${adminUi.panel} p-4`;
+  const glassInputClass = adminUi.field;
+  const glassButtonClass = adminUi.btnSecondary;
+  const glassPrimaryBtn = adminUi.btnPrimary;
 
   return (
     <div className="space-y-6">
@@ -330,8 +341,8 @@ export default function CustomersPage() {
       {/* Title block */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-extrabold text-white tracking-tight">Customers</h1>
-          <p className="text-slate-400 text-xs mt-1">Manage B2B Customer Profiles, credit accounts, and statements.</p>
+          <h1 className={adminUi.pageTitle}>Customers</h1>
+          <p className={`${adminUi.meta} mt-1`}>Manage B2B Customer Profiles, credit accounts, and statements.</p>
         </div>
         <div className="flex items-center gap-2">
           <button
@@ -353,25 +364,25 @@ export default function CustomersPage() {
       {summary && (
         <div className={glassPanelClass}>
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4 mb-3">
-            <div className="text-center p-3 rounded-lg bg-slate-950/40 border border-white/5">
-              <p className="text-xl font-black text-white">$0.00</p>
-              <p className="text-[10px] text-slate-500 font-bold uppercase tracking-wider mt-0.5">0 estimates</p>
+            <div className={`text-center p-3 ${adminUi.panel}`}>
+              <p className={adminUi.metric}>$0.00</p>
+              <p className={`${adminUi.label} mt-1`}>0 estimates</p>
             </div>
-            <div className="text-center p-3 rounded-lg bg-slate-950/40 border border-white/5">
-              <p className="text-xl font-black text-white">$0.00</p>
-              <p className="text-[10px] text-slate-500 font-bold uppercase tracking-wider mt-0.5">Unbilled income</p>
+            <div className={`text-center p-3 ${adminUi.panel}`}>
+              <p className={adminUi.metric}>$0.00</p>
+              <p className={`${adminUi.label} mt-1`}>Unbilled income</p>
             </div>
-            <button type="button" onClick={() => router.push('/admin/invoices?unpaid_only=1')} className="text-center p-3 rounded-lg bg-purple-950/20 border border-purple-500/25 hover:bg-purple-950/30 transition-all">
-              <p className="text-xl font-black text-purple-400">${Number(summary.overdueTotal ?? 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}</p>
-              <p className="text-[10px] text-purple-300/80 font-bold uppercase tracking-wider mt-0.5">{(summary.overdueCount ?? 0)} overdue invoices</p>
+            <button type="button" onClick={() => router.push('/admin/invoices?unpaid_only=1')} className={`text-center p-3 ${adminUi.panel} hover:bg-[#F1F5F9]`}>
+              <p className="text-2xl font-semibold tabular-nums text-[#DC2626]">${Number(summary.overdueTotal ?? 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}</p>
+              <p className={`${adminUi.label} mt-1`}>{(summary.overdueCount ?? 0)} overdue invoices</p>
             </button>
-            <button type="button" onClick={() => router.push('/admin/invoices?unpaid_only=1')} className="text-center p-3 rounded-lg bg-amber-950/20 border border-amber-500/25 hover:bg-amber-950/30 transition-all">
-              <p className="text-xl font-black text-amber-400">${Number(summary.openTotal ?? 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}</p>
-              <p className="text-[10px] text-amber-300/80 font-bold uppercase tracking-wider mt-0.5">{(summary.openCount ?? 0)} open invoices</p>
+            <button type="button" onClick={() => router.push('/admin/invoices?unpaid_only=1')} className={`text-center p-3 ${adminUi.panel} hover:bg-[#F1F5F9]`}>
+              <p className="text-2xl font-semibold tabular-nums text-[#D97706]">${Number(summary.openTotal ?? 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}</p>
+              <p className={`${adminUi.label} mt-1`}>{(summary.openCount ?? 0)} open invoices</p>
             </button>
-            <div className="text-center p-3 rounded-lg bg-teal-950/20 border border-teal-500/25">
-              <p className="text-xl font-black text-teal-400">${Number(summary.recentlyPaidTotal ?? 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}</p>
-              <p className="text-[10px] text-teal-300/80 font-bold uppercase tracking-wider mt-0.5">{(summary.paidCount ?? 0)} recently paid</p>
+            <div className={`text-center p-3 ${adminUi.panel}`}>
+              <p className="text-2xl font-semibold tabular-nums text-[#16A34A]">${Number(summary.recentlyPaidTotal ?? 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}</p>
+              <p className={`${adminUi.label} mt-1`}>{(summary.paidCount ?? 0)} recently paid</p>
             </div>
           </div>
           <div className="h-2 rounded-full overflow-hidden flex bg-slate-950 border border-white/5">
@@ -382,9 +393,9 @@ export default function CustomersPage() {
               const recentW = (Number(summary.recentlyPaidTotal) || 0) / total * 100;
               return (
                 <>
-                  <div className="bg-purple-600 h-full transition-all" style={{ width: `${Math.max(0, overdueW)}%` }} />
-                  <div className="bg-amber-600 h-full transition-all" style={{ width: `${Math.max(0, openW)}%` }} />
-                  <div className="bg-teal-600 h-full flex-1 transition-all" style={{ width: `${Math.max(0, recentW)}%` }} />
+                  <div className="h-full transition-all bg-[#DC2626]" style={{ width: `${Math.max(0, overdueW)}%` }} />
+                  <div className="h-full transition-all bg-[#D97706]" style={{ width: `${Math.max(0, openW)}%` }} />
+                  <div className="h-full flex-1 transition-all bg-[#16A34A]" style={{ width: `${Math.max(0, recentW)}%` }} />
                 </>
               );
             })()}
@@ -470,7 +481,7 @@ export default function CustomersPage() {
                                 setActionDropdownAnchor(e.currentTarget.getBoundingClientRect());
                               }
                             }}
-                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-[#0f766e] text-white hover:bg-[#0d6b63]"
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-[#0F9F8F] text-white hover:bg-[#0B8275]"
                           >
                             {openBal > 0 ? 'Receive payment' : 'Create invoice'}
                             <ChevronDown className="w-3.5 h-3.5" />
@@ -499,7 +510,7 @@ export default function CustomersPage() {
           <>
             <div className="fixed inset-0 z-[100]" aria-hidden onClick={(e) => { e.stopPropagation(); closeDropdown(); }} />
             <div
-              className="fixed z-[101] py-1.5 bg-slate-950 border border-white/10 rounded-xl shadow-[0_10px_30px_rgba(0,0,0,0.55)] min-w-[170px] backdrop-filter backdrop-blur-xl text-xs font-semibold"
+              className="fixed z-[101] py-1.5 bg-white border border-[#E2E8F0] rounded-lg min-w-[170px] text-xs font-medium text-[#0F172A]"
               style={{ top: actionDropdownAnchor.bottom + 4, right: typeof window !== 'undefined' ? window.innerWidth - actionDropdownAnchor.right : 0 }}
             >
               {openBal > 0 && (
@@ -522,10 +533,10 @@ export default function CustomersPage() {
       {/* Customer Form Modal Dialog */}
       {showModal && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4" onClick={handleCustomerModalClose}>
-          <div className="bg-slate-950/95 border border-white/10 rounded-2xl shadow-2xl max-w-lg w-full max-h-[90vh] overflow-hidden flex flex-col relative text-white" onClick={(e) => e.stopPropagation()}>
+          <div className="bg-white border border-[#E2E8F0] rounded-lg max-w-lg w-full max-h-[90vh] overflow-hidden flex flex-col relative text-[#0F172A]" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between p-5 border-b border-white/10 shrink-0">
               <h2 className="text-lg font-black">{editing ? 'Edit B2B Customer' : 'Add B2B Customer'}</h2>
-              <button type="button" onClick={handleCustomerModalClose} className="p-2 rounded-xl bg-slate-900 border border-white/5 text-slate-450 hover:text-white" aria-label="Close">
+              <button type="button" onClick={handleCustomerModalClose} className="p-2 rounded-md border border-[#CBD5E1] text-[#64748B] hover:bg-[#F1F5F9] hover:text-[#0F172A]" aria-label="Close">
                 <X className="w-4 h-4" />
               </button>
             </div>
@@ -665,7 +676,7 @@ export default function CustomersPage() {
                 </div>
               )}
               <div className="flex gap-3 pt-4">
-                <button type="submit" className="flex-1 px-5 py-3 rounded-xl bg-gradient-to-tr from-teal-600 to-teal-500 text-xs font-bold text-white shadow-md shadow-teal-500/10 hover:from-teal-500 hover:to-teal-400 transition-all cursor-pointer">
+                <button type="submit" className={`flex-1 ${adminUi.btnPrimary}`}>
                   {editing ? 'Update Customer' : 'Create Customer'}
                 </button>
                 <button
@@ -679,7 +690,7 @@ export default function CustomersPage() {
             </form>
             {showCustomerCloseConfirm && (
               <div className="absolute inset-0 flex items-center justify-center bg-black/60 rounded-2xl z-10 p-4">
-                <div className="bg-slate-950 border border-white/10 rounded-xl p-4 max-w-sm w-full">
+                <div className="bg-white border border-[#E2E8F0] rounded-lg p-4 max-w-sm w-full">
                   <p className="text-white font-medium mb-3">You have unsaved changes.</p>
                   <div className="flex gap-2 justify-end">
                     <button type="button" onClick={handleCustomerCloseWithoutSaving} className="px-3 py-2 text-slate-400 hover:text-white rounded-lg text-xs font-semibold">Discard Changes</button>
@@ -694,10 +705,10 @@ export default function CustomersPage() {
 
       {detailCustomer && (
         <div className="fixed inset-0 bg-black/65 backdrop-blur-sm flex justify-end z-50" onClick={() => setDetailCustomer(null)}>
-          <div className="bg-slate-950 border-l border-white/10 w-full max-w-xl shadow-2xl overflow-y-auto text-white" onClick={(e) => e.stopPropagation()}>
-            <div className="p-6 border-b border-white/10 flex items-center justify-between sticky top-0 bg-slate-950/90 backdrop-blur">
+          <div className="bg-white border-l border-[#E2E8F0] w-full max-w-xl overflow-y-auto text-[#0F172A]" onClick={(e) => e.stopPropagation()}>
+            <div className="p-6 border-b border-[#E2E8F0] flex items-center justify-between sticky top-0 bg-white">
               <h2 className="text-lg font-black">Customer Details Summary</h2>
-              <button type="button" onClick={() => setDetailCustomer(null)} className="p-2 rounded-xl bg-slate-900 border border-white/5 text-slate-450 hover:text-white"><X className="w-4 h-4" /></button>
+              <button type="button" onClick={() => setDetailCustomer(null)} className="p-2 rounded-md border border-[#CBD5E1] text-[#64748B] hover:bg-[#F1F5F9] hover:text-[#0F172A]"><X className="w-4 h-4" /></button>
             </div>
             <div className="p-6 space-y-6 text-xs font-semibold">
               <div>
@@ -739,7 +750,7 @@ export default function CustomersPage() {
                 </div>
               </div>
               <div className="pt-4 border-t border-white/10 flex justify-end">
-                <button type="button" onClick={() => { openEdit(detailCustomer); setDetailCustomer(null); }} className="px-4 py-2 bg-gradient-to-tr from-teal-600 to-teal-500 hover:from-teal-500 hover:to-teal-400 border border-white/10 text-white rounded-xl text-xs font-bold">
+                <button type="button" onClick={() => { openEdit(detailCustomer); setDetailCustomer(null); }} className={adminUi.btnPrimary}>
                   Edit B2B Customer Info
                 </button>
               </div>

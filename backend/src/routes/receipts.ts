@@ -1,6 +1,7 @@
 import express from 'express';
+import mongoose from 'mongoose';
 import Receipt from '../models/Receipt';
-import Customer from '../models/Customer';
+import BankAccount from '../models/BankAccount';
 import { authenticateAdmin, AuthRequest } from '../middleware/auth';
 import { httpErrorFromPayment, paymentApplication } from '../services/paymentApplication';
 
@@ -10,10 +11,125 @@ function generateTrxId() {
   return 'RT' + Date.now().toString(36).toUpperCase().slice(-5) + Math.random().toString(36).substring(2, 5).toUpperCase();
 }
 
+function isArchivedReceipt(r: { state?: string | null }) {
+  return r.state === 'archived';
+}
+
+function isDepositedReceipt(r: { state?: string | null; bank_account_id?: unknown }) {
+  if (isArchivedReceipt(r)) return false;
+  if (r.state === 'deposited') return true;
+  if (r.state === 'pending') return false;
+  return !!r.bank_account_id;
+}
+
+function depositAt(r: { city?: string | null; trx_date?: Date | string }) {
+  const raw = String(r.city || '');
+  if (/^\d{4}-\d{2}-\d{2}/.test(raw)) {
+    const d = new Date(raw);
+    if (!Number.isNaN(d.getTime())) return d;
+  }
+  return r.trx_date ? new Date(r.trx_date) : new Date(0);
+}
+
+function periodBounds(period: string) {
+  const end = new Date();
+  const start = new Date(end);
+  start.setHours(0, 0, 0, 0);
+  if (period === 'week') start.setDate(start.getDate() - 6);
+  else if (period === '2weeks') start.setDate(start.getDate() - 13);
+  else if (period === 'month') start.setMonth(start.getMonth() - 1);
+  else if (period === '2months') start.setMonth(start.getMonth() - 2);
+  return { start, end };
+}
+
+function toReceiptRow(r: any) {
+  const deposited = isDepositedReceipt({
+    state: r.state,
+    bank_account_id: r.bank_account_id?._id || r.bank_account_id,
+  });
+  return {
+    id: r._id.toString(),
+    trx_date: r.trx_date,
+    trx_id: r.trx_id,
+    customer_id: r.customer_id?.toString(),
+    customer_name: r.customer_name,
+    bank_account_id: r.bank_account_id?._id?.toString() || (r.bank_account_id && typeof r.bank_account_id === 'string' ? r.bank_account_id : undefined),
+    bank_account_name: r.bank_account_id?.name,
+    state: r.state,
+    city: r.city,
+    so_id: r.so_id,
+    invoice_num: r.invoice_num,
+    pmt_mode: r.pmt_mode,
+    amount_received: r.amount_received,
+    created_at: r.created_at,
+    deposit_status: isArchivedReceipt(r) ? 'archived' : deposited ? 'deposited' : 'pending',
+    deposited_at: deposited || isArchivedReceipt(r) ? depositAt(r).toISOString() : undefined,
+  };
+}
+
+// Overview of deposited totals by bank for a time window. Sums stored amounts only.
+router.get('/overview', authenticateAdmin, async (req: AuthRequest, res) => {
+  try {
+    const period = String(req.query.period || 'today');
+    const { start, end } = periodBounds(period);
+    const [receipts, banks] = await Promise.all([
+      Receipt.find({}).populate('bank_account_id', 'name').limit(2000).lean(),
+      BankAccount.find({ is_active: true }).select('name').lean(),
+    ]);
+
+    let pending_total = 0;
+    let pending_count = 0;
+    const byBank: Record<string, { id: string; name: string; amount: number; count: number }> = {};
+    for (const b of banks) {
+      const id = (b as any)._id.toString();
+      byBank[id] = { id, name: (b as any).name, amount: 0, count: 0 };
+    }
+    byBank['unassigned'] = { id: 'unassigned', name: 'Unassigned', amount: 0, count: 0 };
+
+    let total_deposited = 0;
+    let deposited_count = 0;
+    for (const raw of receipts) {
+      const r = raw as any;
+      if (isArchivedReceipt(r)) continue;
+      const deposited = isDepositedReceipt({ state: r.state, bank_account_id: r.bank_account_id });
+      const amount = Number(r.amount_received) || 0;
+      if (!deposited) {
+        pending_total += amount;
+        pending_count += 1;
+        continue;
+      }
+      const when = depositAt(r);
+      if (when < start || when > end) continue;
+      total_deposited += amount;
+      deposited_count += 1;
+      const bankId = r.bank_account_id?._id?.toString() || 'unassigned';
+      if (!byBank[bankId]) {
+        byBank[bankId] = { id: bankId, name: r.bank_account_id?.name || 'Bank', amount: 0, count: 0 };
+      }
+      byBank[bankId].amount += amount;
+      byBank[bankId].count += 1;
+    }
+
+    res.json({
+      period,
+      from: start.toISOString(),
+      to: end.toISOString(),
+      total_deposited,
+      deposited_count,
+      pending_total,
+      pending_count,
+      banks: Object.values(byBank).filter((b) => b.id !== 'unassigned' || b.amount > 0),
+    });
+  } catch (error) {
+    console.error('Receipts overview error:', error);
+    res.status(500).json({ error: 'Failed to load bank overview' });
+  }
+});
+
 // List receipts (bank transactions)
 router.get('/', authenticateAdmin, async (req: AuthRequest, res) => {
   try {
-    const { search, bank_account_id } = req.query;
+    const { search, bank_account_id, deposit_status } = req.query;
     let query: any = {};
     if (search && typeof search === 'string') {
       query.$or = [
@@ -30,24 +146,11 @@ router.get('/', authenticateAdmin, async (req: AuthRequest, res) => {
       .sort({ trx_date: -1, created_at: -1 })
       .limit(500)
       .lean();
-    res.json({
-      receipts: receipts.map((r: any) => ({
-        id: r._id.toString(),
-        trx_date: r.trx_date,
-        trx_id: r.trx_id,
-        customer_id: r.customer_id?.toString(),
-        customer_name: r.customer_name,
-        bank_account_id: r.bank_account_id?._id?.toString(),
-        bank_account_name: r.bank_account_id?.name,
-        state: r.state,
-        city: r.city,
-        so_id: r.so_id,
-        invoice_num: r.invoice_num,
-        pmt_mode: r.pmt_mode,
-        amount_received: r.amount_received,
-        created_at: r.created_at,
-      })),
-    });
+    let rows = receipts.map(toReceiptRow);
+    if (deposit_status === 'pending' || deposit_status === 'deposited' || deposit_status === 'archived') {
+      rows = rows.filter((r) => r.deposit_status === deposit_status);
+    }
+    res.json({ receipts: rows });
   } catch (error) {
     console.error('List receipts error:', error);
     res.status(500).json({ error: 'Failed to fetch receipts' });
@@ -73,6 +176,7 @@ router.post('/', authenticateAdmin, async (req: AuthRequest, res) => {
         bankAccountId: bank_account_id,
         trxId: trx_id,
         customerName: customer_name,
+        notes: so_id,
       });
       return res.status(201).json({
         id: applied.receipt.id,
@@ -87,14 +191,16 @@ router.post('/', authenticateAdmin, async (req: AuthRequest, res) => {
     }
 
     const finalTrxId = trx_id || generateTrxId();
+    const when = trx_date ? new Date(trx_date) : new Date();
+    const hasBank = !!(bank_account_id && mongoose.Types.ObjectId.isValid(String(bank_account_id)));
     const receipt = await Receipt.create({
       trx_id: finalTrxId,
-      trx_date: trx_date ? new Date(trx_date) : new Date(),
+      trx_date: when,
       customer_id: customer_id || null,
       customer_name: customer_name || '',
-      bank_account_id: bank_account_id || null,
-      state: state || '',
-      city: city || '',
+      bank_account_id: hasBank ? bank_account_id : null,
+      state: hasBank ? 'deposited' : (state || 'pending'),
+      city: hasBank ? when.toISOString() : (city || ''),
       so_id: so_id || '',
       invoice_num: '',
       so_balance: so_balance != null ? Number(so_balance) : 0,
@@ -120,6 +226,53 @@ router.post('/', authenticateAdmin, async (req: AuthRequest, res) => {
 // Generate Trx ID (for UI)
 router.get('/generate-id', authenticateAdmin, (req, res) => {
   res.json({ trx_id: generateTrxId() });
+});
+
+// Mark a received payment as deposited. Does not change invoice amounts.
+router.post('/:id/deposit', authenticateAdmin, async (req: AuthRequest, res) => {
+  try {
+    const { bank_account_id, deposit_date, deposit_time } = req.body || {};
+    if (!bank_account_id || !mongoose.Types.ObjectId.isValid(String(bank_account_id))) {
+      return res.status(400).json({ error: 'Select a bank account.' });
+    }
+    const day = String(deposit_date || '').trim();
+    if (!day) return res.status(400).json({ error: 'Deposit date is required.' });
+    const time = String(deposit_time || '').trim() || new Date().toISOString().slice(11, 16);
+    const depositedAt = new Date(`${day}T${time}`);
+    if (Number.isNaN(depositedAt.getTime())) {
+      return res.status(400).json({ error: 'Invalid deposit date or time.' });
+    }
+
+    const result = await paymentApplication.updateReceiptLifecycle(req.params.id, {
+      bank_account_id: String(bank_account_id),
+      state: 'deposited',
+      city: depositedAt.toISOString(),
+    });
+    res.json({
+      success: true,
+      id: result.receipt.id,
+      deposit_status: 'deposited',
+      deposited_at: depositedAt.toISOString(),
+    });
+  } catch (error) {
+    const mapped = httpErrorFromPayment(error);
+    if (mapped) return res.status(mapped.status).json(mapped.body);
+    console.error('Deposit receipt error:', error);
+    res.status(500).json({ error: 'Failed to mark as deposited' });
+  }
+});
+
+// Hide a receipt from Pending/Deposited without changing invoice amounts.
+router.post('/:id/archive', authenticateAdmin, async (req: AuthRequest, res) => {
+  try {
+    const result = await paymentApplication.updateReceiptLifecycle(req.params.id, { state: 'archived' });
+    res.json({ success: true, id: result.receipt.id, deposit_status: 'archived' });
+  } catch (error) {
+    const mapped = httpErrorFromPayment(error);
+    if (mapped) return res.status(mapped.status).json(mapped.body);
+    console.error('Archive receipt error:', error);
+    res.status(500).json({ error: 'Failed to archive transaction' });
+  }
 });
 
 // Update receipt. Invoice-applied rows adjust Invoice.amount_paid by the amount delta.

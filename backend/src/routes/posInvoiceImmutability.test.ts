@@ -107,7 +107,10 @@ test('PUT route rejects POS sale invoice types before save', () => {
   const posSrc = readFileSync(join(process.cwd(), 'src/routes/pos.ts'), 'utf8');
   assert.equal(posSrc.includes("router.put("), false);
   assert.equal(posSrc.includes("router.delete("), false);
-  assert.equal(src.includes("router.delete("), false);
+  const deleteAt = src.indexOf("router.delete('/:id'");
+  assert.ok(deleteAt >= 0, 'invoice delete exists for quotations / unpaid invoices');
+  const deletePosGuard = src.indexOf('isPosSaleInvoiceType(invoice.invoice_type)', deleteAt);
+  assert.ok(deletePosGuard > deleteAt, 'invoice delete must reject POS sale types');
 });
 
 test('C — PUT of a POS invoice is rejected and mutates nothing', async () => {

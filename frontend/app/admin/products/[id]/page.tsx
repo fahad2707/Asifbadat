@@ -82,8 +82,8 @@ export default function Product360Page() {
   const marginPct = Math.round(((product.price - cost) / product.price) * 1000) / 10;
 
   // Liquid glass CSS
-  const glassPanelClass = `bg-slate-900/40 backdrop-blur-lg border border-white/[0.06] border-t-white/[0.18] shadow-[0_12px_40px_rgba(0,0,0,0.25),inset_0_1px_0_rgba(255,255,255,0.1)] rounded-2xl p-5`;
-  const glassButtonClass = `inline-flex items-center gap-2 px-3.5 py-2.5 bg-gradient-to-b from-white/[0.10] to-white/[0.02] border border-white/[0.08] hover:bg-white/[0.06] active:scale-[0.98] rounded-xl text-xs font-semibold text-white transition-all cursor-pointer`;
+  const glassPanelClass = `bg-white border border-[#E2E8F0] rounded-lg p-5`;
+  const glassButtonClass = `inline-flex items-center gap-2 px-3.5 py-2.5 bg-white border border-[#CBD5E1] hover:bg-[#F1F5F9] rounded-md text-sm font-medium text-[#334155] transition-all cursor-pointer`;
 
   return (
     <div className="max-w-[1400px] mx-auto space-y-6">
@@ -95,7 +95,7 @@ export default function Product360Page() {
         </Link>
         <button
           onClick={() => setShowEditModal(true)}
-          className="inline-flex items-center gap-2 px-3.5 py-2.5 bg-gradient-to-tr from-teal-600 to-teal-500 hover:from-teal-500 hover:to-teal-400 border border-white/10 active:scale-[0.98] rounded-xl text-xs font-bold text-white transition-all shadow-md shadow-teal-500/10 cursor-pointer"
+          className="inline-flex items-center gap-2 px-3.5 py-2.5 bg-[#0F9F8F] hover:bg-[#0B8275] border-transparent active:scale-[0.98] rounded-xl text-xs font-bold text-white transition-all shadow-md shadow-teal-500/10 cursor-pointer"
         >
           <Edit className="w-4 h-4" /> Edit Specifications
         </button>

@@ -18,7 +18,7 @@ const createSchema = z.object({
   expense_type: z.string().min(1, 'Expense type is required'),
   description: z.string().optional(),
   amount: z.number().min(0),
-  payment_mode: z.enum(['CASH', 'BANK', 'UPI', 'CARD']),
+  payment_mode: z.string().min(1, 'Payment mode is required').max(80),
   vendor_name: z.string().optional(),
   attachment: z.union([z.string().url(), z.literal('')]).optional(),
   is_recurring: z.boolean().default(false),
@@ -105,6 +105,14 @@ router.get('/', authenticateAdmin, async (req: AuthRequest, res) => {
         is_recurring: e.is_recurring,
         recurrence_type: e.recurrence_type,
         created_at: e.created_at,
+        bank_account_id: e.bank_account_id?.toString(),
+        deposit_state: e.deposit_state,
+        deposited_at: e.deposited_at,
+        deposit_status: e.deposit_state === 'archived'
+          ? 'archived'
+          : e.deposit_state === 'deposited' || (e.payment_mode === 'BANK' && e.bank_account_id && e.deposit_state !== 'pending')
+            ? 'deposited'
+            : 'pending',
       })),
       pagination: { page: Number(page), limit: Number(limit), total, total_pages: Math.ceil(total / Number(limit)) },
     });
@@ -252,6 +260,45 @@ router.delete('/:id', authenticateAdmin, async (req: AuthRequest, res) => {
   } catch (e) {
     console.error('Delete expense:', e);
     res.status(500).json({ error: 'Failed to delete expense' });
+  }
+});
+
+router.post('/:id/deposit', authenticateAdmin, async (req: AuthRequest, res) => {
+  try {
+    const { bank_account_id, deposit_date, deposit_time } = req.body || {};
+    if (!bank_account_id || !mongoose.Types.ObjectId.isValid(String(bank_account_id))) {
+      return res.status(400).json({ error: 'Select a bank account.' });
+    }
+    const day = String(deposit_date || '').trim();
+    if (!day) return res.status(400).json({ error: 'Deposit date is required.' });
+    const time = String(deposit_time || '').trim() || new Date().toISOString().slice(11, 16);
+    const depositedAt = new Date(`${day}T${time}`);
+    if (Number.isNaN(depositedAt.getTime())) {
+      return res.status(400).json({ error: 'Invalid deposit date or time.' });
+    }
+    const expense = await Expense.findOne({ _id: req.params.id, $or: [{ deleted_at: null }, { deleted_at: { $exists: false } }] });
+    if (!expense) return res.status(404).json({ error: 'Expense not found' });
+    expense.bank_account_id = new mongoose.Types.ObjectId(String(bank_account_id));
+    expense.deposit_state = 'deposited';
+    expense.deposited_at = depositedAt;
+    await expense.save();
+    res.json({ success: true, id: expense._id.toString(), deposit_status: 'deposited', deposited_at: depositedAt.toISOString() });
+  } catch (e) {
+    console.error('Deposit expense:', e);
+    res.status(500).json({ error: 'Failed to mark as deposited' });
+  }
+});
+
+router.post('/:id/archive', authenticateAdmin, async (req: AuthRequest, res) => {
+  try {
+    const expense = await Expense.findOne({ _id: req.params.id, $or: [{ deleted_at: null }, { deleted_at: { $exists: false } }] });
+    if (!expense) return res.status(404).json({ error: 'Expense not found' });
+    expense.deposit_state = 'archived';
+    await expense.save();
+    res.json({ success: true, id: expense._id.toString(), deposit_status: 'archived' });
+  } catch (e) {
+    console.error('Archive expense:', e);
+    res.status(500).json({ error: 'Failed to archive paid bill' });
   }
 });
 

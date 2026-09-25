@@ -8,10 +8,10 @@ export default function ProductsSectionLayout({ children }: { children: React.Re
   const isInactive = pathname?.includes('/admin/products/inactive');
 
   const tabClass = (active: boolean) =>
-    `inline-flex items-center rounded-xl px-4 py-2.5 text-xs font-bold transition-all border ${
+    `inline-flex items-center rounded-md px-3 py-2 text-sm font-medium border ${
       active
-        ? 'bg-gradient-to-tr from-teal-600 to-teal-500 hover:from-teal-500 hover:to-teal-400 border-white/10 text-white shadow-sm'
-        : 'bg-slate-905/60 border-white/10 text-slate-400 hover:bg-slate-900 hover:text-white'
+        ? 'bg-[#0F9F8F] border-transparent text-white'
+        : 'bg-white border-[#CBD5E1] text-[#334155] hover:bg-[#F1F5F9]'
     }`;
 
   return (

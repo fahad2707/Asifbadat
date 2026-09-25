@@ -320,6 +320,25 @@ router.post('/:id/cancel', authenticateAdmin, async (req: AuthRequest, res) => {
   }
 });
 
+// Delete (draft / cancelled only — approved memos stay until cancelled)
+router.delete('/:id', authenticateAdmin, async (req: AuthRequest, res) => {
+  try {
+    const cm = await CreditMemo.findById(req.params.id);
+    if (!cm) return res.status(404).json({ error: 'Credit memo not found' });
+    const status = String(cm.status || '').toUpperCase();
+    if (status === 'APPROVED' || status === 'ADJUSTED') {
+      return res.status(400).json({
+        error: `${cm.credit_memo_number || 'This credit memo'} is ${status.toLowerCase()} and cannot be deleted. Cancel it first, or export it instead.`,
+      });
+    }
+    await CreditMemo.deleteOne({ _id: cm._id });
+    res.json({ success: true, id: cm._id.toString() });
+  } catch (e) {
+    console.error('Delete credit memo:', e);
+    res.status(500).json({ error: 'Failed to delete credit memo' });
+  }
+});
+
 // Analytics: total returns per vendor, damage %, return ratio by product
 router.get('/analytics/returns-by-vendor', authenticateAdmin, async (req, res) => {
   try {

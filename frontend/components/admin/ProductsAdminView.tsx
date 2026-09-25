@@ -15,8 +15,6 @@ import {
   FileDown,
   Layers,
   RotateCcw,
-  Image,
-  ImageOff,
   ChevronLeft,
   ChevronRight,
 } from 'lucide-react';
@@ -25,6 +23,8 @@ import { isAdminAuthRedirectError } from '@/lib/admin-auth-redirect';
 import { formatApiError } from '@/lib/format-api-error';
 import toast from 'react-hot-toast';
 import ProductModal from '@/components/admin/ProductModal';
+import { StockAttentionBanner } from '@/components/admin/StockAttentionBanner';
+import { adminUi } from '@/lib/admin-ui';
 
 interface Product {
   id: string | number;
@@ -112,7 +112,7 @@ export function ProductsAdminView({ mode }: { mode: ProductsAdminMode }) {
   const [bulkSubId, setBulkSubId] = useState('');
   const [bulkAssigning, setBulkAssigning] = useState(false);
   const [togglingId, setTogglingId] = useState<string | null>(null);
-  const [imageFilter, setImageFilter] = useState<'all' | 'no_image' | 'has_image'>('all');
+  const [categoryFilter, setCategoryFilter] = useState('');
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(50);
 
@@ -165,7 +165,7 @@ export function ProductsAdminView({ mode }: { mode: ProductsAdminMode }) {
 
   useEffect(() => {
     setPage(1);
-  }, [searchTerm, stockFilter, imageFilter, mode]);
+  }, [searchTerm, stockFilter, categoryFilter, mode]);
 
   const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -356,25 +356,23 @@ export function ProductsAdminView({ mode }: { mode: ProductsAdminMode }) {
           cat.includes(searchLower)
         );
       });
+  const categoryFiltered = categoryFilter
+    ? filteredBySearch.filter((p) => {
+        if (String(p.category_id || '') === categoryFilter) return true;
+        const cat = categories.find((c) => c.id === categoryFilter);
+        return !!(cat && (p.category_name || '') === cat.name);
+      })
+    : filteredBySearch;
   const stockFiltered =
     mode === 'inactive'
-      ? filteredBySearch
+      ? categoryFiltered
       : stockFilter === 'low_stock'
-        ? filteredBySearch.filter((p) => (p.stock_quantity ?? 0) > 0 && (p.stock_quantity ?? 0) <= lowStockThreshold(p))
+        ? categoryFiltered.filter((p) => (p.stock_quantity ?? 0) > 0 && (p.stock_quantity ?? 0) <= lowStockThreshold(p))
         : stockFilter === 'out_of_stock'
-          ? filteredBySearch.filter((p) => (p.stock_quantity ?? 0) <= 0)
-          : filteredBySearch;
+          ? categoryFiltered.filter((p) => (p.stock_quantity ?? 0) <= 0)
+          : categoryFiltered;
 
-  const hasProductImage = (p: Product) => !!(p.image_url && String(p.image_url).trim());
-
-  const filteredProducts =
-    imageFilter === 'no_image'
-      ? stockFiltered.filter((p) => !hasProductImage(p))
-      : imageFilter === 'has_image'
-        ? stockFiltered.filter((p) => hasProductImage(p))
-        : stockFiltered;
-
-  const noImageCount = stockFiltered.filter((p) => !hasProductImage(p)).length;
+  const filteredProducts = stockFiltered;
   const totalFiltered = filteredProducts.length;
   const pageCount = Math.max(1, Math.ceil(totalFiltered / pageSize) || 1);
   const safePage = Math.min(Math.max(1, page), pageCount);
@@ -384,16 +382,14 @@ export function ProductsAdminView({ mode }: { mode: ProductsAdminMode }) {
     <div>
       <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between mb-8">
         <div>
-          <h1 className="text-3xl font-extrabold text-white tracking-tight">
-            Products
+          <h1 className="text-[28px] font-normal text-[#1A1A1A] tracking-tight">
+            Products &amp; services
           </h1>
           {mode === 'inactive' ? (
-            <p className="text-slate-400 mt-2 max-w-2xl text-xs">
+            <p className="text-[#6B6C72] mt-2 max-w-2xl text-sm">
               Hidden from the public storefront. Use <strong>Set active</strong> or edit the product and turn on &ldquo;Active on website&rdquo;.
             </p>
-          ): (
-            <p className="text-slate-400 text-xs mt-1">Manage active catalog items, stock limits, and bulk categorical settings.</p>
-          )}
+          ) : null}
           {totalCount !== null && (
             <p className="text-teal-400 mt-1.5 font-bold text-xs uppercase tracking-wider">
               {mode === 'inactive' ? 'Inactive' : 'Active'}: {totalCount.toLocaleString()} product{totalCount !== 1 ? 's' : ''}
@@ -412,7 +408,7 @@ export function ProductsAdminView({ mode }: { mode: ProductsAdminMode }) {
             <a
               href="/product-import-sample.csv"
               download="product-import-sample.csv"
-              className="inline-flex items-center gap-2 px-3.5 py-2.5 bg-gradient-to-b from-white/[0.10] to-white/[0.02] border border-white/[0.08] hover:bg-white/[0.06] active:scale-[0.98] rounded-xl text-xs font-semibold text-white transition-all cursor-pointer"
+              className="inline-flex items-center gap-2 px-3.5 py-2.5 bg-white border border-[#CBD5E1] hover:bg-[#F1F5F9] rounded-md text-sm font-medium text-[#334155] transition-all cursor-pointer"
             >
               <FileSpreadsheet className="w-4 h-4 text-slate-400" />
               Sample CSV
@@ -420,7 +416,7 @@ export function ProductsAdminView({ mode }: { mode: ProductsAdminMode }) {
             <button
               type="button"
               onClick={() => fileInputRef.current?.click()}
-              className="inline-flex items-center gap-2 px-3.5 py-2.5 bg-gradient-to-b from-white/[0.10] to-white/[0.02] border border-white/[0.08] hover:bg-white/[0.06] active:scale-[0.98] rounded-xl text-xs font-semibold text-white transition-all cursor-pointer"
+              className="inline-flex items-center gap-2 px-3.5 py-2.5 bg-white border border-[#CBD5E1] hover:bg-[#F1F5F9] rounded-md text-sm font-medium text-[#334155] transition-all cursor-pointer"
             >
               <Upload className="w-4 h-4 text-slate-400" />
               Import CSV
@@ -431,80 +427,63 @@ export function ProductsAdminView({ mode }: { mode: ProductsAdminMode }) {
                 setEditingProduct(null);
                 setShowModal(true);
               }}
-              className="inline-flex items-center gap-2 px-5 py-3 bg-gradient-to-tr from-teal-600 to-teal-500 hover:from-teal-500 hover:to-teal-400 border border-white/10 active:scale-[0.98] rounded-xl text-xs font-bold text-white transition-all shadow-md shadow-teal-500/10 cursor-pointer"
+              className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-full bg-black text-white text-sm font-medium hover:bg-[#2C2C2C] cursor-pointer"
             >
-              <Plus className="w-4 h-4" />
-              Add new product
+              New product/service
             </button>
           </div>
         )}
       </div>
 
-      <div className="bg-slate-900/40 backdrop-blur-lg border border-white/[0.06] border-t-white/[0.18] shadow-[0_12px_40px_rgba(0,0,0,0.25)] rounded-2xl p-4 mb-6 space-y-3">
-        <div className="relative w-full">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500 pointer-events-none" />
-          <input
-            type="text"
-            placeholder="Search name, Product ID, SKU, category, description…"
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            className="w-full pl-10 pr-4 py-2.5 bg-slate-950/60 border border-white/10 rounded-xl focus:ring-1 focus:ring-teal-500 text-xs text-slate-200 placeholder-slate-500 focus:outline-none font-semibold"
-          />
-        </div>
-        <div className="flex flex-wrap items-center gap-2 text-xs">
-          <span className="text-slate-450 font-bold tracking-wider uppercase shrink-0">Pictures:</span>
-          <div className="flex flex-wrap gap-2">
-            <button
-              type="button"
-              onClick={() => setImageFilter('all')}
-              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-semibold border transition-colors ${
-                imageFilter === 'all'
-                  ? 'bg-teal-600/30 text-teal-400 border-teal-500/40'
-                  : 'bg-slate-950/40 text-slate-350 border-white/10 hover:bg-white/5'
-              }`}
+      {mode === 'active' && (
+        <StockAttentionBanner
+          outOfStockCount={outOfStockCount}
+          lowStockCount={lowStockCount}
+          onSeeOutOfStock={() => setStockFilter('out_of_stock')}
+          onSeeLowStock={() => setStockFilter('low_stock')}
+        />
+      )}
+
+      <div className="bg-white border border-[#E2E8F0] rounded-lg p-4 mb-6 space-y-3">
+        <div className="flex flex-col sm:flex-row gap-3">
+          <div className="relative w-full flex-1">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#8D9096] pointer-events-none" />
+            <input
+              type="text"
+              placeholder="Search name, Product ID, SKU, category, description…"
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className={`${adminUi.field} pl-9`}
+            />
+          </div>
+          <div className="sm:w-64 shrink-0">
+            <label className="sr-only" htmlFor="product-category-filter">Category</label>
+            <select
+              id="product-category-filter"
+              value={categoryFilter}
+              onChange={(e) => setCategoryFilter(e.target.value)}
+              className={adminUi.field}
             >
-              All
-            </button>
-            <button
-              type="button"
-              onClick={() => setImageFilter(imageFilter === 'no_image' ? 'all' : 'no_image')}
-              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-semibold border transition-colors ${
-                imageFilter === 'no_image'
-                  ? 'bg-amber-600/30 text-amber-400 border-amber-500/40'
-                  : 'bg-slate-950/40 text-slate-350 border-white/10 hover:bg-white/5'
-              }`}
-            >
-              <ImageOff className="w-3.5 h-3.5" />
-              Missing image
-              <span className="tabular-nums opacity-90">({noImageCount.toLocaleString()})</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => setImageFilter(imageFilter === 'has_image' ? 'all' : 'has_image')}
-              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-semibold border transition-colors ${
-                imageFilter === 'has_image'
-                  ? 'bg-teal-600/30 text-teal-400 border-teal-500/40'
-                  : 'bg-slate-950/40 text-slate-350 border-white/10 hover:bg-white/5'
-              }`}
-            >
-              <Image className="w-3.5 h-3.5" />
-              Has image
-            </button>
+              <option value="">All categories</option>
+              {categories.map((c) => (
+                <option key={c.id} value={c.id}>{c.name}</option>
+              ))}
+            </select>
           </div>
         </div>
-        <div className="flex flex-wrap items-center justify-between gap-3 pt-1 border-t border-white/5 text-xs font-semibold text-slate-400">
+        <div className="flex flex-wrap items-center justify-between gap-3 pt-1 border-t border-[#E3E5E8] text-xs font-semibold text-[#6B6C72]">
           <p>
             {totalFiltered === 0 ? (
               <>No products match.</>
             ) : (
               <>
                 Showing{' '}
-                <span className="font-semibold text-slate-200 tabular-nums">
+                <span className="font-semibold text-[#1A1A1A] tabular-nums">
                   {((safePage - 1) * pageSize + 1).toLocaleString()}–{Math.min(safePage * pageSize, totalFiltered).toLocaleString()}
                 </span>{' '}
-                of <span className="font-semibold text-slate-200 tabular-nums">{totalFiltered.toLocaleString()}</span>
-                {searchTerm.trim() || imageFilter !== 'all' || (mode === 'active' && stockFilter !== 'all') ? (
-                  <span className="text-slate-500"> (filtered)</span>
+                of <span className="font-semibold text-[#1A1A1A] tabular-nums">{totalFiltered.toLocaleString()}</span>
+                {searchTerm.trim() || categoryFilter || (mode === 'active' && stockFilter !== 'all') ? (
+                  <span className="text-[#8D9096]"> (filtered)</span>
                 ) : null}
               </>
             )}
@@ -526,41 +505,6 @@ export function ProductsAdminView({ mode }: { mode: ProductsAdminMode }) {
           </label>
         </div>
       </div>
-      {/* Low stock / Out of stock indicators - click to filter */}
-      {mode === 'active' && (
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6">
-        <button
-          type="button"
-          onClick={() => setStockFilter(stockFilter === 'low_stock' ? 'all' : 'low_stock')}
-          className={`flex items-center gap-4 p-5 rounded-2xl border transition-all text-left ${
-            stockFilter === 'low_stock' ? 'border-amber-500/40 bg-amber-950/20' : 'border-white/5 bg-slate-900/40 hover:border-amber-300/30'
-          }`}
-        >
-          <div className="w-12 h-12 rounded-full bg-amber-500/10 flex items-center justify-center shrink-0">
-            <AlertCircle className="w-6 h-6 text-amber-500 animate-pulse" />
-          </div>
-          <div>
-            <p className="text-2xl font-black text-amber-400">{lowStockCount}</p>
-            <p className="text-[10px] font-bold text-slate-450 tracking-wider uppercase">LOW STOCK WARNINGS</p>
-          </div>
-        </button>
-        <button
-          type="button"
-          onClick={() => setStockFilter(stockFilter === 'out_of_stock' ? 'all' : 'out_of_stock')}
-          className={`flex items-center gap-4 p-5 rounded-2xl border transition-all text-left ${
-            stockFilter === 'out_of_stock' ? 'border-red-500/40 bg-red-950/20' : 'border-white/5 bg-slate-900/40 hover:border-red-300/30'
-          }`}
-        >
-          <div className="w-12 h-12 rounded-full bg-red-500/10 flex items-center justify-center shrink-0">
-            <XCircle className="w-6 h-6 text-red-500" />
-          </div>
-          <div>
-            <p className="text-2xl font-black text-red-400">{outOfStockCount}</p>
-            <p className="text-[10px] font-bold text-slate-450 tracking-wider uppercase">OUT OF STOCK PRODUCTS</p>
-          </div>
-        </button>
-      </div>
-      )}
       {mode === 'active' && stockFilter !== 'all' && (
         <p className="text-xs text-slate-400 mb-2 font-semibold flex items-center gap-2">
           Showing only {stockFilter === 'low_stock' ? 'low stock' : 'out of stock'} products.
@@ -572,7 +516,7 @@ export function ProductsAdminView({ mode }: { mode: ProductsAdminMode }) {
       <>
       {/* Import preview / progress / summary */}
       {importStep === 'preview' && preview && (
-        <div className="bg-slate-900/40 backdrop-blur-lg border border-white/[0.06] border-t-white/[0.18] shadow-[0_12px_40px_rgba(0,0,0,0.25)] rounded-2xl p-6 mb-6">
+        <div className="bg-white border border-[#E2E8F0] rounded-lg p-6 mb-6">
           <h2 className="text-xl font-bold text-white mb-4">Import Preview</h2>
           <p className="text-xs text-slate-400 mb-4 font-semibold">
             File target: <span className="font-mono text-slate-200">{selectedFile?.name}</span>
@@ -634,7 +578,7 @@ export function ProductsAdminView({ mode }: { mode: ProductsAdminMode }) {
             <button
               onClick={handleConfirmImport}
               disabled={preview.summary.valid === 0}
-              className="px-5 py-2.5 bg-gradient-to-tr from-teal-600 to-teal-500 hover:from-teal-500 hover:to-teal-400 border border-white/10 text-white rounded-xl text-xs font-bold transition-all shadow-sm disabled:opacity-40"
+              className="px-5 py-2.5 bg-[#0F9F8F] hover:bg-[#0B8275] border-transparent text-white rounded-xl text-xs font-bold transition-all shadow-sm disabled:opacity-40"
             >
               Import {preview.summary.valid} Product{preview.summary.valid !== 1 ? 's' : ''}
             </button>
@@ -646,7 +590,7 @@ export function ProductsAdminView({ mode }: { mode: ProductsAdminMode }) {
       )}
 
       {importStep === 'importing' && (
-        <div className="bg-slate-900/40 backdrop-blur-lg border border-white/[0.06] border-t-white/[0.18] shadow-[0_12px_40px_rgba(0,0,0,0.25)] rounded-2xl p-8 mb-6 text-center">
+        <div className="bg-white border border-[#E2E8F0] rounded-lg p-8 mb-6 text-center">
           <div className="animate-spin rounded-full h-10 w-10 border-2 border-teal-500 border-t-transparent mx-auto mb-4" />
           <p className="text-white font-bold text-sm">Executing CSV Database Upsert...</p>
           <p className="text-xs text-slate-500 mt-1 font-semibold">Do not close this window or navigate away.</p>
@@ -654,7 +598,7 @@ export function ProductsAdminView({ mode }: { mode: ProductsAdminMode }) {
       )}
 
       {importStep === 'done' && importResult && (
-        <div className="bg-slate-900/40 backdrop-blur-lg border border-white/[0.06] border-t-white/[0.18] shadow-[0_12px_40px_rgba(0,0,0,0.25)] rounded-2xl p-6 mb-6">
+        <div className="bg-white border border-[#E2E8F0] rounded-lg p-6 mb-6">
           <h2 className="text-xl font-bold text-white mb-4">Import Run Summary</h2>
           <div className="grid grid-cols-2 sm:grid-cols-5 gap-4 mb-4">
             <div className="bg-slate-950/40 border border-white/5 rounded-xl p-3">
@@ -763,7 +707,7 @@ export function ProductsAdminView({ mode }: { mode: ProductsAdminMode }) {
               <button
                 type="button"
                 onClick={handleBulkActivate}
-                className="inline-flex items-center gap-1.5 px-3 py-2 bg-gradient-to-tr from-teal-600 to-teal-500 hover:from-teal-500 hover:to-teal-400 border border-white/10 text-white rounded-xl text-xs font-bold cursor-pointer active:scale-95"
+                className="inline-flex items-center gap-1.5 px-3 py-2 bg-[#0F9F8F] hover:bg-[#0B8275] border-transparent text-white rounded-xl text-xs font-bold cursor-pointer active:scale-95"
               >
                 <RotateCcw className="w-3.5 h-3.5" />
                 Set active
@@ -795,7 +739,7 @@ export function ProductsAdminView({ mode }: { mode: ProductsAdminMode }) {
           <div className="animate-spin rounded-full h-10 w-10 border-2 border-teal-500 border-t-transparent" />
         </div>
       ) : (
-        <div className="bg-slate-900/40 backdrop-blur-lg border border-white/[0.06] rounded-2xl shadow-xl overflow-hidden">
+        <div className="bg-white border border-[#E2E8F0] rounded-lg overflow-hidden">
           <table className="w-full text-xs font-semibold">
             <thead className="bg-slate-950/60 sticky top-0 z-10 border-b border-white/5 text-slate-400">
               <tr>

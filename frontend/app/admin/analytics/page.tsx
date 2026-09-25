@@ -17,6 +17,7 @@ import {
   Cell,
 } from 'recharts';
 import adminApi from '@/lib/admin-api';
+import { adminUi } from '@/lib/admin-ui';
 import { isAdminAuthRedirectError } from '@/lib/admin-auth-redirect';
 import toast from 'react-hot-toast';
 import { FileDown, FileText, DollarSign, TrendingDown, TrendingUp, Wallet, Percent } from 'lucide-react';
@@ -179,14 +180,14 @@ export default function AnalyticsPage() {
     <div className="space-y-6">
       <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between mb-2">
         <div>
-          <h1 className="text-3xl font-extrabold text-white tracking-tight">Reports</h1>
-          <p className="text-slate-400 text-xs mt-1">B2B Financial Overview, Gross Profit Margins, &amp; Operating Cost Trends.</p>
+          <h1 className={adminUi.pageTitle}>Reports</h1>
+          <p className={`${adminUi.meta} mt-1`}>B2B Financial Overview, Gross Profit Margins, &amp; Operating Cost Trends.</p>
         </div>
         <div className="flex items-center gap-2.5 flex-wrap">
           <select
             value={reportPeriod}
             onChange={(e) => setReportPeriod(e.target.value)}
-            className="px-3.5 py-2.5 bg-slate-950/60 border border-white/10 rounded-xl text-xs font-bold text-white focus:outline-none focus:ring-1 focus:ring-teal-500 cursor-pointer"
+            className={adminUi.field}
           >
             <option value="this_month">This Month</option>
             <option value="last_month">Last Month</option>
@@ -203,15 +204,15 @@ export default function AnalyticsPage() {
           )}
           <button
             onClick={handleExportCSV}
-            className="inline-flex items-center gap-2 px-3.5 py-2.5 bg-gradient-to-b from-white/[0.10] to-white/[0.02] border border-white/[0.08] hover:bg-white/[0.06] active:scale-[0.98] rounded-xl text-xs font-semibold text-white transition-all cursor-pointer"
+            className={adminUi.btnSecondary}
           >
-            <FileDown className="w-4 h-4 text-teal-400" /> Export CSV
+            <FileDown className={`w-4 h-4 ${adminUi.icon}`} /> Export CSV
           </button>
           <button
             onClick={handleExportPDF}
-            className="inline-flex items-center gap-2 px-3.5 py-2.5 bg-gradient-to-b from-white/[0.10] to-white/[0.02] border border-white/[0.08] hover:bg-white/[0.06] active:scale-[0.98] rounded-xl text-xs font-semibold text-white transition-all cursor-pointer"
+            className={adminUi.btnSecondary}
           >
-            <FileText className="w-4 h-4 text-emerald-400" /> Print / PDF
+            <FileText className={`w-4 h-4 ${adminUi.icon}`} /> Print / PDF
           </button>
         </div>
       </div>
@@ -428,7 +429,7 @@ export default function AnalyticsPage() {
             </ResponsiveContainer>
           </div>
 
-          <div className="bg-slate-900/40 backdrop-blur-lg border border-white/[0.06] rounded-2xl shadow-xl overflow-hidden p-5">
+          <div className="bg-white border border-[#E2E8F0] rounded-lg overflow-hidden p-5">
             <h2 className="text-sm font-bold mb-4 text-white uppercase tracking-wider">Category Revenue Listings</h2>
             <div className="overflow-x-auto">
               <table className="w-full text-xs font-semibold">

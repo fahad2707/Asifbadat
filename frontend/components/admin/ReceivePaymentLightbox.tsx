@@ -158,6 +158,7 @@ export default function ReceivePaymentLightbox({ isOpen, onClose, onRecorded, pr
         payment_date: paymentDate,
         payment_method: paymentMethod,
         reference_no: referenceNo,
+        notes: referenceNo,
         allocations: allocs,
       });
       toast.success('Payment recorded');
@@ -188,7 +189,7 @@ export default function ReceivePaymentLightbox({ isOpen, onClose, onRecorded, pr
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50" onClick={handleClose}>
+    <div className="admin-lightbox fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50" onClick={handleClose}>
       <div className="bg-white rounded-xl shadow-xl max-w-2xl w-full max-h-[90vh] overflow-hidden flex flex-col" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between p-4 border-b border-gray-200">
           <h2 className="text-xl font-bold text-gray-900">Receive Payment</h2>
@@ -283,7 +284,7 @@ export default function ReceivePaymentLightbox({ isOpen, onClose, onRecorded, pr
                         type="button"
                         onClick={handleAddPaymentMethod}
                         disabled={addingPaymentMethod || !newPaymentMethodName.trim()}
-                        className="px-3 py-2 bg-[#0f766e] text-white rounded-lg text-sm font-medium hover:bg-[#0d5d57] disabled:opacity-50"
+                        className="px-3 py-2 bg-black text-white rounded-lg text-sm font-medium hover:bg-[#2C2C2C] disabled:opacity-50"
                       >
                         {addingPaymentMethod ? 'Adding…' : 'Add & use'}
                       </button>
@@ -292,8 +293,13 @@ export default function ReceivePaymentLightbox({ isOpen, onClose, onRecorded, pr
                 </div>
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Reference no.</label>
-                <input type="text" value={referenceNo} onChange={(e) => { setReferenceNo(e.target.value); setDirty(true); }} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" placeholder="Optional" />
+                <label className="block text-sm font-medium text-gray-700 mb-1">Comment</label>
+                <textarea
+                  value={referenceNo}
+                  onChange={(e) => { setReferenceNo(e.target.value); setDirty(true); }}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm min-h-[72px]"
+                  placeholder="Saved on this payment — check, wire ref, note for the timeline"
+                />
               </div>
 
               <div>
@@ -335,8 +341,8 @@ export default function ReceivePaymentLightbox({ isOpen, onClose, onRecorded, pr
         </div>
         <div className="flex justify-end gap-2 p-4 border-t border-gray-200">
           <button type="button" onClick={handleClose} className="px-4 py-2 text-gray-700 hover:bg-gray-100 rounded-lg">Cancel</button>
-          <button type="button" onClick={() => handleRecord(false)} disabled={saving} className="px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 disabled:opacity-50">Record</button>
-          <button type="button" onClick={() => handleRecord(true)} disabled={saving} className="px-4 py-2 bg-[#0f766e] text-white rounded-lg hover:bg-[#0d6b63] disabled:opacity-50">Record and close</button>
+          <button type="button" onClick={() => handleRecord(false)} disabled={saving} className="px-4 py-2 bg-white border border-[#CBD5E1] text-[#334155] rounded-lg hover:bg-[#F1F5F9] disabled:opacity-50">Record</button>
+          <button type="button" onClick={() => handleRecord(true)} disabled={saving} className="px-4 py-2 bg-black text-white rounded-lg hover:bg-[#2C2C2C] disabled:opacity-50">Record and close</button>
         </div>
       </div>
 
@@ -346,7 +352,7 @@ export default function ReceivePaymentLightbox({ isOpen, onClose, onRecorded, pr
             <p className="text-gray-900 font-medium mb-3">You have unsaved changes.</p>
             <div className="flex gap-2 justify-end">
               <button type="button" onClick={() => setShowCloseConfirm(false)} className="px-3 py-2 text-gray-700 hover:bg-gray-100 rounded-lg">Cancel</button>
-              <button type="button" onClick={handleCloseWithoutSaving} className="px-3 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700">Close without saving</button>
+              <button type="button" onClick={handleCloseWithoutSaving} className="px-3 py-2 bg-white border border-[#CBD5E1] text-[#334155] rounded-lg hover:bg-[#F1F5F9]">Close without saving</button>
             </div>
           </div>
         </div>

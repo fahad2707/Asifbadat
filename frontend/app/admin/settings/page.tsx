@@ -80,7 +80,7 @@ export default function SettingsPage() {
       <div className="flex items-center gap-3.5 mb-6">
         <Settings className="w-8 h-8 text-teal-400" />
         <div>
-          <h1 className="text-3xl font-extrabold text-white tracking-tight">Settings</h1>
+          <h1 className="text-2xl font-semibold text-[#0F172A] tracking-tight">Settings</h1>
           <p className="text-xs text-slate-400 mt-1">Configure retail invoice headers, default tax brackets, location parameters, and receipt notes.</p>
         </div>
       </div>
@@ -210,7 +210,7 @@ export default function SettingsPage() {
           <button
             type="submit"
             disabled={saving}
-            className="inline-flex items-center justify-center gap-2 px-6 py-2.5 bg-gradient-to-tr from-teal-600 to-teal-500 hover:from-teal-500 hover:to-teal-400 border border-white/10 text-white rounded-xl text-xs font-bold shadow-sm transition-all disabled:opacity-40"
+            className="inline-flex items-center justify-center gap-2 px-6 py-2.5 bg-[#0F9F8F] hover:bg-[#0B8275] border-transparent text-white rounded-xl text-xs font-bold shadow-sm transition-all disabled:opacity-40"
           >
             <Save className="w-4 h-4" />
             {saving ? 'Saving Config...' : 'Save Settings'}
