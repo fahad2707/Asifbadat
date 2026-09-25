@@ -102,7 +102,9 @@ const isAllowedOrigin = (origin: string) =>
   allowedOrigins.includes(origin) ||
   origin.includes('.onrender.com') ||
   origin.includes('.vercel.app') ||
-  origin.includes('.netlify.app');
+  origin.includes('.netlify.app') ||
+  origin.includes('.up.railway.app') ||
+  origin.includes('.railway.app');
 app.use(cors({
   origin: (origin: string | undefined, cb: (err: Error | null, allow?: boolean) => void) => {
     if (!origin) return cb(null, true);
