@@ -37,14 +37,23 @@ function reportNotPdf(buf: Uint8Array, fallback: string) {
   }
 }
 
-function bytesToPdfBlob(buf: Uint8Array, contentType?: string | null): Blob {
+/** Axios headers can be string | number | boolean | string[]. */
+function normalizeContentType(contentType?: unknown): string | undefined {
+  if (contentType == null) return undefined;
+  if (Array.isArray(contentType)) return String(contentType[0] ?? '');
+  const text = String(contentType);
+  return text || undefined;
+}
+
+function bytesToPdfBlob(buf: Uint8Array, contentType?: unknown): Blob {
+  const type = normalizeContentType(contentType);
   const copy = new Uint8Array(buf.byteLength);
   copy.set(buf);
-  return new Blob([copy], { type: contentType?.includes('pdf') ? contentType : 'application/pdf' });
+  return new Blob([copy], { type: type?.includes('pdf') ? type : 'application/pdf' });
 }
 
 /** Build a PDF Blob from validated bytes. */
-export async function toPdfBlob(data: BlobPart, contentType?: string | null): Promise<Blob | null> {
+export async function toPdfBlob(data: BlobPart, contentType?: unknown): Promise<Blob | null> {
   const buf = await toUint8Array(data);
   if (!isPdfBytes(buf)) return null;
   return bytesToPdfBlob(buf, contentType);
@@ -54,7 +63,7 @@ export async function toPdfBlob(data: BlobPart, contentType?: string | null): Pr
 export async function downloadPdfFromResponse(
   data: BlobPart,
   filename: string,
-  contentType?: string | null
+  contentType?: unknown
 ): Promise<boolean> {
   const buf = await toUint8Array(data);
   if (!isPdfBytes(buf)) {
@@ -78,7 +87,7 @@ export async function downloadPdfFromResponse(
 }
 
 /** Open the PDF in a new tab (for printing). */
-export async function openPdfFromResponse(data: BlobPart, contentType?: string | null): Promise<boolean> {
+export async function openPdfFromResponse(data: BlobPart, contentType?: unknown): Promise<boolean> {
   const buf = await toUint8Array(data);
   if (!isPdfBytes(buf)) {
     reportNotPdf(buf, 'Could not open PDF — invalid file');

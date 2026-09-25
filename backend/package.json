@@ -3,6 +3,10 @@
   "version": "1.0.0",
   "description": "Backend API for Express Distributors",
   "main": "dist/server.js",
+  "engines": {
+    "node": "20"
+  },
+  "packageManager": "npm@10.9.2",
   "scripts": {
     "dev": "tsx src/server.ts",
     "build": "node run-tsc.cjs",

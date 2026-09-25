@@ -1,0 +1,11 @@
+# Railway Root Directory must be `backend`.
+# Do not use --workspace here — this folder is not the monorepo root.
+[build]
+builder = "RAILPACK"
+buildCommand = "npm run build"
+
+[deploy]
+startCommand = "npm start"
+healthcheckPath = "/health"
+healthcheckTimeout = 30
+restartPolicyType = "ON_FAILURE"
