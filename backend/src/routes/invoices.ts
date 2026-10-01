@@ -9,6 +9,7 @@ import {
   InvoiceLineTaxError,
   buildInvoiceLines,
   copyInvoiceLineSnapshots,
+  hasInvoiceLineTaxSnapshot,
   invoiceTaxTotals,
 } from '../utils/invoiceLineTax';
 import { authenticateAdmin, AuthRequest } from '../middleware/auth';
@@ -438,7 +439,7 @@ router.put('/:id', authenticateAdmin, async (req: AuthRequest, res) => {
     if (body.items !== undefined) {
       const rawItems = (body.items || []) as Record<string, unknown>[];
       const existingItems = ((invoice as any).items || []) as unknown[];
-      const existingHasLineTax = existingItems.some((item) => item && typeof item === 'object' && Object.prototype.hasOwnProperty.call(item, 'taxable'));
+      const existingHasLineTax = existingItems.some((item) => hasInvoiceLineTaxSnapshot(item));
       const incomingHasProduct = rawItems.some((item) => Boolean(item.product_id));
       const inheritFromProduct = incomingHasProduct && existingHasLineTax;
       const productsById = inheritFromProduct ? await loadProductsById(rawItems) : new Map();
@@ -578,7 +579,7 @@ router.post('/:id/convert', authenticateAdmin, async (req: AuthRequest, res) => 
     }
 
     const items = copyInvoiceLineSnapshots((quote as any).items || []);
-    const usedLineTax = items.some((item) => Object.prototype.hasOwnProperty.call(item, 'taxable'));
+    const usedLineTax = items.some((item) => hasInvoiceLineTaxSnapshot(item));
     const totals = invoiceTaxTotals(items, {
       usedLineTax,
       fallbackTaxAmount: Number((quote as any).tax_amount) || 0,

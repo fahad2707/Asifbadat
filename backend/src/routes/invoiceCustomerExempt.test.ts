@@ -398,3 +398,68 @@ test('H — legacy invoice without line snapshots keeps document-level tax', asy
   const line = (created?.items as Array<Record<string, unknown>>)[0];
   assert.equal(Object.prototype.hasOwnProperty.call(line, 'taxable'), false);
 });
+
+test('9 — converting a Mongoose Customer Exempt quotation preserves the snapshot', async () => {
+  assertNoMongoConnection();
+  stubCatalog();
+  stubCustomer(false);
+  const quote = new Invoice({
+    invoice_number: 'QTN#EXEMPT-MONGO',
+    invoice_type: DOCUMENT_TYPE_QUOTATION,
+    customer_id: CUSTOMER_ID,
+    customer_name: 'Exempt Co',
+    items: [
+      {
+        product_id: PRODUCT_A,
+        product_name: 'ABC',
+        quantity: 1,
+        price: 100,
+        subtotal: 100,
+        taxable: false,
+        tax_exempt: true,
+        tax_type_id: GST_ID,
+        tax_type_name: 'GST',
+        tax_rate_type: 'percent',
+        tax_rate: 18,
+        tax_amount: 0,
+        tax_type_label: 'Customer Exempt',
+        total: 100,
+      },
+    ],
+    subtotal_amount: 100,
+    tax_amount: 0,
+    total_amount: 100,
+    shipping_type: '',
+  });
+  quote.save = async function saveNoDb() {
+    return this;
+  };
+  mock.method(Invoice, 'findById', async () => quote);
+  mock.method(Invoice, 'find', () => ({
+    sort() {
+      return this;
+    },
+    limit() {
+      return this;
+    },
+    lean: async () => [],
+  }));
+  let created: Record<string, unknown> | undefined;
+  mock.method(Invoice, 'create', async (doc: Record<string, unknown>) => {
+    created = doc;
+    return createdInvoice(doc);
+  });
+  const res = await request(createApp())
+    .post('/api/invoices/qtn-exempt-mongo/convert')
+    .set('Authorization', `Bearer ${adminTestToken()}`)
+    .send({});
+  assert.equal(res.status, 201);
+  const line = (created?.items as Array<Record<string, unknown>>)[0];
+  assert.equal(line.taxable, false);
+  assert.equal(line.tax_exempt, true);
+  assert.equal(line.tax_amount, 0);
+  assert.equal(line.tax_type_label, 'Customer Exempt');
+  assert.equal(line.tax_rate, 18);
+  assert.equal(created?.tax_amount, 0);
+  assert.equal(created?.total_amount, 100);
+});

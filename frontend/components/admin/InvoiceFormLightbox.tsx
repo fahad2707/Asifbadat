@@ -10,6 +10,7 @@ import { shareDocumentOnWhatsApp, composeEmailWithPdf } from '@/lib/share-docume
 import SearchableProductDropdown from './SearchableProductDropdown';
 import {
   emptyInvoiceLineTax,
+  hasInvoiceLineTaxSnapshot,
   inheritInvoiceLineTax,
   recalculateInvoiceLineTax,
   type InvoiceLineTaxState,
@@ -191,13 +192,13 @@ export default function InvoiceFormLightbox({ isOpen, onClose, onSaved, editId, 
         setCustomerAddress(d.customer_address || '');
         setTerms(d.terms || 'Due on receipt');
         setTaxAmount(Number(d.tax_amount) || 0);
-        const loadedHasLineTax = (d.items || []).some((i: any) => Object.prototype.hasOwnProperty.call(i || {}, 'taxable'));
+        const loadedHasLineTax = (d.items || []).some((i: any) => hasInvoiceLineTaxSnapshot(i));
         setUsesLineTax(loadedHasLineTax);
         const items = (d.items || []).map((i: any) => {
           const quantity = Number(i.quantity) || 0;
           const price = Number(i.price) || 0;
           const subtotal = Number(i.subtotal) || quantity * price;
-          const snapshot = Object.prototype.hasOwnProperty.call(i || {}, 'taxable')
+          const snapshot = hasInvoiceLineTaxSnapshot(i)
             ? recalculateInvoiceLineTax(subtotal, {
                 taxable: i.taxable === true,
                 tax_type_configured: true,

@@ -6,12 +6,17 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import mongoose from 'mongoose';
+import Invoice from '../models/Invoice';
 import {
   InvoiceLineTaxError,
+  MIXED_LINE_TAX_ERROR,
   applyLineTaxSnapshot,
+  assertUniformInvoiceLineTaxModel,
   buildInvoiceLines,
   computePercentLineTax,
   copyInvoiceLineSnapshots,
+  hasInvoiceLineTaxSnapshot,
   inheritLineTaxFromProduct,
   invoiceTaxTotals,
   noTaxLineSnapshot,
@@ -264,4 +269,129 @@ test('legacy lines without taxable keep fallback document tax', () => {
   assert.equal(totals.subtotal_amount, 100);
   assert.equal(totals.tax_amount, 8.5);
   assert.equal(totals.total_amount, 108.5);
+});
+
+function mongooseInvoiceItem(fields: Record<string, unknown>) {
+  const doc = new Invoice({
+    invoice_number: 'INV#DISC',
+    total_amount: 1,
+    tax_amount: 0,
+    items: [fields],
+  });
+  return doc.items![0] as unknown as {
+    taxable?: boolean;
+    toObject: () => Record<string, unknown>;
+  };
+}
+
+test('1 — legacy plain object has no snapshot', () => {
+  assert.equal(hasInvoiceLineTaxSnapshot({ product_name: 'Line', quantity: 1, price: 100, subtotal: 100 }), false);
+});
+
+test('2 — TAX-02 plain object taxable true is a snapshot', () => {
+  assert.equal(hasInvoiceLineTaxSnapshot({ taxable: true }), true);
+});
+
+test('3 — TAX-02 plain object taxable false is still a snapshot', () => {
+  assert.equal(hasInvoiceLineTaxSnapshot({ taxable: false }), true);
+});
+
+test('4 — legacy Mongoose subdocument has no snapshot', () => {
+  const line = mongooseInvoiceItem({ product_name: 'Line', quantity: 1, price: 100, subtotal: 100 });
+  assert.equal(Object.prototype.hasOwnProperty.call(line, 'taxable'), false);
+  assert.equal('taxable' in line, true);
+  assert.equal(hasInvoiceLineTaxSnapshot(line), false);
+  assert.equal(hasInvoiceLineTaxSnapshot(line.toObject()), false);
+});
+
+test('5 — TAX-02 Mongoose subdocument taxable true is a snapshot', () => {
+  const line = mongooseInvoiceItem({
+    product_name: 'GST line',
+    quantity: 1,
+    price: 100,
+    subtotal: 100,
+    taxable: true,
+    tax_rate: 18,
+  });
+  assert.equal(Object.prototype.hasOwnProperty.call(line, 'taxable'), false);
+  assert.equal(hasInvoiceLineTaxSnapshot(line), true);
+  assert.equal(hasInvoiceLineTaxSnapshot(line.toObject()), true);
+});
+
+test('6 — TAX-02 Mongoose subdocument taxable false is a snapshot', () => {
+  const line = mongooseInvoiceItem({
+    product_name: 'No Tax line',
+    quantity: 1,
+    price: 7.5,
+    subtotal: 7.5,
+    taxable: false,
+  });
+  assert.equal(line.taxable, false);
+  assert.equal(hasInvoiceLineTaxSnapshot(line), true);
+  assert.equal(hasInvoiceLineTaxSnapshot(line.toObject()), true);
+});
+
+test('mixed line-tax models are rejected', () => {
+  assert.throws(
+    () =>
+      buildInvoiceLines({
+        items: [
+          { product_id: PRODUCT_A, product_name: 'ABC', quantity: 1, price: 100, subtotal: 100 },
+          { product_name: 'Legacy Line', quantity: 1, price: 50, subtotal: 50 },
+        ],
+        productsById: new Map([
+          [PRODUCT_A, { name: 'ABC', tax_type_id: { _id: GST_ID, name: 'GST', rate: 18, rate_type: 'percent' } }],
+        ]),
+        inheritFromProduct: true,
+      }),
+    (err: unknown) => {
+      assert.ok(err instanceof InvoiceLineTaxError);
+      assert.equal(err.message, MIXED_LINE_TAX_ERROR);
+      return true;
+    }
+  );
+});
+
+test('quotation conversion copies Mongoose TAX-02 snapshots', () => {
+  const quote = new Invoice({
+    invoice_number: 'QTN#SNAP',
+    invoice_type: 'quotation',
+    total_amount: 118,
+    tax_amount: 18,
+    items: [
+      {
+        product_id: PRODUCT_A,
+        product_name: 'ABC',
+        quantity: 1,
+        price: 100,
+        subtotal: 100,
+        taxable: true,
+        tax_type_id: GST_ID,
+        tax_type_name: 'GST',
+        tax_rate_type: 'percent',
+        tax_rate: 18,
+        tax_amount: 18,
+        tax_type_label: 'GST — 18%',
+        total: 118,
+      },
+    ],
+  });
+  const copied = copyInvoiceLineSnapshots(quote.items || []);
+  assert.equal(hasInvoiceLineTaxSnapshot(copied[0]), true);
+  assert.equal(copied[0].taxable, true);
+  assert.equal(copied[0].tax_type_name, 'GST');
+  assert.equal(copied[0].tax_rate, 18);
+  assert.equal(copied[0].tax_amount, 18);
+  assert.equal(copied[0].tax_type_label, 'GST — 18%');
+  assert.equal(mongoose.connection.readyState, 0);
+});
+
+test('assertUniformInvoiceLineTaxModel allows all-legacy and all-TAX-02', () => {
+  assert.doesNotThrow(() => assertUniformInvoiceLineTaxModel([{ product_name: 'A', quantity: 1, price: 1, subtotal: 1 }]));
+  assert.doesNotThrow(() =>
+    assertUniformInvoiceLineTaxModel([
+      { taxable: true },
+      { taxable: false },
+    ])
+  );
 });

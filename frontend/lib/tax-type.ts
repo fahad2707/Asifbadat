@@ -30,6 +30,22 @@ export function productTaxLabel(product: {
 
 export type InvoiceLineTaxIssue = 'not_configured' | 'amount_unsupported' | null;
 
+/**
+ * Same discriminator as backend `hasInvoiceLineTaxSnapshot`.
+ * TAX-02 iff `taxable` is actually present (`true` or `false`).
+ * Admin GET payloads are lean JSON, so this checks own properties (and `_doc` if present).
+ */
+function invoiceLinePersistedFields(item: object): object {
+  const rec = item as { _doc?: unknown };
+  if (rec._doc && typeof rec._doc === 'object') return rec._doc as object;
+  return item;
+}
+
+export function hasInvoiceLineTaxSnapshot(item: unknown): boolean {
+  if (!item || typeof item !== 'object') return false;
+  return Object.prototype.hasOwnProperty.call(invoiceLinePersistedFields(item), 'taxable');
+}
+
 export const CUSTOMER_EXEMPT_TAX_LABEL = 'Customer Exempt';
 
 export type InvoiceLineTaxState = {

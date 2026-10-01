@@ -286,3 +286,303 @@ test('DELETE tax type is blocked when products are assigned', async () => {
   assert.equal(res.status, 400);
   assert.match(String(res.body.error), /assigned to 3 products/i);
 });
+
+function stubInvoiceNumber() {
+  mock.method(Invoice, 'find', () => ({
+    sort() {
+      return this;
+    },
+    limit() {
+      return this;
+    },
+    lean: async () => [],
+  }));
+}
+
+function mongooseInvoiceDoc(fields: Record<string, unknown>) {
+  const doc = new Invoice({
+    invoice_number: fields.invoice_number || 'INV#MONG',
+    invoice_type: fields.invoice_type || DOCUMENT_TYPE_INVOICE,
+    customer_id: fields.customer_id,
+    customer_name: fields.customer_name,
+    items: fields.items,
+    subtotal_amount: fields.subtotal_amount,
+    tax_amount: fields.tax_amount,
+    total_amount: fields.total_amount,
+    amount_paid: fields.amount_paid ?? 0,
+    payment_status: fields.payment_status || 'unpaid',
+    shipping_type: fields.shipping_type || '',
+  });
+  doc.save = async function saveNoDb() {
+    return this;
+  };
+  return doc;
+}
+
+test('7 — PUT of Mongoose TAX-02 invoice keeps GST 18% after Product becomes VAT', async () => {
+  assertNoMongoConnection();
+  stubProducts();
+  const doc = mongooseInvoiceDoc({
+    invoice_number: 'INV#HIST-MONGO',
+    items: [
+      {
+        product_id: PRODUCT_A,
+        product_name: 'ABC',
+        quantity: 1,
+        price: 4.99,
+        subtotal: 4.99,
+        taxable: true,
+        tax_type_id: GST_ID,
+        tax_type_name: 'GST',
+        tax_rate_type: 'percent',
+        tax_rate: 18,
+        tax_amount: 0.9,
+        tax_type_label: 'GST — 18%',
+        total: 5.89,
+      },
+    ],
+    subtotal_amount: 4.99,
+    tax_amount: 0.9,
+    total_amount: 5.89,
+  });
+  mock.method(Invoice, 'findById', async () => doc);
+  catalog[PRODUCT_A] = {
+    ...catalog[PRODUCT_A],
+    tax_type_id: { _id: VAT_ID, name: 'VAT', rate: 12, rate_type: 'percent' },
+    tax_rate: 99,
+  };
+
+  const res = await request(createApp())
+    .put('/api/invoices/inv-hist-mongo')
+    .set('Authorization', `Bearer ${adminTestToken()}`)
+    .send({
+      items: [{ product_id: PRODUCT_A, product_name: 'ABC', quantity: 1, price: 4.99, subtotal: 4.99 }],
+    });
+
+  assert.equal(res.status, 200);
+  const line = doc.items![0];
+  assert.equal(line.tax_type_name, 'GST');
+  assert.equal(line.tax_rate, 18);
+  assert.equal(line.tax_amount, 0.9);
+  assert.equal(line.taxable, true);
+  assert.equal(doc.tax_amount, 0.9);
+  assert.equal(doc.total_amount, 5.89);
+  assert.equal(catalog[PRODUCT_A].tax_rate, 99);
+  assertNoMongoConnection();
+});
+
+test('8 — converting a Mongoose TAX-02 quotation copies GST snapshot exactly', async () => {
+  assertNoMongoConnection();
+  stubProducts();
+  stubInvoiceNumber();
+  const quote = mongooseInvoiceDoc({
+    invoice_number: 'QTN#SNAP',
+    invoice_type: DOCUMENT_TYPE_QUOTATION,
+    items: [
+      {
+        product_id: PRODUCT_A,
+        product_name: 'ABC',
+        quantity: 1,
+        price: 100,
+        subtotal: 100,
+        taxable: true,
+        tax_type_id: GST_ID,
+        tax_type_name: 'GST',
+        tax_rate_type: 'percent',
+        tax_rate: 18,
+        tax_amount: 18,
+        tax_type_label: 'GST — 18%',
+        total: 118,
+      },
+    ],
+    subtotal_amount: 100,
+    tax_amount: 18,
+    total_amount: 118,
+  });
+  mock.method(Invoice, 'findById', async () => quote);
+  catalog[PRODUCT_A] = {
+    ...catalog[PRODUCT_A],
+    tax_type_id: { _id: VAT_ID, name: 'VAT', rate: 12, rate_type: 'percent' },
+    tax_rate: 40,
+  };
+  let created: Record<string, unknown> | undefined;
+  mock.method(Invoice, 'create', async (doc: Record<string, unknown>) => {
+    created = doc;
+    return createdInvoice(doc);
+  });
+  const res = await request(createApp())
+    .post('/api/invoices/qtn-snap/convert')
+    .set('Authorization', `Bearer ${adminTestToken()}`)
+    .send({});
+  assert.equal(res.status, 201);
+  const line = (created?.items as Array<Record<string, unknown>>)[0];
+  assert.equal(line.taxable, true);
+  assert.equal(line.tax_type_name, 'GST');
+  assert.equal(line.tax_rate, 18);
+  assert.equal(line.tax_amount, 18);
+  assert.equal(line.tax_type_label, 'GST — 18%');
+  assert.equal(created?.tax_amount, 18);
+  assert.equal(created?.total_amount, 118);
+  assert.equal(catalog[PRODUCT_A].tax_rate, 40);
+});
+
+test('10 — mixed POST with product line and snapshot-less line is rejected', async () => {
+  assertNoMongoConnection();
+  stubProducts();
+  mock.method(Invoice, 'create', async () => {
+    throw new Error('mixed POST must not create an invoice');
+  });
+  const res = await postInvoice({
+    invoice_number: 'INV#MIX',
+    items: [
+      { product_id: PRODUCT_A, product_name: 'ABC', quantity: 1, price: 100, subtotal: 100 },
+      { product_name: 'Legacy Line', quantity: 1, price: 50, subtotal: 50 },
+    ],
+    tax_amount: 8.5,
+  });
+  assert.equal(res.status, 400);
+  assert.match(String(res.body.error), /cannot mix legacy and line-level tax/i);
+});
+
+test('11a — PUT omitting snapshot fields on an existing TAX-02 line preserves the stored snapshot', async () => {
+  assertNoMongoConnection();
+  stubProducts();
+  const doc = mongooseInvoiceDoc({
+    invoice_number: 'INV#PRESERVE',
+    items: [
+      {
+        product_id: PRODUCT_A,
+        product_name: 'ABC',
+        quantity: 1,
+        price: 100,
+        subtotal: 100,
+        taxable: true,
+        tax_type_id: GST_ID,
+        tax_type_name: 'GST',
+        tax_rate_type: 'percent',
+        tax_rate: 18,
+        tax_amount: 18,
+        tax_type_label: 'GST — 18%',
+        total: 118,
+      },
+      {
+        product_id: PRODUCT_C,
+        product_name: 'XYZ',
+        quantity: 1,
+        price: 7.5,
+        subtotal: 7.5,
+        taxable: false,
+        tax_type_id: null,
+        tax_type_name: 'No Tax',
+        tax_amount: 0,
+        tax_type_label: 'No Tax',
+        total: 7.5,
+      },
+    ],
+    subtotal_amount: 107.5,
+    tax_amount: 18,
+    total_amount: 125.5,
+  });
+  mock.method(Invoice, 'findById', async () => doc);
+  const res = await request(createApp())
+    .put('/api/invoices/inv-preserve')
+    .set('Authorization', `Bearer ${adminTestToken()}`)
+    .send({
+      items: [
+        { product_id: PRODUCT_A, product_name: 'ABC', quantity: 1, price: 100, subtotal: 100 },
+        { product_id: PRODUCT_C, product_name: 'XYZ', quantity: 1, price: 7.5, subtotal: 7.5 },
+      ],
+    });
+  assert.equal(res.status, 200);
+  assert.equal(doc.items![0].tax_type_name, 'GST');
+  assert.equal(doc.items![0].tax_rate, 18);
+  assert.equal(doc.items![0].taxable, true);
+  assert.equal(doc.items![1].taxable, false);
+  assert.equal(doc.tax_amount, 18);
+});
+
+test('11b — PUT that would mix TAX-02 snapshots with a legacy line is rejected', async () => {
+  assertNoMongoConnection();
+  stubProducts();
+  const doc = mongooseInvoiceDoc({
+    invoice_number: 'INV#NOMIX',
+    items: [
+      {
+        product_id: PRODUCT_A,
+        product_name: 'ABC',
+        quantity: 1,
+        price: 100,
+        subtotal: 100,
+        taxable: true,
+        tax_type_id: GST_ID,
+        tax_type_name: 'GST',
+        tax_rate_type: 'percent',
+        tax_rate: 18,
+        tax_amount: 18,
+        tax_type_label: 'GST — 18%',
+        total: 118,
+      },
+    ],
+    subtotal_amount: 100,
+    tax_amount: 18,
+    total_amount: 118,
+  });
+  const snapshot = JSON.stringify({
+    tax_amount: doc.tax_amount,
+    total_amount: doc.total_amount,
+    tax_type_name: doc.items![0].tax_type_name,
+  });
+  mock.method(Invoice, 'findById', async () => doc);
+  const res = await request(createApp())
+    .put('/api/invoices/inv-nomix')
+    .set('Authorization', `Bearer ${adminTestToken()}`)
+    .send({
+      items: [
+        { product_id: PRODUCT_A, product_name: 'ABC', quantity: 1, price: 100, subtotal: 100 },
+        { product_name: 'Free text line', quantity: 1, price: 50, subtotal: 50 },
+      ],
+    });
+  assert.equal(res.status, 400);
+  assert.match(String(res.body.error), /cannot mix legacy and line-level tax/i);
+  assert.equal(
+    JSON.stringify({
+      tax_amount: doc.tax_amount,
+      total_amount: doc.total_amount,
+      tax_type_name: doc.items![0].tax_type_name,
+    }),
+    snapshot
+  );
+});
+
+test('12 — PUT of a legacy Mongoose invoice does not introduce TAX-02 snapshot fields', async () => {
+  assertNoMongoConnection();
+  stubProducts();
+  const doc = mongooseInvoiceDoc({
+    invoice_number: 'INV#LEGACY',
+    items: [{ product_id: PRODUCT_A, product_name: 'ABC', quantity: 1, price: 100, subtotal: 100 }],
+    subtotal_amount: 100,
+    tax_amount: 8.5,
+    total_amount: 108.5,
+  });
+  mock.method(Invoice, 'findById', async () => doc);
+  catalog[PRODUCT_A] = {
+    ...catalog[PRODUCT_A],
+    tax_type_id: { _id: VAT_ID, name: 'VAT', rate: 12, rate_type: 'percent' },
+  };
+  const res = await request(createApp())
+    .put('/api/invoices/inv-legacy')
+    .set('Authorization', `Bearer ${adminTestToken()}`)
+    .send({
+      tax_amount: 8.5,
+      items: [{ product_id: PRODUCT_A, product_name: 'ABC', quantity: 2, price: 100, subtotal: 200 }],
+    });
+  assert.equal(res.status, 200);
+  const line = doc.items![0] as unknown as { quantity: number; subtotal: number; toObject: () => Record<string, unknown> };
+  const raw = line.toObject();
+  assert.equal(Object.prototype.hasOwnProperty.call(raw, 'taxable'), false);
+  assert.equal(line.quantity, 2);
+  assert.equal(line.subtotal, 200);
+  assert.equal(doc.tax_amount, 8.5);
+  assert.equal(doc.total_amount, 208.5);
+  assertNoMongoConnection();
+});

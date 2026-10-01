@@ -54,8 +54,39 @@ export type InvoiceLineRecord = {
   subtotal: number;
 } & Partial<InvoiceLineTaxSnapshot>;
 
-export function hasInvoiceLineTaxSnapshot(item: object): boolean {
-  return Object.prototype.hasOwnProperty.call(item, 'taxable');
+export const MIXED_LINE_TAX_ERROR =
+  'Invoice lines cannot mix legacy and line-level tax models. Every line must use the same tax model.';
+
+/**
+ * Discriminator: TAX-02 line vs legacy line.
+ *
+ * TAX-02 iff the object actually contains a `taxable` key (`true` or `false`).
+ * Schema presence is not enough: Mongoose InvoiceItem getters make
+ * `'taxable' in subdoc` true even when the field was never stored.
+ *
+ * Reads:
+ * - lean Mongo / JSON / tests — own property on the object
+ * - Mongoose subdocuments — own property on `_doc` (persisted/assigned bag)
+ * - `toObject()` results — own property on the plain object
+ */
+function invoiceLinePersistedFields(item: object): object {
+  const rec = item as { _doc?: unknown };
+  if (rec._doc && typeof rec._doc === 'object') return rec._doc as object;
+  return item;
+}
+
+export function hasInvoiceLineTaxSnapshot(item: unknown): boolean {
+  if (!item || typeof item !== 'object') return false;
+  return Object.prototype.hasOwnProperty.call(invoiceLinePersistedFields(item), 'taxable');
+}
+
+export function assertUniformInvoiceLineTaxModel(items: unknown[]): void {
+  const flags = (items || []).map((item) => hasInvoiceLineTaxSnapshot(item));
+  const some = flags.some(Boolean);
+  const all = flags.length === 0 || flags.every(Boolean);
+  if (some && !all) {
+    throw new InvoiceLineTaxError(MIXED_LINE_TAX_ERROR);
+  }
 }
 
 export function computePercentLineTax(subtotal: number, rate: number): number {
@@ -251,6 +282,7 @@ export function buildInvoiceLines(input: {
       customerExempt: input.customerExempt === true,
     });
   });
+  assertUniformInvoiceLineTaxModel(items);
   const usedLineTax = items.some((item) => hasInvoiceLineTaxSnapshot(item));
   return { items, usedLineTax };
 }
@@ -271,7 +303,7 @@ export function invoiceTaxTotals(
 }
 
 export function copyInvoiceLineSnapshots(items: unknown[]): InvoiceLineRecord[] {
-  return (items || []).map((raw) => {
+  const copied = (items || []).map((raw) => {
     const rec = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
     const quantity = Number(rec.quantity) || 0;
     const price = Number(rec.price) || 0;
@@ -287,4 +319,6 @@ export function copyInvoiceLineSnapshots(items: unknown[]): InvoiceLineRecord[] 
     if (!hasInvoiceLineTaxSnapshot(rec)) return base;
     return { ...base, ...applyLineTaxSnapshot(subtotal, rec) };
   });
+  assertUniformInvoiceLineTaxModel(copied);
+  return copied;
 }
