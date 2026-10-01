@@ -38,42 +38,77 @@ router.get('/summary', authenticateAdmin, async (req: AuthRequest, res) => {
   }
 });
 
-// Adjust stock (manual adjustment)
+// Adjust stock (manual adjustment) and optionally update listed cost / selling price
 router.post('/adjust', authenticateAdmin, async (req: AuthRequest, res) => {
   try {
     const schema = z.object({
       product_id: z.string(),
-      quantity_change: z.number().int(), // positive = add, negative = remove
+      quantity_change: z.coerce.number().int().optional().default(0), // positive = add, negative = remove
+      cost_price: z.coerce.number().min(0).optional(),
+      price: z.coerce.number().min(0).optional(),
       notes: z.string().optional(),
     });
-    const { product_id, quantity_change, notes } = schema.parse(req.body);
+    const { product_id, quantity_change, cost_price, price, notes } = schema.parse(req.body);
     const product = await Product.findById(product_id);
     if (!product) return res.status(404).json({ error: 'Product not found' });
+
+    const hasQty = quantity_change !== 0;
+    const hasCost = cost_price !== undefined;
+    const hasPrice = price !== undefined;
+    if (!hasQty && !hasCost && !hasPrice) {
+      return res.status(400).json({ error: 'Nothing to update' });
+    }
+
+    const nextCost = hasCost ? Number(cost_price) : Number((product as any).cost_price || 0);
+    const nextPrice = hasPrice ? Number(price) : Number(product.price || 0);
+    if (nextCost > 0) {
+      const min = Math.round(nextCost * 1.05 * 100) / 100;
+      if (nextPrice + 1e-9 < min) {
+        return res.status(400).json({
+          error: `"${product.name}" selling price must be at least $${min.toFixed(2)} (5% above cost $${nextCost.toFixed(2)}).`,
+        });
+      }
+    }
+
     const oldQty = product.stock_quantity;
     const newQty = oldQty + quantity_change;
-    if (newQty < 0) return res.status(400).json({ error: 'Resulting stock cannot be negative' });
-    await Product.findByIdAndUpdate(product_id, { stock_quantity: newQty });
-    await StockMovement.create({
-      product_id,
-      movement_type: 'adjustment',
-      quantity_change,
-      notes: notes || undefined,
-      admin_id: req.userId,
-    });
+    const update: Record<string, unknown> = {};
+    if (hasQty) update.stock_quantity = newQty;
+    if (hasCost) update.cost_price = nextCost;
+    if (hasPrice) update.price = nextPrice;
+
+    await Product.findByIdAndUpdate(product_id, update);
+    if (hasQty) {
+      await StockMovement.create({
+        product_id,
+        movement_type: 'adjustment',
+        quantity_change,
+        notes: notes || undefined,
+        admin_id: req.userId,
+      });
+    }
     await AuditLog.create({
       admin_id: req.userId,
       action: 'stock_adjust',
       entity_type: 'Product',
       entity_id: product_id,
-      old_value: { stock_quantity: oldQty },
-      new_value: { stock_quantity: newQty },
+      old_value: { stock_quantity: oldQty, cost_price: (product as any).cost_price, price: product.price },
+      new_value: {
+        stock_quantity: hasQty ? newQty : oldQty,
+        cost_price: hasCost ? nextCost : (product as any).cost_price,
+        price: hasPrice ? nextPrice : product.price,
+      },
       details: notes || `Stock adjusted by ${quantity_change >= 0 ? '+' : ''}${quantity_change}`,
     });
     const updated = await Product.findById(product_id).lean();
     res.json({
       id: updated!._id.toString(),
       stock_quantity: (updated as any).stock_quantity,
-      message: `Stock adjusted by ${quantity_change >= 0 ? '+' : ''}${quantity_change}`,
+      cost_price: (updated as any).cost_price ?? null,
+      price: (updated as any).price,
+      message: hasQty
+        ? `Stock adjusted by ${quantity_change >= 0 ? '+' : ''}${quantity_change}`
+        : 'Prices updated',
     });
   } catch (error: any) {
     if (error instanceof z.ZodError) return res.status(400).json({ error: error.errors[0].message });

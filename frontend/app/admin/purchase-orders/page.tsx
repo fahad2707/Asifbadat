@@ -1,15 +1,17 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { Plus, Eye, FileText, Truck, Search, X, Trash2, Download } from 'lucide-react';
-import adminApi from '@/lib/admin-api';
+import { Plus, Search, X, Trash2, Download } from 'lucide-react';
+import adminApi, { uploadApi } from '@/lib/admin-api';
 import toast from 'react-hot-toast';
 import { downloadPdfFromResponse, openPdfFromResponse } from '@/lib/download-pdf';
 import Link from 'next/link';
 import SearchableProductDropdown from '@/components/admin/SearchableProductDropdown';
+import NumberInput from '@/components/admin/NumberInput';
 import { adminUi } from '@/lib/admin-ui';
 import { exportPurchaseOrdersToExcel } from '@/lib/export-purchase-orders-excel';
+import PurchaseOrderDrawer from '@/components/admin/PurchaseOrderDrawer';
 
 interface POItem {
   product_id: string;
@@ -34,6 +36,8 @@ interface PurchaseOrder {
   tax_amount: number;
   total_amount: number;
   created_at: string;
+  vendor_invoice_url?: string | null;
+  vendor_invoice_name?: string | null;
 }
 
 interface Vendor {
@@ -83,6 +87,9 @@ export default function PurchaseOrdersPage() {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [exporting, setExporting] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [detailId, setDetailId] = useState<string | null>(null);
+  const [uploadingVendorInvoice, setUploadingVendorInvoice] = useState(false);
+  const vendorInvoiceInputRef = useRef<HTMLInputElement>(null);
 
   const fetchPOs = async () => {
     try {
@@ -97,7 +104,7 @@ export default function PurchaseOrdersPage() {
 
   const fetchVendors = async () => {
     try {
-      const res = await adminApi.get('/vendors');
+      const res = await adminApi.get('/vendors', { params: { limit: 5000 } });
       setVendors(res.data.vendors || []);
     } catch {
       toast.error('Failed to load vendors');
@@ -106,7 +113,7 @@ export default function PurchaseOrdersPage() {
 
   const fetchProducts = async () => {
     try {
-      const res = await adminApi.get('/products');
+      const res = await adminApi.get('/products', { params: { limit: 5000 } });
       setProducts(res.data.products || []);
     } catch {
       toast.error('Failed to load products');
@@ -300,13 +307,39 @@ export default function PurchaseOrdersPage() {
   const pmtStatus = (po: PurchaseOrder) => {
     if (po.status === 'received') return 'Paid';
     if (po.status === 'partial') return 'Partial PMT';
+    if (po.status === 'cancelled') return 'Cancelled';
     return 'Pending';
   };
 
   const shippingStatus = (po: PurchaseOrder) => {
     if (po.status === 'received') return 'Received';
     if (po.status === 'partial') return 'Partial';
+    if (po.status === 'sent') return 'Sent';
+    if (po.status === 'cancelled') return 'Cancelled';
     return 'Pending';
+  };
+
+  const receivePoStock = async (po: PurchaseOrder) => {
+    try {
+      const res = await adminApi.get(`/purchase-orders/${po.id}`);
+      const items = (res.data.items || [])
+        .map((i: POItem) => {
+          const pid = typeof i.product_id === 'string' ? i.product_id : String((i.product_id as unknown as { _id?: string })?._id || i.product_id || '');
+          const remaining = Number(i.quantity_ordered || 0) - Number(i.quantity_received || 0);
+          return { product_id: pid, quantity_received: remaining };
+        })
+        .filter((i: { product_id: string; quantity_received: number }) => i.product_id && i.quantity_received > 0);
+      if (items.length === 0) {
+        toast.error('Nothing left to receive');
+        return;
+      }
+      if (!confirm(`Mark remaining stock as received for ${po.po_number}? Inventory will increase.`)) return;
+      await adminApi.post(`/purchase-orders/${po.id}/receive`, { items });
+      toast.success('Stock received and inventory updated');
+      fetchPOs();
+    } catch (err: any) {
+      toast.error(err.response?.data?.error || 'Failed to receive stock');
+    }
   };
 
   return (
@@ -417,7 +450,11 @@ export default function PurchaseOrdersPage() {
                     const paySt = pmtStatus(po);
                     const shipSt = shippingStatus(po);
                     return (
-                      <tr key={po.id} className={`border-b border-white/5 hover:bg-white/[0.02] transition-colors ${selectedIds.has(po.id) ? 'bg-[#F4F5F8]' : ''}`}>
+                      <tr
+                        key={po.id}
+                        className={`border-b border-white/5 hover:bg-white/[0.02] transition-colors cursor-pointer ${selectedIds.has(po.id) ? 'bg-[#F4F5F8]' : ''}`}
+                        onClick={() => setDetailId(po.id)}
+                      >
                         <td className="py-3 px-4" onClick={(e) => e.stopPropagation()}>
                           <input
                             type="checkbox"
@@ -428,7 +465,12 @@ export default function PurchaseOrdersPage() {
                           />
                         </td>
                         <td className="py-3 px-4 text-xs text-slate-350">{po.created_at ? new Date(po.created_at).toLocaleDateString('en-US', { month: 'short', day: '2-digit', year: 'numeric' }) : '—'}</td>
-                        <td className="py-3 px-4 text-xs font-mono font-bold text-teal-450">{po.po_number}</td>
+                        <td className="py-3 px-4 text-xs font-mono font-bold text-teal-450">
+                          <span>{po.po_number}</span>
+                          {po.vendor_invoice_url ? (
+                            <span className="ml-2 text-[10px] font-semibold text-[#6B6C72] uppercase tracking-wide">vendor inv.</span>
+                          ) : null}
+                        </td>
                         <td className="py-3 px-4 text-xs text-slate-300 font-mono">{po.supplier_id || '—'}</td>
                         <td className="py-3 px-4 text-xs font-semibold text-slate-200">{po.vendor_name}</td>
                         <td className="py-3 px-4 text-xs text-slate-400">—</td>
@@ -443,12 +485,16 @@ export default function PurchaseOrdersPage() {
                         <td className="py-3 px-4 text-xs">
                           <span className={`inline-flex px-2 py-0.5 rounded text-[10px] font-bold border ${shipSt === 'Received' ? 'bg-teal-500/10 text-teal-450 border-teal-500/20' : shipSt === 'Partial' ? 'bg-amber-500/10 text-amber-400 border-amber-500/20' : 'bg-slate-800 text-slate-400 border-white/10'}`}>{shipSt}</span>
                         </td>
-                        <td className="py-3 px-4 text-right text-xs">
-                          <div className="flex items-center justify-end gap-2.5">
-                            <Link href={`/admin/purchase-orders/${po.id}`} className="inline-flex items-center gap-1 text-teal-450 hover:text-teal-350 hover:underline font-semibold">
-                              <Eye className="w-3.5 h-3.5" />
+                        <td className="py-3 px-4 text-right text-xs" onClick={(e) => e.stopPropagation()}>
+                          <div className="flex items-center justify-end gap-2.5 flex-wrap">
+                            <button type="button" onClick={() => setDetailId(po.id)} className="text-[#0077C5] hover:underline font-medium">
                               View
-                            </Link>
+                            </button>
+                            {po.status === 'draft' && (
+                              <Link href={`/admin/purchase-orders/${po.id}`} className="text-[#0077C5] hover:underline font-medium">
+                                Edit
+                              </Link>
+                            )}
                             <button
                               type="button"
                               onClick={async () => {
@@ -461,12 +507,33 @@ export default function PurchaseOrdersPage() {
                                   toast.error('Failed to download PDF');
                                 }
                               }}
-                              className="inline-flex items-center gap-1 text-slate-400 hover:text-white hover:underline font-semibold"
-                              title="Download PDF"
+                              className="text-[#6B6C72] hover:underline font-medium"
                             >
-                              <Download className="w-3.5 h-3.5" />
-                              PDF
+                              Print
                             </button>
+                            {(po.status === 'draft' || po.status === 'sent' || po.status === 'partial') && (
+                              <button type="button" onClick={() => receivePoStock(po)} className="text-[#0077C5] hover:underline font-medium">
+                                Receive
+                              </button>
+                            )}
+                            {(po.status === 'draft' || po.status === 'cancelled' || po.status === 'sent') && (
+                              <button
+                                type="button"
+                                onClick={async () => {
+                                  if (!confirm(`Delete ${po.po_number}?`)) return;
+                                  try {
+                                    await adminApi.delete(`/purchase-orders/${po.id}`);
+                                    toast.success('Deleted');
+                                    fetchPOs();
+                                  } catch (error: any) {
+                                    toast.error(error?.response?.data?.error || 'Failed to delete');
+                                  }
+                                }}
+                                className="text-[#C81916] hover:underline font-medium"
+                              >
+                                Delete
+                              </button>
+                            )}
                           </div>
                         </td>
                       </tr>
@@ -478,6 +545,16 @@ export default function PurchaseOrdersPage() {
           </div>
         )}
       </div>
+
+      <PurchaseOrderDrawer
+        poId={detailId}
+        onClose={() => setDetailId(null)}
+        onEdit={(id) => {
+          setDetailId(null);
+          router.push(`/admin/purchase-orders/${id}`);
+        }}
+        onChanged={fetchPOs}
+      />
 
       {showCreate && (
         <div className="admin-lightbox fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50" onClick={() => setShowCreate(false)}>
@@ -571,14 +648,14 @@ export default function PurchaseOrdersPage() {
                               <td className="py-2 px-4 text-gray-600">{r.category_name || ''}</td>
                               <td className="py-2 px-4 text-right">
                                 {hasProduct ? (
-                                  <input type="number" min={1} value={r.qty} onChange={(e) => updateRow(idx, 'qty', e.target.value)} className="w-16 text-right border border-gray-300 rounded px-2 py-1" />
+                                  <NumberInput min={1} value={r.qty} onValueChange={(n) => updateRow(idx, 'qty', n === '' ? 0 : n)} className="w-16 text-right border border-gray-300 rounded px-2 py-1" />
                                 ) : (
                                   <span className="text-gray-400">—</span>
                                 )}
                               </td>
                               <td className="py-2 px-4 text-right">
                                 {hasProduct ? (
-                                  <input type="number" min={0} step={0.01} value={r.unit_cost || ''} onChange={(e) => updateRow(idx, 'unit_cost', e.target.value)} className="w-20 text-right border border-gray-300 rounded px-2 py-1" />
+                                  <NumberInput min={0} step={0.01} value={r.unit_cost} onValueChange={(n) => updateRow(idx, 'unit_cost', n === '' ? 0 : n)} className="w-20 text-right border border-gray-300 rounded px-2 py-1" />
                                 ) : (
                                   <span className="text-gray-400">—</span>
                                 )}
@@ -615,14 +692,12 @@ export default function PurchaseOrdersPage() {
                           <p className="text-sm text-gray-600">Subtotal: <span className="font-medium text-gray-900">${itemSubtotal.toFixed(2)}</span></p>
                           <div>
                             <label className="block text-sm font-medium text-gray-700 mb-1">Shipping</label>
-                            <input
-                              type="number"
+                            <NumberInput
                               min={0}
                               step={0.01}
-                              value={shippingCost || ''}
-                              onChange={(e) => setShippingCost(Number(e.target.value) || 0)}
+                              value={shippingCost}
+                              onValueChange={(n) => setShippingCost(n === '' ? 0 : n)}
                               className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
-                              placeholder="0.00"
                             />
                           </div>
                           <p className="font-semibold text-gray-900 text-base">Total: ${grandTotal.toFixed(2)}</p>
@@ -693,7 +768,41 @@ export default function PurchaseOrdersPage() {
         <div className="admin-lightbox fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50" onClick={() => { setShowPdfModal(false); setSavedPoId(null); }}>
           <div className="bg-white rounded-xl shadow-xl p-6 max-w-sm w-full" onClick={(e) => e.stopPropagation()}>
             <h3 className="text-lg font-semibold text-gray-900 mb-2">Document saved</h3>
-            <p className="text-gray-600 text-sm mb-4">Download or print the purchase order PDF.</p>
+            <p className="text-gray-600 text-sm mb-4">Download our PO PDF, or attach the vendor&apos;s invoice (JPG or PDF) for later reference.</p>
+            <input
+              ref={vendorInvoiceInputRef}
+              type="file"
+              accept=".jpg,.jpeg,.pdf,image/jpeg,application/pdf"
+              className="hidden"
+              onChange={async (e) => {
+                const file = e.target.files?.[0];
+                e.target.value = '';
+                if (!file || !savedPoId) return;
+                const name = file.name.toLowerCase();
+                const ok =
+                  file.type === 'image/jpeg' ||
+                  file.type === 'application/pdf' ||
+                  name.endsWith('.jpg') ||
+                  name.endsWith('.jpeg') ||
+                  name.endsWith('.pdf');
+                if (!ok) {
+                  toast.error('Upload a JPG or PDF of the vendor invoice');
+                  return;
+                }
+                setUploadingVendorInvoice(true);
+                try {
+                  const form = new FormData();
+                  form.append('file', file);
+                  await uploadApi.post(`/purchase-orders/${savedPoId}/vendor-invoice`, form);
+                  toast.success('Vendor invoice saved');
+                  fetchPOs();
+                } catch (err: any) {
+                  toast.error(err.response?.data?.error || 'Failed to upload vendor invoice');
+                } finally {
+                  setUploadingVendorInvoice(false);
+                }
+              }}
+            />
             <div className="flex flex-col gap-2">
               <button
                 type="button"
@@ -710,6 +819,14 @@ export default function PurchaseOrdersPage() {
                 className="w-full px-4 py-2.5 rounded-lg font-medium bg-black text-white hover:bg-[#2C2C2C]"
               >
                 Download PDF
+              </button>
+              <button
+                type="button"
+                disabled={uploadingVendorInvoice}
+                onClick={() => vendorInvoiceInputRef.current?.click()}
+                className="w-full px-4 py-2.5 rounded-lg font-medium border border-gray-300 text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+              >
+                {uploadingVendorInvoice ? 'Uploading…' : 'Upload vendor invoice'}
               </button>
               <button
                 type="button"

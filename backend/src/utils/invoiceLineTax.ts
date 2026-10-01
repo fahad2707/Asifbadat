@@ -292,9 +292,11 @@ export function invoiceTaxTotals(
   opts: { usedLineTax: boolean; fallbackTaxAmount?: number }
 ): { subtotal_amount: number; tax_amount: number; total_amount: number } {
   const subtotal_amount = roundMoney(items.reduce((sum, item) => sum + (Number(item.subtotal) || 0), 0));
+  const lineTax = roundMoney(items.reduce((sum, item) => sum + (Number(item.tax_amount) || 0), 0));
   const tax_amount = opts.usedLineTax
-    ? roundMoney(items.reduce((sum, item) => sum + (Number(item.tax_amount) || 0), 0))
+    ? roundMoney(Math.max(lineTax, opts.fallbackTaxAmount ?? 0))
     : roundMoney(opts.fallbackTaxAmount ?? 0);
+  // TAX-02 line tax is the floor. A higher fallback is extra tax on the bill.
   return {
     subtotal_amount,
     tax_amount,

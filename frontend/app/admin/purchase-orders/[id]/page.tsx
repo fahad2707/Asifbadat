@@ -6,6 +6,7 @@ import Link from 'next/link';
 import { ArrowLeft, Send, Package, Check } from 'lucide-react';
 import adminApi from '@/lib/admin-api';
 import toast from 'react-hot-toast';
+import NumberInput from '@/components/admin/NumberInput';
 
 interface POItem {
   product_id: string;
@@ -32,6 +33,13 @@ interface PO {
   created_at: string;
 }
 
+function lineProductId(item: POItem): string {
+  const p = item.product_id as unknown;
+  if (typeof p === 'string') return p;
+  const rec = p as { _id?: unknown; id?: unknown };
+  return String(rec._id || rec.id || '');
+}
+
 export default function PurchaseOrderDetailPage() {
   const params = useParams();
   const router = useRouter();
@@ -48,7 +56,7 @@ export default function PurchaseOrderDetailPage() {
       const initial: Record<string, number> = {};
       (res.data.items || []).forEach((i: POItem) => {
         const remaining = i.quantity_ordered - (i.quantity_received || 0);
-        initial[i.product_id] = remaining > 0 ? remaining : 0;
+        initial[lineProductId(i)] = remaining > 0 ? remaining : 0;
       });
       setReceiveQty(initial);
     } catch {
@@ -76,8 +84,8 @@ export default function PurchaseOrderDetailPage() {
   const handleReceive = async () => {
     if (!po) return;
     const items = po.items
-      .filter((i) => (receiveQty[i.product_id] || 0) > 0)
-      .map((i) => ({ product_id: i.product_id, quantity_received: receiveQty[i.product_id] || 0 }));
+      .filter((i) => (receiveQty[lineProductId(i)] || 0) > 0)
+      .map((i) => ({ product_id: lineProductId(i), quantity_received: receiveQty[lineProductId(i)] || 0 }));
     if (items.length === 0) {
       toast.error('Enter quantities to receive');
       return;
@@ -177,12 +185,11 @@ export default function PurchaseOrderDetailPage() {
                   {canReceive && (
                     <td className="py-3 px-4 text-right text-xs">
                       {remaining > 0 ? (
-                        <input
-                          type="number"
+                        <NumberInput
                           min={0}
                           max={remaining}
-                          value={receiveQty[item.product_id] ?? remaining}
-                          onChange={(e) => setReceiveQty({ ...receiveQty, [item.product_id]: parseInt(e.target.value, 10) || 0 })}
+                          value={receiveQty[lineProductId(item)] ?? remaining}
+                          onValueChange={(n) => setReceiveQty({ ...receiveQty, [lineProductId(item)]: n === '' ? 0 : Math.trunc(n) })}
                           className="w-20 bg-slate-950/60 border border-white/10 rounded px-2.5 py-1 text-xs text-right text-slate-205 focus:outline-none"
                         />
                       ) : (

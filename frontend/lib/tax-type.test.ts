@@ -75,4 +75,5 @@ test('invoice editor keeps edit-mode snapshot lines and syncs live exemption for
   assert.match(src, /lineFromProduct\(product, 1, usePrice, undefined, usesLineTax, customerTaxExempt\)/);
   assert.match(src, /Existing lines keep their stored tax/);
   assert.equal(src.includes('!editId && customerTaxExempt'), false);
+  assert.equal(src.includes('has no configured tax type.`, { duration: 5000 }'), false);
 });

@@ -25,7 +25,7 @@ import {
   Settings,
 } from 'lucide-react';
 import adminApi from '@/lib/admin-api';
-import { adminNavItemClass, adminNavUtilityClass, adminUi } from '@/lib/admin-ui';
+import { adminCreateTagClass, adminNavItemClass, adminNavUtilityClass, adminUi } from '@/lib/admin-ui';
 
 function pathMatches(pathname: string | null | undefined, href: string): boolean {
   if (!pathname) return false;
@@ -39,20 +39,35 @@ function catalogTabIs(searchParams: { get: (key: string) => string | null }, tab
   return t === tab;
 }
 
-function headerContextLabel(pathname: string | null | undefined, creatingInvoice = false, catalogTab = ''): string {
+function createHrefIsActive(pathname: string | null | undefined, searchParams: { get: (key: string) => string | null }, href: string): boolean {
+  if (!pathname) return false;
+  const [path, query = ''] = href.split('?');
+  const params = new URLSearchParams(query);
+  if (path === '/admin/products/new') {
+    return pathname === '/admin/products/new' || pathname.startsWith('/admin/products/new/');
+  }
+  if (pathname !== path) return false;
+  if (![...params.keys()].length) return false;
+  return [...params.entries()].every(([key, value]) => searchParams.get(key) === value);
+}
+
+function headerContextLabel(pathname: string | null | undefined, creatingInvoice = false, catalogTab = '', receivingPayment = false, adjustingStock = false): string {
   if (!pathname) return 'Express Distributors';
   if (pathname === '/admin/dashboard' || pathname.startsWith('/admin/dashboard/')) return 'Overview';
+  if ((pathname === '/admin/invoices' || pathname.startsWith('/admin/invoices/')) && receivingPayment) return 'Receive payments';
   if ((pathname === '/admin/invoices' || pathname.startsWith('/admin/invoices/')) && creatingInvoice) return 'Offline sales';
   if (pathname === '/admin/invoices' || pathname.startsWith('/admin/invoices/')) return 'Invoices & quotations';
   if (pathname === '/admin/customers' || pathname.startsWith('/admin/customers/')) return 'Customers';
   if (pathname === '/admin/products/new') return 'Product';
   if (pathname === '/admin/products' || pathname.startsWith('/admin/products/')) return 'Products';
   if (pathname === '/admin/receipts' || pathname.startsWith('/admin/receipts/')) return 'Bank transactions';
+  if ((pathname === '/admin/inventory' || pathname.startsWith('/admin/inventory/')) && adjustingStock) return 'Stock adjustments';
   if (pathname === '/admin/inventory' || pathname.startsWith('/admin/inventory/')) return 'Inventory';
   if (pathname === '/admin/purchase-orders' || pathname.startsWith('/admin/purchase-orders/')) return 'Purchase order';
   if (pathname === '/admin/vendors' || pathname.startsWith('/admin/vendors/')) return 'Vendors / suppliers';
-  if (pathname === '/admin/expenses' || pathname.startsWith('/admin/expenses/')) return 'Expense overview';
-  if (pathname === '/admin/credit-memos' || pathname.startsWith('/admin/credit-memos/')) return 'Credit memo';
+  if (pathname === '/admin/expenses' || pathname.startsWith('/admin/expenses/')) return 'Pay bill';
+  if (pathname.includes('/admin/credit-memos/vendors')) return 'Credit memo for vendors';
+  if (pathname.includes('/admin/credit-memos/customers') || pathname === '/admin/credit-memos' || pathname.startsWith('/admin/credit-memos/')) return 'Credit memo for customers';
   if (pathname === '/admin/analytics' || pathname.startsWith('/admin/analytics/')) return 'Profit & loss';
   if (pathname === '/admin/rfq' || pathname.startsWith('/admin/rfq/')) return 'RFQ';
   if (pathname === '/admin/shipments' || pathname.startsWith('/admin/shipments/')) return 'Shipments';
@@ -79,15 +94,16 @@ export default function AdminLayoutClient({ children }: { children: React.ReactN
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const creatingInvoice = searchParams.get('create') === 'invoice';
+  const receivingPayment = searchParams.get('receive') === '1';
+  const adjustingStock = searchParams.get('adjust') === '1';
   const [hasToken, setHasToken] = useState<boolean>(true);
 
   // Collapsible navigational groups
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({
-    create: true,
     sales: true,
-    banking: true,
-    customers: true,
+    vendors: true,
     inventory: true,
+    banking: true,
     reports: true,
     more: true,
   });
@@ -120,41 +136,6 @@ export default function AdminLayoutClient({ children }: { children: React.ReactN
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, []);
-
-  useEffect(() => {
-    if (!pathname) return;
-    const creating = searchParams.get('create') || searchParams.get('new');
-    const catalogTab = searchParams.get('tab') || '';
-    const isCatalog = pathname === '/admin/catalog' || pathname.startsWith('/admin/catalog/');
-    const isCreate =
-      Boolean(creating) ||
-      pathname === '/admin/products/new' ||
-      pathname.startsWith('/admin/products/new/');
-    const isSales =
-      !creatingInvoice &&
-      (['/admin/invoices', '/admin/rfq', '/admin/products'].some((p) => pathname === p || pathname.startsWith(`${p}/`)) ||
-        (isCatalog && (catalogTab === 'categories' || catalogTab === 'subcategories' || !catalogTab)));
-    const isBanking =
-      ['/admin/expenses', '/admin/vendors', '/admin/receipts'].some((p) => pathname === p || pathname.startsWith(`${p}/`)) ||
-      (isCatalog && (catalogTab === 'tax' || catalogTab === 'bank' || catalogTab === 'payment'));
-    const isCustomers = pathname === '/admin/customers' || pathname.startsWith('/admin/customers/');
-    const isInventory =
-      creatingInvoice ||
-      ['/admin/inventory', '/admin/purchase-orders', '/admin/credit-memos'].some((p) => pathname === p || pathname.startsWith(`${p}/`));
-    const isReports = pathname === '/admin/analytics' || pathname.startsWith('/admin/analytics/');
-    const isMore = isCatalog || pathname === '/admin/data' || pathname.startsWith('/admin/data/');
-    const isHome = pathname === '/admin' || pathname === '/admin/dashboard' || pathname.startsWith('/admin/dashboard/');
-
-    setOpenGroups({
-      create: isCreate || isHome,
-      sales: (isSales && !isCreate) || isHome,
-      banking: (isBanking && !isCreate) || isHome,
-      customers: (isCustomers && !isCreate) || isHome,
-      inventory: (isInventory && !isCreate) || isHome,
-      reports: isReports || isHome,
-      more: (isMore && !isCreate) || isHome,
-    });
-  }, [pathname, creatingInvoice, searchParams]);
 
   useEffect(() => {
     setMobileNavOpen(false);
@@ -290,7 +271,8 @@ export default function AdminLayoutClient({ children }: { children: React.ReactN
     { label: 'Customer', short: 'c c', icon: Users, href: '/admin/customers?create=1' },
     { label: 'Vendor', short: 'c v', icon: Truck, href: '/admin/vendors?create=1' },
     { label: 'Purchase order', short: 'c p', icon: ClipboardList, href: '/admin/purchase-orders?create=1' },
-    { label: 'Credit memo', short: 'c m', icon: RotateCcw, href: '/admin/credit-memos?new=1' },
+    { label: 'Credit memo (customer)', short: 'c m', icon: RotateCcw, href: '/admin/credit-memos/customers?new=1' },
+    { label: 'Credit memo (vendor)', short: 'c n', icon: RotateCcw, href: '/admin/credit-memos/vendors?new=1' },
     { label: 'Bank transaction', short: 'c b', icon: Landmark, href: '/admin/receipts?create=1' },
     { label: 'Product', short: 'c r', icon: Package, href: '/admin/products/new' },
     { label: 'Category', short: 'c g', icon: FolderTree, href: '/admin/catalog?tab=categories&create=1' },
@@ -372,7 +354,7 @@ export default function AdminLayoutClient({ children }: { children: React.ReactN
       )}
 
       <aside
-        className={`w-56 shrink-0 h-full min-h-0 flex flex-col z-40 ${adminUi.sidebar} fixed inset-y-0 left-0 transform transition-transform duration-200 lg:static lg:translate-x-0 ${
+        className={`w-64 shrink-0 h-full min-h-0 flex flex-col z-40 ${adminUi.sidebar} fixed inset-y-0 left-0 transform transition-transform duration-200 lg:static lg:translate-x-0 ${
           mobileNavOpen ? 'translate-x-0' : '-translate-x-full'
         }`}
       >
@@ -391,58 +373,43 @@ export default function AdminLayoutClient({ children }: { children: React.ReactN
           }}
         >
           <div>
-            <button type="button" onClick={() => toggleGroup('create')} className="w-full flex items-center justify-between px-3 py-1.5 rounded-md hover:bg-[#F4F5F8] text-left">
-              <span className={adminUi.navGroup}>Create</span>
-              {openGroups.create ? <ChevronDown className="w-3.5 h-3.5 text-[#8D9096]" /> : <ChevronRight className="w-3.5 h-3.5 text-[#8D9096]" />}
-            </button>
-            {openGroups.create && (
-              <div className="pl-2 mt-0.5 space-y-0.5">
-                {createActions.map((a) => (
-                  <Link key={a.href} href={a.href} className={adminNavItemClass(false)} onClick={() => setMobileNavOpen(false)}>
-                    {a.label}
-                  </Link>
-                ))}
-              </div>
-            )}
+            <p className={`${adminUi.navGroup} px-3 py-1.5`}>Create</p>
+            <div className="px-2 mt-0.5 flex flex-wrap gap-1.5">
+              {createActions.map((a) => (
+                <Link key={a.href} href={a.href} className={adminCreateTagClass(createHrefIsActive(pathname, searchParams, a.href))} onClick={() => setMobileNavOpen(false)}>
+                  {a.label}
+                </Link>
+              ))}
+            </div>
           </div>
           <div>
             <button type="button" onClick={() => toggleGroup('sales')} className="w-full flex items-center justify-between px-3 py-1.5 rounded-md hover:bg-[#F4F5F8] text-left">
-              <span className={adminUi.navGroup}>Sales and get paid</span>
+              <span className={adminUi.navGroup}>Sales and getting paid</span>
               {openGroups.sales ? <ChevronDown className="w-3.5 h-3.5 text-[#8D9096]" /> : <ChevronRight className="w-3.5 h-3.5 text-[#8D9096]" />}
             </button>
             {openGroups.sales && (
               <div className="pl-2 mt-0.5 space-y-0.5">
-                <Link href="/admin/invoices" className={adminNavItemClass(pathMatches(pathname, '/admin/invoices') && !creatingInvoice)}>Invoices &amp; quotations</Link>
+                <Link href="/admin/customers" className={adminNavItemClass(pathMatches(pathname, '/admin/customers'))}>Customer</Link>
+                <Link href="/admin/invoices" className={adminNavItemClass(pathMatches(pathname, '/admin/invoices') && !creatingInvoice && !receivingPayment)}>Invoices &amp; quotations</Link>
                 <Link href="/admin/rfq" className={adminNavItemClass(pathMatches(pathname, '/admin/rfq'))}>RFQ</Link>
+                <Link href="/admin/credit-memos/customers" className={adminNavItemClass(pathname?.includes('/admin/credit-memos/customers') || pathname === '/admin/credit-memos')}>Credit memo (customers)</Link>
+                <Link href="/admin/invoices?receive=1" className={adminNavItemClass(receivingPayment)}>Receive payments</Link>
                 <Link href="/admin/products/active" className={adminNavItemClass(pathMatches(pathname, '/admin/products') && pathname !== '/admin/products/new')}>Products</Link>
                 <Link href="/admin/catalog?tab=categories" className={adminNavItemClass(pathMatches(pathname, '/admin/catalog') && catalogTabIs(searchParams, 'categories'))}>Categories</Link>
               </div>
             )}
           </div>
           <div>
-            <button type="button" onClick={() => toggleGroup('banking')} className="w-full flex items-center justify-between px-3 py-1.5 rounded-md hover:bg-[#F4F5F8] text-left">
-              <span className={adminUi.navGroup}>Banking and accounting</span>
-              {openGroups.banking ? <ChevronDown className="w-3.5 h-3.5 text-[#8D9096]" /> : <ChevronRight className="w-3.5 h-3.5 text-[#8D9096]" />}
+            <button type="button" onClick={() => toggleGroup('vendors')} className="w-full flex items-center justify-between px-3 py-1.5 rounded-md hover:bg-[#F4F5F8] text-left">
+              <span className={adminUi.navGroup}>Vendors</span>
+              {openGroups.vendors ? <ChevronDown className="w-3.5 h-3.5 text-[#8D9096]" /> : <ChevronRight className="w-3.5 h-3.5 text-[#8D9096]" />}
             </button>
-            {openGroups.banking && (
+            {openGroups.vendors && (
               <div className="pl-2 mt-0.5 space-y-0.5">
-                <Link href="/admin/expenses" className={adminNavItemClass(pathMatches(pathname, '/admin/expenses'))}>Expense overview</Link>
-                <Link href="/admin/vendors" className={adminNavItemClass(pathMatches(pathname, '/admin/vendors'))}>Vendors / suppliers</Link>
-                <Link href="/admin/receipts" className={adminNavItemClass(pathMatches(pathname, '/admin/receipts'))}>Bank transactions</Link>
-                <Link href="/admin/catalog?tab=tax" className={adminNavItemClass(pathMatches(pathname, '/admin/catalog') && catalogTabIs(searchParams, 'tax'))}>Tax types</Link>
-                <Link href="/admin/catalog?tab=bank" className={adminNavItemClass(pathMatches(pathname, '/admin/catalog') && catalogTabIs(searchParams, 'bank'))}>Bank accounts</Link>
-                <Link href="/admin/catalog?tab=payment" className={adminNavItemClass(pathMatches(pathname, '/admin/catalog') && catalogTabIs(searchParams, 'payment'))}>Payment methods</Link>
-              </div>
-            )}
-          </div>
-          <div>
-            <button type="button" onClick={() => toggleGroup('customers')} className="w-full flex items-center justify-between px-3 py-1.5 rounded-md hover:bg-[#F4F5F8] text-left">
-              <span className={adminUi.navGroup}>Customers hub</span>
-              {openGroups.customers ? <ChevronDown className="w-3.5 h-3.5 text-[#8D9096]" /> : <ChevronRight className="w-3.5 h-3.5 text-[#8D9096]" />}
-            </button>
-            {openGroups.customers && (
-              <div className="pl-2 mt-0.5 space-y-0.5">
-                <Link href="/admin/customers" className={adminNavItemClass(pathMatches(pathname, '/admin/customers'))}>Customer</Link>
+                <Link href="/admin/vendors" className={adminNavItemClass(pathMatches(pathname, '/admin/vendors'))}>Vendors</Link>
+                <Link href="/admin/purchase-orders" className={adminNavItemClass(pathMatches(pathname, '/admin/purchase-orders'))}>Purchase order</Link>
+                <Link href="/admin/credit-memos/vendors" className={adminNavItemClass(!!pathname?.includes('/admin/credit-memos/vendors'))}>Credit memo (vendors)</Link>
+                <Link href="/admin/expenses" className={adminNavItemClass(pathMatches(pathname, '/admin/expenses'))}>Pay bill</Link>
               </div>
             )}
           </div>
@@ -453,10 +420,23 @@ export default function AdminLayoutClient({ children }: { children: React.ReactN
             </button>
             {openGroups.inventory && (
               <div className="pl-2 mt-0.5 space-y-0.5">
+                <Link href="/admin/inventory" className={adminNavItemClass(pathMatches(pathname, '/admin/inventory') && !adjustingStock)}>Inventory</Link>
                 <Link href="/admin/invoices?create=invoice" className={adminNavItemClass(creatingInvoice)}>Offline sales</Link>
-                <Link href="/admin/inventory" className={adminNavItemClass(pathMatches(pathname, '/admin/inventory'))}>Inventory</Link>
-                <Link href="/admin/purchase-orders" className={adminNavItemClass(pathMatches(pathname, '/admin/purchase-orders'))}>Purchase order</Link>
-                <Link href="/admin/credit-memos" className={adminNavItemClass(pathMatches(pathname, '/admin/credit-memos'))}>Credit memo</Link>
+                <Link href="/admin/inventory?adjust=1" className={adminNavItemClass(adjustingStock)}>Stock adjustments</Link>
+              </div>
+            )}
+          </div>
+          <div>
+            <button type="button" onClick={() => toggleGroup('banking')} className="w-full flex items-center justify-between px-3 py-1.5 rounded-md hover:bg-[#F4F5F8] text-left">
+              <span className={adminUi.navGroup}>Banking and accounting</span>
+              {openGroups.banking ? <ChevronDown className="w-3.5 h-3.5 text-[#8D9096]" /> : <ChevronRight className="w-3.5 h-3.5 text-[#8D9096]" />}
+            </button>
+            {openGroups.banking && (
+              <div className="pl-2 mt-0.5 space-y-0.5">
+                <Link href="/admin/receipts" className={adminNavItemClass(pathMatches(pathname, '/admin/receipts'))}>Bank transactions</Link>
+                <Link href="/admin/catalog?tab=tax" className={adminNavItemClass(pathMatches(pathname, '/admin/catalog') && catalogTabIs(searchParams, 'tax'))}>Tax types</Link>
+                <Link href="/admin/catalog?tab=bank" className={adminNavItemClass(pathMatches(pathname, '/admin/catalog') && catalogTabIs(searchParams, 'bank'))}>Bank accounts</Link>
+                <Link href="/admin/catalog?tab=payment" className={adminNavItemClass(pathMatches(pathname, '/admin/catalog') && catalogTabIs(searchParams, 'payment'))}>Payment methods</Link>
               </div>
             )}
           </div>
@@ -478,18 +458,8 @@ export default function AdminLayoutClient({ children }: { children: React.ReactN
             </button>
             {openGroups.more && (
               <div className="pl-2 mt-0.5 space-y-0.5">
-                <Link href="/admin/catalog?tab=categories" className={adminNavItemClass(pathMatches(pathname, '/admin/catalog') && catalogTabIs(searchParams, 'categories'))}>
-                  Categories
-                </Link>
-                <Link href="/admin/catalog?tab=tax" className={adminNavItemClass(pathMatches(pathname, '/admin/catalog') && catalogTabIs(searchParams, 'tax'))}>
-                  Tax types
-                </Link>
-                <Link href="/admin/catalog?tab=bank" className={adminNavItemClass(pathMatches(pathname, '/admin/catalog') && catalogTabIs(searchParams, 'bank'))}>
-                  Bank accounts
-                </Link>
-                <Link href="/admin/catalog?tab=payment" className={adminNavItemClass(pathMatches(pathname, '/admin/catalog') && catalogTabIs(searchParams, 'payment'))}>
-                  Payment methods
-                </Link>
+                <Link href="/admin/shipments" className={adminNavItemClass(pathMatches(pathname, '/admin/shipments'))}>Shipments</Link>
+                <Link href="/admin/data" className={adminNavItemClass(pathMatches(pathname, '/admin/data'))}>Data</Link>
               </div>
             )}
           </div>

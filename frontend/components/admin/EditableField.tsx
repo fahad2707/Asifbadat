@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { Pencil, Check, X } from 'lucide-react';
+import NumberInput from './NumberInput';
 
 export function displayValue(value?: string | number | null): string {
   if (value === undefined || value === null || String(value).trim() === '') return '—';
@@ -71,6 +72,23 @@ export function EditableField({
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
           rows={3}
+          className={fieldInputClass}
+          autoFocus
+        />
+      ) : type === 'number' ? (
+        <NumberInput
+          value={draft}
+          onValueChange={(n) => setDraft(n === '' ? '' : String(n))}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              e.preventDefault();
+              void save();
+            }
+            if (e.key === 'Escape') {
+              setDraft(value);
+              setEditing(false);
+            }
+          }}
           className={fieldInputClass}
           autoFocus
         />

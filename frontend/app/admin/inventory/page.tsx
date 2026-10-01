@@ -1,10 +1,15 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import { Package, Search, Edit, Trash2, X } from 'lucide-react';
+import { Suspense, useEffect, useRef, useState } from 'react';
+import Link from 'next/link';
+import { useRouter, useSearchParams } from 'next/navigation';
+import { Package, Search, Trash2, X } from 'lucide-react';
 import adminApi from '@/lib/admin-api';
 import toast from 'react-hot-toast';
 import { StockAttentionBanner } from '@/components/admin/StockAttentionBanner';
+import SearchableProductDropdown, { type ProductOption } from '@/components/admin/SearchableProductDropdown';
+import NumberInput from '@/components/admin/NumberInput';
+import { sellingBelowMin, minSellingPrice } from '@/lib/min-selling-price';
 
 interface InventoryItem {
   id: string;
@@ -16,6 +21,8 @@ interface InventoryItem {
   low_stock_threshold: number;
   category_id?: string;
   sub_category_id?: string;
+  cost_price?: number;
+  price?: number;
 }
 
 interface Category {
@@ -29,7 +36,50 @@ interface SubCategory {
   category_id: string;
 }
 
+interface AdjustLine {
+  product_id: string;
+  product_name: string;
+  sku?: string;
+  current_stock: number;
+  quantity_change: number;
+  cost_price: number | '';
+  selling_price: number | '';
+}
+
+const ADJUST_LINES = 12;
+
+function emptyAdjustLine(): AdjustLine {
+  return {
+    product_id: '',
+    product_name: '',
+    sku: '',
+    current_stock: 0,
+    quantity_change: 0,
+    cost_price: '',
+    selling_price: '',
+  };
+}
+
+function pricesFromProduct(product: { cost_price?: number; price?: number }): Pick<AdjustLine, 'cost_price' | 'selling_price'> {
+  const cost = Number(product.cost_price);
+  const sell = Number(product.price);
+  return {
+    cost_price: Number.isFinite(cost) && cost !== 0 ? cost : '',
+    selling_price: Number.isFinite(sell) && sell !== 0 ? sell : '',
+  };
+}
+
 export default function InventoryPage() {
+  return (
+    <Suspense fallback={<div className="flex justify-center h-64 items-center"><div className="animate-spin rounded-full h-10 w-10 border-2 border-teal-500 border-t-transparent" /></div>}>
+      <InventoryPageInner />
+    </Suspense>
+  );
+}
+
+function InventoryPageInner() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
   const [items, setItems] = useState<InventoryItem[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [subCategories, setSubCategories] = useState<SubCategory[]>([]);
@@ -42,8 +92,11 @@ export default function InventoryPage() {
   const [showCategoryModal, setShowCategoryModal] = useState(false);
   const [showSubcategoryModal, setShowSubcategoryModal] = useState(false);
   const [showAdjustModal, setShowAdjustModal] = useState(false);
-  const [adjustProductId, setAdjustProductId] = useState('');
-  const [adjustQty, setAdjustQty] = useState('');
+  const [adjustLines, setAdjustLines] = useState<AdjustLine[]>(() => Array.from({ length: ADJUST_LINES }, emptyAdjustLine));
+  const [adjustScan, setAdjustScan] = useState('');
+  const [adjustNotes, setAdjustNotes] = useState('');
+  const [adjustSaving, setAdjustSaving] = useState(false);
+  const adjustScanRef = useRef<HTMLInputElement>(null);
   const [movementSummary, setMovementSummary] = useState<Record<string, { in: number; out: number }>>({});
   const [editing, setEditing] = useState<InventoryItem | null>(null);
   const [form, setForm] = useState({
@@ -57,7 +110,7 @@ export default function InventoryPage() {
 
   const fetchProducts = async () => {
     try {
-      const res = await adminApi.get('/products', { params: { limit: 5000 } });
+      const res = await adminApi.get('/products', { params: { limit: 5000, visibility: 'all' } });
       const list = (res.data.products || []).map((p: any) => ({
         id: p.id,
         sku: p.sku,
@@ -68,6 +121,8 @@ export default function InventoryPage() {
         low_stock_threshold: p.low_stock_threshold ?? 10,
         category_id: p.category_id,
         sub_category_id: p.sub_category_id,
+        cost_price: p.cost_price != null ? Number(p.cost_price) : undefined,
+        price: p.price != null ? Number(p.price) : undefined,
       }));
       setItems(list);
     } catch {
@@ -118,6 +173,25 @@ export default function InventoryPage() {
       fetchSubCategories();
     }
   }, [showItemModal, showCategoryModal, showSubcategoryModal]);
+
+  const openAdjust = () => {
+    setAdjustLines(Array.from({ length: ADJUST_LINES }, emptyAdjustLine));
+    setAdjustScan('');
+    setAdjustNotes('');
+    setShowAdjustModal(true);
+    window.setTimeout(() => adjustScanRef.current?.focus(), 50);
+  };
+
+  const closeAdjust = () => {
+    if (adjustSaving) return;
+    setShowAdjustModal(false);
+    if (searchParams.get('adjust') === '1') router.replace('/admin/inventory');
+  };
+
+  useEffect(() => {
+    if (searchParams.get('adjust') === '1') openAdjust();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams]);
 
   const generateItemId = async () => {
     try {
@@ -199,6 +273,162 @@ export default function InventoryPage() {
     setShowItemModal(true);
   };
 
+  const productOptions: ProductOption[] = items.map((p) => ({
+    id: p.id,
+    name: p.name,
+    sku: p.sku,
+    stock_quantity: p.stock_quantity,
+    category_name: p.category_name,
+    cost_price: p.cost_price,
+    price: p.price,
+  }));
+
+  const addAdjustProduct = (product: {
+    id: string;
+    name: string;
+    sku?: string;
+    stock_quantity?: number;
+    cost_price?: number;
+    price?: number;
+  }) => {
+    setAdjustLines((prev) => {
+      const existingIdx = prev.findIndex((l) => l.product_id === product.id);
+      if (existingIdx !== -1) {
+        const next = [...prev];
+        next[existingIdx] = {
+          ...next[existingIdx],
+          quantity_change: next[existingIdx].quantity_change + 1,
+          current_stock: product.stock_quantity ?? next[existingIdx].current_stock,
+        };
+        return next;
+      }
+      const emptyIdx = prev.findIndex((l) => !l.product_id);
+      const line: AdjustLine = {
+        product_id: product.id,
+        product_name: product.name,
+        sku: product.sku,
+        current_stock: product.stock_quantity ?? 0,
+        quantity_change: 1,
+        ...pricesFromProduct(product),
+      };
+      if (emptyIdx === -1) return [...prev, line];
+      const next = [...prev];
+      next[emptyIdx] = line;
+      return next;
+    });
+    setAdjustScan('');
+    window.setTimeout(() => adjustScanRef.current?.focus(), 0);
+  };
+
+  const selectAdjustLine = (index: number, product: ProductOption) => {
+    setAdjustLines((prev) => {
+      const existingIdx = prev.findIndex((l, i) => i !== index && l.product_id === product.id);
+      const next = [...prev];
+      if (existingIdx !== -1) {
+        next[existingIdx] = {
+          ...next[existingIdx],
+          quantity_change: next[existingIdx].quantity_change + (next[index].quantity_change || 1),
+        };
+        next[index] = emptyAdjustLine();
+        return next;
+      }
+      next[index] = {
+        product_id: product.id,
+        product_name: product.name,
+        sku: product.sku,
+        current_stock: product.stock_quantity ?? 0,
+        quantity_change: next[index].quantity_change || 1,
+        ...pricesFromProduct(product),
+      };
+      return next;
+    });
+  };
+
+  const scanAdjustBarcode = (code: string) => {
+    const trimmed = code.trim();
+    if (!trimmed) return;
+    const listed = items.find(
+      (p) => p.sku === trimmed || p.id === trimmed || p.name.toLowerCase() === trimmed.toLowerCase()
+    );
+    if (listed) {
+      addAdjustProduct(listed);
+      return;
+    }
+    adminApi
+      .get(`/products/barcode/${encodeURIComponent(trimmed)}`)
+      .then((r) => {
+        const p = r.data;
+        if (p?.id) {
+          addAdjustProduct({
+            id: p.id,
+            name: p.name,
+            sku: p.sku,
+            stock_quantity: p.stock_quantity,
+            cost_price: p.cost_price,
+            price: p.price,
+          });
+        }
+      })
+      .catch(() => toast.error('Product not found for this barcode/ID'));
+  };
+
+  const saveAdjustments = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const valid = adjustLines.filter(
+      (l) => l.product_id && (l.quantity_change !== 0 || l.cost_price !== '' || l.selling_price !== '')
+    );
+    if (valid.length === 0) {
+      toast.error('Add at least one product to adjust stock or prices');
+      return;
+    }
+    for (const line of valid) {
+      const cost = line.cost_price === '' ? null : Number(line.cost_price);
+      const sell = line.selling_price === '' ? null : Number(line.selling_price);
+      if (sell != null && cost != null && sellingBelowMin(sell, cost)) {
+        toast.error(
+          `"${line.product_name}" selling price must be at least $${minSellingPrice(cost).toFixed(2)} (5% above cost).`
+        );
+        return;
+      }
+    }
+    setAdjustSaving(true);
+    let ok = 0;
+    const failures: string[] = [];
+    for (const line of valid) {
+      try {
+        const payload: {
+          product_id: string;
+          quantity_change: number;
+          notes?: string;
+          cost_price?: number;
+          price?: number;
+        } = {
+          product_id: line.product_id,
+          quantity_change: Math.trunc(Number(line.quantity_change) || 0),
+          notes: adjustNotes || undefined,
+        };
+        if (line.cost_price !== '') payload.cost_price = Number(line.cost_price);
+        if (line.selling_price !== '') payload.price = Number(line.selling_price);
+        await adminApi.post('/inventory/adjust', payload);
+        ok += 1;
+      } catch (err: any) {
+        failures.push(err.response?.data?.error || `Could not adjust ${line.product_name}`);
+      }
+    }
+    setAdjustSaving(false);
+    if (ok) {
+      toast.success(`Adjusted ${ok} ${ok === 1 ? 'product' : 'products'}`);
+      fetchProducts();
+      fetchMovementSummary();
+    }
+    if (failures.length) {
+      toast.error(failures.slice(0, 3).join(' · '));
+      return;
+    }
+    setShowAdjustModal(false);
+    if (searchParams.get('adjust') === '1') router.replace('/admin/inventory');
+  };
+
   const handleDelete = async (id: string) => {
     if (!confirm('Deactivate this item? It can be reactivated later.')) return;
     try {
@@ -248,11 +478,7 @@ export default function InventoryPage() {
         <div className="flex items-center gap-2.5 flex-wrap">
           <button
             type="button"
-            onClick={() => {
-              setAdjustProductId('');
-              setAdjustQty('');
-              setShowAdjustModal(true);
-            }}
+            onClick={openAdjust}
             className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-teal-400 border border-teal-500/25 bg-teal-500/5 hover:bg-teal-500/10 font-bold text-xs transition-all"
           >
             <Package className="w-4 h-4" />
@@ -338,78 +564,181 @@ export default function InventoryPage() {
       </div>
 
       {showAdjustModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-955/80 backdrop-blur-sm p-4">
-          <div className="bg-white border border-[#E2E8F0] rounded-lg text-[#0F172A] max-w-md w-full max-h-[90vh] overflow-y-auto">
-            <div className="flex items-center justify-between p-5 border-b border-white/5">
-              <h2 className="text-lg font-bold text-white">Adjust Stock Quantity</h2>
-              <button type="button" onClick={() => setShowAdjustModal(false)} className="p-1.5 hover:bg-white/5 rounded-lg text-slate-400 hover:text-white transition-all">
+        <div className="admin-lightbox fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50" onClick={closeAdjust}>
+          <div className="bg-white rounded-xl shadow-xl max-w-6xl w-full max-h-[90vh] overflow-hidden flex flex-col" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between p-4 border-b border-gray-200">
+              <h2 className="text-xl font-bold text-gray-900">Stock adjustment</h2>
+              <button type="button" onClick={closeAdjust} className="p-2 rounded-lg hover:bg-gray-100 text-gray-600" aria-label="Close">
                 <X className="w-5 h-5" />
               </button>
             </div>
-            <form
-              onSubmit={async (e) => {
-                e.preventDefault();
-                if (!adjustProductId) {
-                  toast.error('Select a product');
-                  return;
-                }
-                const change = Number(adjustQty);
-                if (!change || Number.isNaN(change)) {
-                  toast.error('Enter a quantity to adjust');
-                  return;
-                }
-                try {
-                  await adminApi.post('/inventory/adjust', {
-                    product_id: adjustProductId,
-                    quantity_change: change,
-                  });
-                  toast.success('Stock adjusted');
-                  setShowAdjustModal(false);
-                  setAdjustProductId('');
-                  setAdjustQty('');
-                  fetchProducts();
-                } catch (err: any) {
-                  toast.error(err.response?.data?.error || 'Failed to adjust stock');
-                }
-              }}
-              className="p-5 space-y-4 text-xs"
-            >
-              <div>
-                <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">Target Product *</label>
-                <select
-                  value={adjustProductId}
-                  onChange={(e) => setAdjustProductId(e.target.value)}
-                  className="w-full bg-slate-955/60 border border-white/10 rounded-xl px-4 py-2 text-xs text-slate-200 focus:outline-none"
-                  required
-                >
-                  <option value="">Select product (scan barcode or select ID)</option>
-                  {items.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.name} {p.sku ? `(${p.sku})` : ''}
-                    </option>
-                  ))}
-                </select>
+            <form onSubmit={saveAdjustments} className="flex-1 min-h-0 flex flex-col">
+              <div className="flex-1 overflow-y-auto p-4 space-y-4">
+                <div className="flex items-center gap-2">
+                  <label className="block text-sm font-medium text-gray-700">Product or service</label>
+                  <div className="flex-1 flex gap-2 items-center">
+                    <input
+                      ref={adjustScanRef}
+                      type="text"
+                      value={adjustScan}
+                      onChange={(e) => setAdjustScan(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key !== 'Enter') return;
+                        e.preventDefault();
+                        scanAdjustBarcode(adjustScan);
+                      }}
+                      placeholder="Scan barcode / item ID and press Enter"
+                      className="flex-1 max-w-xs pl-3 py-1.5 border border-gray-300 rounded-lg text-sm"
+                    />
+                    <Link href="/admin/products/new" className="text-sm text-[#0F9F8F] font-medium hover:underline">+ Add product</Link>
+                  </div>
+                </div>
+                <div className="border border-gray-200 rounded-lg overflow-x-auto">
+                  <table className="w-full text-sm min-w-[920px]">
+                    <thead className="bg-gray-50">
+                      <tr>
+                        <th className="text-left py-3 px-4 w-10">#</th>
+                        <th className="text-left py-3 px-4 min-w-[240px]">Product</th>
+                        <th className="text-left py-3 px-4 min-w-[120px]">SKU</th>
+                        <th className="text-right py-3 px-4 w-28">Current stock</th>
+                        <th className="text-right py-3 px-4 w-32">Adjustment qty</th>
+                        <th className="text-right py-3 px-4 w-28">New stock</th>
+                        <th className="text-right py-3 px-4 w-32">Cost price</th>
+                        <th className="text-right py-3 px-4 w-32">Selling price</th>
+                        <th className="w-12 px-4" />
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {adjustLines.map((line, idx) => {
+                        const hasProduct = !!line.product_id;
+                        const newStock = line.current_stock + (Number(line.quantity_change) || 0);
+                        return (
+                          <tr key={idx} className={`border-t border-gray-100 hover:bg-gray-50/50 ${hasProduct && newStock < 0 ? 'bg-red-50' : ''}`}>
+                            <td className="py-2 px-4">{idx + 1}</td>
+                            <td className="py-2 px-4">
+                              <SearchableProductDropdown
+                                products={productOptions}
+                                value={line.product_id}
+                                displayName={line.product_name || undefined}
+                                showPrice={false}
+                                onSelect={(p) => selectAdjustLine(idx, p)}
+                                onBarcodeScan={scanAdjustBarcode}
+                                placeholder="Search product or scan barcode…"
+                              />
+                            </td>
+                            <td className="py-2 px-4 text-gray-600">{hasProduct ? (line.sku || '—') : ''}</td>
+                            <td className="py-2 px-4 text-right text-gray-600">{hasProduct ? line.current_stock : ''}</td>
+                            <td className="py-2 px-4 text-right">
+                              {hasProduct ? (
+                                <NumberInput
+                                  step={1}
+                                  value={line.quantity_change}
+                                  onValueChange={(n) => {
+                                    setAdjustLines((prev) => {
+                                      const next = [...prev];
+                                      next[idx] = { ...next[idx], quantity_change: n === '' ? 0 : n };
+                                      return next;
+                                    });
+                                  }}
+                                  className={`w-24 text-right border rounded px-2 py-1 ${newStock < 0 ? 'border-red-400 text-red-700 bg-red-50' : 'border-gray-300'}`}
+                                />
+                              ) : (
+                                <span className="text-gray-400">—</span>
+                              )}
+                            </td>
+                            <td className={`py-2 px-4 text-right font-medium ${newStock < 0 ? 'text-red-700' : ''}`}>
+                              {hasProduct ? newStock : ''}
+                            </td>
+                            <td className="py-2 px-4 text-right">
+                              {hasProduct ? (
+                                <NumberInput
+                                  value={line.cost_price}
+                                  onValueChange={(n) => {
+                                    setAdjustLines((prev) => {
+                                      const next = [...prev];
+                                      next[idx] = { ...next[idx], cost_price: n };
+                                      return next;
+                                    });
+                                  }}
+                                  className="w-24 text-right border border-gray-300 rounded px-2 py-1"
+                                />
+                              ) : (
+                                <span className="text-gray-400">—</span>
+                              )}
+                            </td>
+                            <td className="py-2 px-4 text-right">
+                              {hasProduct ? (
+                                <NumberInput
+                                  value={line.selling_price}
+                                  onValueChange={(n) => {
+                                    setAdjustLines((prev) => {
+                                      const next = [...prev];
+                                      next[idx] = { ...next[idx], selling_price: n };
+                                      return next;
+                                    });
+                                  }}
+                                  className={`w-24 text-right border rounded px-2 py-1 ${
+                                    line.cost_price !== '' &&
+                                    line.selling_price !== '' &&
+                                    sellingBelowMin(Number(line.selling_price), Number(line.cost_price))
+                                      ? 'border-red-400 text-red-700 bg-red-50'
+                                      : 'border-gray-300'
+                                  }`}
+                                />
+                              ) : (
+                                <span className="text-gray-400">—</span>
+                              )}
+                            </td>
+                            <td className="py-2 px-4">
+                              {hasProduct && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setAdjustLines((prev) => {
+                                      const next = [...prev];
+                                      next[idx] = emptyAdjustLine();
+                                      return next;
+                                    });
+                                  }}
+                                  className="text-red-600 hover:bg-red-50 p-1 rounded"
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                </button>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+                <div className="flex items-center justify-between">
+                  <p className="text-xs text-gray-500">Scan or search a product. Positive qty adds stock, negative qty deducts. Cost and selling prices stay as listed unless you change them. Scanning the same product again increases qty.</p>
+                  <button
+                    type="button"
+                    onClick={() => setAdjustLines((prev) => [...prev, emptyAdjustLine()])}
+                    className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg border border-gray-300 text-xs font-medium text-gray-700 hover:bg-gray-50"
+                  >
+                    + Add line
+                  </button>
+                </div>
+                <div className="max-w-md">
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Notes (optional)</label>
+                  <input
+                    type="text"
+                    value={adjustNotes}
+                    onChange={(e) => setAdjustNotes(e.target.value)}
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                    placeholder="Reason for this adjustment"
+                  />
+                </div>
               </div>
-              <div>
-                <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">Adjustment Qty Delta *</label>
-                <input
-                  type="number"
-                  value={adjustQty}
-                  onChange={(e) => setAdjustQty(e.target.value)}
-                  className="w-full bg-slate-950/60 border border-white/10 rounded-xl px-4 py-2 text-xs text-slate-200 focus:outline-none placeholder-slate-600"
-                  placeholder="e.g. 20 to add, -15 to deduct from stack"
-                  required
-                />
-                <p className="text-[10px] text-slate-500 font-medium mt-1.5">
-                  Positive overrides add material stock, negatives deduct from the stack.
-                </p>
-              </div>
-              <div className="flex justify-end gap-2.5 pt-4 border-t border-white/5">
-                <button type="button" onClick={() => setShowAdjustModal(false)} className="px-4 py-2.5 bg-slate-800 border border-white/5 text-slate-400 hover:text-white rounded-xl text-xs font-semibold">
+              <div className="flex justify-end gap-2 p-4 border-t border-gray-200">
+                <button type="button" onClick={closeAdjust} className="px-4 py-2 text-gray-700 hover:bg-gray-100 rounded-lg">
                   Cancel
                 </button>
-                <button type="submit" className="px-4 py-2.5 bg-[#0F9F8F] hover:bg-[#0B8275] border-transparent text-white rounded-xl text-xs font-bold transition-all shadow-sm">
-                  Save Adjustment
+                <button type="submit" disabled={adjustSaving} className="px-4 py-2 bg-black text-white rounded-lg hover:bg-[#2C2C2C] disabled:opacity-50">
+                  {adjustSaving ? 'Saving…' : 'Save'}
                 </button>
               </div>
             </form>
@@ -471,7 +800,7 @@ export default function InventoryPage() {
               </div>
               <div>
                 <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">Reorder Buffer Target (Qty) *</label>
-                <input type="number" min={0} value={form.reorder_level} onChange={(e) => setForm((f) => ({ ...f, reorder_level: e.target.value }))} className="w-full bg-slate-950/60 border border-white/10 rounded-xl px-4 py-2 text-xs text-slate-200 focus:outline-none" />
+                <NumberInput min={0} value={form.reorder_level} onValueChange={(n) => setForm((f) => ({ ...f, reorder_level: n === '' ? '' : String(n) }))} className="w-full bg-slate-950/60 border border-white/10 rounded-xl px-4 py-2 text-xs text-slate-200 focus:outline-none" />
               </div>
               <div className="flex justify-end gap-2.5 pt-4 border-t border-white/5">
                 <button type="button" onClick={() => setShowItemModal(false)} className="px-4 py-2.5 bg-slate-800 border border-white/5 text-slate-400 hover:text-white rounded-xl text-xs font-semibold">

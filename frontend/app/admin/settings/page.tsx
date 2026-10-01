@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { Settings, Save } from 'lucide-react';
 import adminApi from '@/lib/admin-api';
 import toast from 'react-hot-toast';
+import NumberInput from '@/components/admin/NumberInput';
 
 interface StoreSettings {
   business_name: string;
@@ -165,12 +166,11 @@ export default function SettingsPage() {
         <h2 className="text-xs font-bold text-white uppercase tracking-wider border-b border-white/5 pb-2.5 pt-4">Tax & Currency</h2>
         <div>
           <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">Default Tax Rate (%)</label>
-          <input
-            type="number"
+          <NumberInput
             min={0}
             step={0.1}
-            value={settings.default_tax_rate ?? 0}
-            onChange={(e) => setSettings({ ...settings, default_tax_rate: parseFloat(e.target.value) || 0 })}
+            value={settings.default_tax_rate}
+            onValueChange={(n) => setSettings({ ...settings, default_tax_rate: n === '' ? 0 : n })}
             className="w-full bg-slate-950/60 border border-white/10 rounded-xl px-4 py-2 text-xs text-slate-200 focus:outline-none focus:ring-1 focus:ring-teal-500 font-mono"
           />
         </div>

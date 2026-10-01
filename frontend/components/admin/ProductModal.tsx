@@ -6,6 +6,8 @@ import adminApi, { uploadApi } from '@/lib/admin-api';
 import { formatApiError } from '@/lib/format-api-error';
 import { formatTaxTypeLabel } from '@/lib/tax-type';
 import toast from 'react-hot-toast';
+import NumberInput from './NumberInput';
+import { minSellingPrice, sellingBelowMin } from '@/lib/min-selling-price';
 
 const ADD_CATEGORY = '__add_category__';
 const ADD_SUB = '__add_sub__';
@@ -267,12 +269,11 @@ function AddTaxTypeModal({ onClose, onSaved }: { onClose: () => void; onSaved: (
             <option value="percent">Rate in %</option>
             <option value="amount">Fixed amount (USD)</option>
           </select>
-          <input
-            type="number"
-            step="0.01"
-            min="0"
+          <NumberInput
+            min={0}
+            step={0.01}
             value={rate}
-            onChange={(e) => setRate(e.target.value)}
+            onValueChange={(n) => setRate(n === '' ? '' : String(n))}
             placeholder={rateType === 'percent' ? 'Rate %' : 'Amount (USD)'}
             className="w-full px-3 py-2 border border-gray-300 rounded-lg mb-4"
           />
@@ -499,9 +500,20 @@ export default function ProductModal({ product, onClose, onSuccess }: ProductMod
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    const sell = Number(formData.price) || 0;
+    const cost = Number(formData.cost_price) || 0;
+    if (sellingBelowMin(sell, cost)) {
+      toast.error(`Selling price must be at least 5% above cost. Minimum is $${minSellingPrice(cost).toFixed(2)}.`);
+      return;
+    }
     setLoading(true);
     try {
-      const payload: Record<string, unknown> = { ...formData, price: Number(formData.price) || 0 };
+      const payload: Record<string, unknown> = {
+        ...formData,
+        price: Number(formData.price) || 0,
+        stock_quantity: Number(formData.stock_quantity) || 0,
+        low_stock_threshold: Number(formData.low_stock_threshold) || 10,
+      };
       delete payload.product_id;
       if (taxTypeId === undefined) {
         delete payload.tax_type_id;
@@ -644,12 +656,11 @@ export default function ProductModal({ product, onClose, onSuccess }: ProductMod
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">Selling price (USD) *</label>
-              <input
-                type="number"
-                step="0.01"
-                min="0"
-                value={formData.price === undefined ? '' : formData.price}
-                onChange={(e) => { setFormData({ ...formData, price: e.target.value === '' ? undefined : parseFloat(e.target.value) }); setMarginPct(''); setMarginUsd(''); }}
+              <NumberInput
+                min={0}
+                step={0.01}
+                value={formData.price}
+                onValueChange={(n) => { setFormData({ ...formData, price: n === '' ? undefined : n }); setMarginPct(''); setMarginUsd(''); }}
                 placeholder="Enter amount"
                 className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500"
                 required
@@ -657,12 +668,11 @@ export default function ProductModal({ product, onClose, onSuccess }: ProductMod
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">Cost price (admin only, not on website)</label>
-              <input
-                type="number"
-                step="0.01"
-                min="0"
-                value={formData.cost_price ?? ''}
-                onChange={(e) => { setFormData({ ...formData, cost_price: e.target.value === '' ? undefined : parseFloat(e.target.value) }); setMarginPct(''); setMarginUsd(''); }}
+              <NumberInput
+                min={0}
+                step={0.01}
+                value={formData.cost_price}
+                onValueChange={(n) => { setFormData({ ...formData, cost_price: n === '' ? undefined : n }); setMarginPct(''); setMarginUsd(''); }}
                 placeholder="Optional"
                 className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500"
               />
@@ -675,22 +685,20 @@ export default function ProductModal({ product, onClose, onSuccess }: ProductMod
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-xs font-medium text-gray-600 mb-1">Margin (%)</label>
-                  <input
-                    type="number"
-                    step="0.5"
+                  <NumberInput
+                    step={0.5}
                     value={marginPct}
-                    onChange={(e) => handleMarginPctChange(e.target.value)}
+                    onValueChange={(n) => handleMarginPctChange(n === '' ? '' : String(n))}
                     placeholder={autoMarginPct != null ? autoMarginPct.toFixed(1) : 'e.g. 20'}
                     className="w-full px-3 py-1.5 border border-gray-300 rounded-lg text-sm focus:ring-1 focus:ring-[#0F9F8F] focus:border-[#0F9F8F]"
                   />
                 </div>
                 <div>
                   <label className="block text-xs font-medium text-gray-600 mb-1">Margin ($)</label>
-                  <input
-                    type="number"
-                    step="0.01"
+                  <NumberInput
+                    step={0.01}
                     value={marginUsd}
-                    onChange={(e) => handleMarginUsdChange(e.target.value)}
+                    onValueChange={(n) => handleMarginUsdChange(n === '' ? '' : String(n))}
                     placeholder={autoMarginUsd != null ? autoMarginUsd.toFixed(2) : 'e.g. 5.00'}
                     className="w-full px-3 py-1.5 border border-gray-300 rounded-lg text-sm focus:ring-1 focus:ring-[#0F9F8F] focus:border-[#0F9F8F]"
                   />
@@ -764,22 +772,18 @@ export default function ProductModal({ product, onClose, onSuccess }: ProductMod
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">Stock Quantity *</label>
-              <input
-                type="number"
-                min="0"
+              <NumberInput
                 value={formData.stock_quantity}
-                onChange={(e) => setFormData({ ...formData, stock_quantity: parseInt(e.target.value) })}
+                onValueChange={(n) => setFormData({ ...formData, stock_quantity: n === '' ? undefined : Math.trunc(n) })}
                 className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500"
-                required
               />
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">Low Stock Threshold</label>
-              <input
-                type="number"
-                min="0"
+              <NumberInput
+                min={0}
                 value={formData.low_stock_threshold}
-                onChange={(e) => setFormData({ ...formData, low_stock_threshold: parseInt(e.target.value) })}
+                onValueChange={(n) => setFormData({ ...formData, low_stock_threshold: n === '' ? undefined : Math.trunc(n) })}
                 className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500"
               />
             </div>

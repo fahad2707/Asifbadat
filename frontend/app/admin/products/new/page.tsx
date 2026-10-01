@@ -6,6 +6,8 @@ import { useRouter } from 'next/navigation';
 import { ArrowLeft, Image as ImageIcon, Loader2 } from 'lucide-react';
 import adminApi, { uploadApi } from '@/lib/admin-api';
 import toast from 'react-hot-toast';
+import NumberInput from '@/components/admin/NumberInput';
+import { minSellingPrice, sellingBelowMin } from '@/lib/min-selling-price';
 
 interface Category {
   id: string | number;
@@ -36,7 +38,7 @@ export default function NewProductPage() {
     cost_price: '',
     category_id: '',
     sub_category_id: '',
-    stock_quantity: '0',
+    stock_quantity: '',
     low_stock_threshold: '10',
   });
   const [marginPct, setMarginPct] = useState('');
@@ -94,6 +96,11 @@ export default function NewProductPage() {
     const selling = parseFloat(form.selling_price);
     if (isNaN(selling) || selling < 0) {
       toast.error('Enter a valid selling price');
+      return;
+    }
+    const cost = form.cost_price !== '' ? parseFloat(form.cost_price) : NaN;
+    if (!Number.isNaN(cost) && sellingBelowMin(selling, cost)) {
+      toast.error(`Selling price must be at least 5% above cost. Minimum is $${minSellingPrice(cost).toFixed(2)}.`);
       return;
     }
     setLoading(true);
@@ -200,24 +207,22 @@ export default function NewProductPage() {
         <div className="grid grid-cols-2 gap-4">
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Selling price (USD) *</label>
-            <input
-              type="number"
-              step="0.01"
-              min="0"
+            <NumberInput
+              min={0}
+              step={0.01}
               value={form.selling_price}
-              onChange={(e) => { setForm((f) => ({ ...f, selling_price: e.target.value })); setMarginPct(''); setMarginUsd(''); }}
+              onValueChange={(n) => { setForm((f) => ({ ...f, selling_price: n === '' ? '' : String(n) })); setMarginPct(''); setMarginUsd(''); }}
               className="w-full border border-gray-300 rounded-lg px-3 py-2"
               required
             />
           </div>
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Cost price (admin only, not on website)</label>
-            <input
-              type="number"
-              step="0.01"
-              min="0"
+            <NumberInput
+              min={0}
+              step={0.01}
               value={form.cost_price}
-              onChange={(e) => { setForm((f) => ({ ...f, cost_price: e.target.value })); setMarginPct(''); setMarginUsd(''); }}
+              onValueChange={(n) => { setForm((f) => ({ ...f, cost_price: n === '' ? '' : String(n) })); setMarginPct(''); setMarginUsd(''); }}
               placeholder="Optional"
               className="w-full border border-gray-300 rounded-lg px-3 py-2"
             />
@@ -235,12 +240,11 @@ export default function NewProductPage() {
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-xs font-medium text-gray-600 mb-1">Margin (%)</label>
-                  <input
-                    type="number"
-                    step="0.5"
+                  <NumberInput
+                    step={0.5}
                     value={marginPct}
-                    onChange={(e) => {
-                      const val = e.target.value;
+                    onValueChange={(n) => {
+                      const val = n === '' ? '' : String(n);
                       setMarginPct(val);
                       setMarginUsd('');
                       const pct = parseFloat(val);
@@ -254,12 +258,11 @@ export default function NewProductPage() {
                 </div>
                 <div>
                   <label className="block text-xs font-medium text-gray-600 mb-1">Margin ($)</label>
-                  <input
-                    type="number"
-                    step="0.01"
+                  <NumberInput
+                    step={0.01}
                     value={marginUsd}
-                    onChange={(e) => {
-                      const val = e.target.value;
+                    onValueChange={(n) => {
+                      const val = n === '' ? '' : String(n);
                       setMarginUsd(val);
                       setMarginPct('');
                       const usd = parseFloat(val);
@@ -301,21 +304,18 @@ export default function NewProductPage() {
         <div className="grid grid-cols-2 gap-4">
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Stock quantity</label>
-            <input
-              type="number"
-              min="0"
+            <NumberInput
               value={form.stock_quantity}
-              onChange={(e) => setForm((f) => ({ ...f, stock_quantity: e.target.value }))}
+              onValueChange={(n) => setForm((f) => ({ ...f, stock_quantity: n === '' ? '' : String(Math.trunc(n)) }))}
               className="w-full border border-gray-300 rounded-lg px-3 py-2"
             />
           </div>
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Low stock threshold</label>
-            <input
-              type="number"
-              min="0"
+            <NumberInput
+              min={0}
               value={form.low_stock_threshold}
-              onChange={(e) => setForm((f) => ({ ...f, low_stock_threshold: e.target.value }))}
+              onValueChange={(n) => setForm((f) => ({ ...f, low_stock_threshold: n === '' ? '' : String(n) }))}
               className="w-full border border-gray-300 rounded-lg px-3 py-2"
             />
           </div>

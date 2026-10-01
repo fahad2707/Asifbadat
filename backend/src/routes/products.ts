@@ -272,6 +272,7 @@ router.get('/barcode/:barcode', authenticateAdmin, async (req, res) => {
       product_id: p.product_id,
       sku: p.sku,
       barcode: p.barcode,
+      stock_quantity: p.stock_quantity ?? 0,
       ...staffTaxTypeFields(p),
     });
   } catch (error) {
@@ -353,7 +354,7 @@ router.post('/', authenticateAdmin, async (req: AuthRequest, res) => {
       image_url: z.union([z.string().url(), z.literal('')]).optional(),
       barcode: z.string().optional(),
       cost_price: z.coerce.number().min(0).optional(),
-      stock_quantity: z.coerce.number().int().min(0).optional(),
+      stock_quantity: z.coerce.number().int().optional(),
       low_stock_threshold: z.coerce.number().int().min(0).optional(),
       is_active: z.boolean().optional(),
     });

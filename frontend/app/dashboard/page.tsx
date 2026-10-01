@@ -19,6 +19,7 @@ import {
 import api from '@/lib/api';
 import { useAuthStore } from '@/lib/store';
 import toast from 'react-hot-toast';
+import NumberInput from '@/components/admin/NumberInput';
 
 interface UserProfile {
   id: string;
@@ -211,10 +212,9 @@ export default function DashboardPage() {
               <div className="bg-white/10 backdrop-blur-sm rounded-xl p-4 mb-4">
                 <p className="text-sm text-primary-100 mb-2">Redeem Points</p>
                 <div className="flex flex-col sm:flex-row gap-2 w-full">
-                  <input
-                    type="number"
+                  <NumberInput
                     value={redeemPoints}
-                    onChange={(e) => setRedeemPoints(e.target.value)}
+                    onValueChange={(n) => setRedeemPoints(n === '' ? '' : String(n))}
                     placeholder="Points"
                     className="flex-1 min-w-0 px-4 py-2 rounded-lg bg-white/20 backdrop-blur-sm text-white placeholder-white/50 border border-white/30 focus:outline-none focus:ring-2 focus:ring-white/50"
                   />

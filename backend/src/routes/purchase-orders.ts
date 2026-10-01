@@ -1,5 +1,8 @@
 import express from 'express';
 import mongoose from 'mongoose';
+import path from 'path';
+import fs from 'fs';
+import multer from 'multer';
 import PurchaseOrder from '../models/PurchaseOrder';
 import Product from '../models/Product';
 import StockMovement from '../models/StockMovement';
@@ -12,6 +15,89 @@ import { postVendorLedger } from '../modules/vendors/services/vendorLedgerServic
 import { LedgerReferenceType } from '../shared/enums';
 
 const router = express.Router();
+
+function poLineProductId(item: any): string {
+  const p = item?.product_id;
+  if (!p) return '';
+  if (typeof p === 'string') return p;
+  if (p._id) return String(p._id);
+  if (p.id) return String(p.id);
+  return String(p);
+}
+
+function serializePoItems(items: any[] = []) {
+  return items.map((i) => ({
+    product_id: poLineProductId(i),
+    product_name: i.product_name || i.product_id?.name || '',
+    quantity_ordered: i.quantity_ordered,
+    quantity_received: i.quantity_received || 0,
+    unit_cost: i.unit_cost,
+    subtotal: i.subtotal,
+  }));
+}
+
+function serializeVendorInvoice(po: any) {
+  return {
+    vendor_invoice_url: po.vendor_invoice_url || null,
+    vendor_invoice_name: po.vendor_invoice_name || null,
+    vendor_invoice_uploaded_at: po.vendor_invoice_uploaded_at || null,
+  };
+}
+
+const vendorInvoiceDir = path.join(__dirname, '../../uploads/purchase-orders');
+if (!fs.existsSync(vendorInvoiceDir)) {
+  fs.mkdirSync(vendorInvoiceDir, { recursive: true });
+}
+
+const vendorInvoiceUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 15 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
+    const mime = (file.mimetype || '').toLowerCase();
+    const name = (file.originalname || '').toLowerCase();
+    const ok =
+      mime === 'image/jpeg' ||
+      mime === 'application/pdf' ||
+      name.endsWith('.jpg') ||
+      name.endsWith('.jpeg') ||
+      name.endsWith('.pdf');
+    if (ok) cb(null, true);
+    else cb(new Error('Only JPG or PDF files are allowed'));
+  },
+});
+
+function handleVendorInvoiceUpload(req: express.Request, res: express.Response, next: express.NextFunction) {
+  vendorInvoiceUpload.single('file')(req, res, (err: unknown) => {
+    if (err) {
+      const message = err instanceof Error ? err.message : 'Upload failed';
+      return res.status(400).json({ error: message });
+    }
+    next();
+  });
+}
+
+function assertVendorInvoiceBuffer(buffer: Buffer, claimedMime: string, originalName: string) {
+  if (!buffer?.length || buffer.length < 5) {
+    throw new Error('Invalid or empty file');
+  }
+  const mime = (claimedMime || '').toLowerCase();
+  const name = (originalName || '').toLowerCase();
+  const isPdf = mime === 'application/pdf' || name.endsWith('.pdf');
+  const isJpg = mime === 'image/jpeg' || name.endsWith('.jpg') || name.endsWith('.jpeg');
+  if (isPdf) {
+    if (buffer.slice(0, 5).toString('ascii') !== '%PDF-') {
+      throw new Error('File is not a valid PDF');
+    }
+    return 'pdf';
+  }
+  if (isJpg) {
+    if (!(buffer.length >= 3 && buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff)) {
+      throw new Error('File is not a valid JPG');
+    }
+    return 'jpg';
+  }
+  throw new Error('Only JPG or PDF files are allowed');
+}
 
 async function generatePOPDFBuffer(po: any): Promise<Buffer> {
   const poNumber = po.po_number || po._id?.toString() || '—';
@@ -80,7 +166,7 @@ router.get('/', authenticateAdmin, async (req: AuthRequest, res) => {
         state: po.vendor_id?.state,
         city: po.vendor_id?.city,
         status: po.status,
-        items: po.items,
+        items: serializePoItems(po.items),
         subtotal: po.subtotal,
         tax_amount: po.tax_amount,
         total_amount: po.total_amount,
@@ -88,6 +174,7 @@ router.get('/', authenticateAdmin, async (req: AuthRequest, res) => {
         received_at: po.received_at,
         notes: po.notes,
         created_at: po.created_at,
+        ...serializeVendorInvoice(po),
       })),
       pagination: { page: Number(page), limit: Number(limit), total, totalPages: Math.ceil(total / Number(limit)) },
     });
@@ -111,6 +198,58 @@ router.get('/:id/pdf', authenticateAdmin, async (req: AuthRequest, res) => {
   }
 });
 
+// Vendor-sent invoice (JPG or PDF) for future reference
+router.post(
+  '/:id/vendor-invoice',
+  authenticateAdmin,
+  handleVendorInvoiceUpload,
+  async (req: AuthRequest, res) => {
+    try {
+      if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+      const po = await PurchaseOrder.findById(req.params.id);
+      if (!po) return res.status(404).json({ error: 'Purchase order not found' });
+      const kind = assertVendorInvoiceBuffer(req.file.buffer, req.file.mimetype, req.file.originalname);
+      const ext = kind === 'pdf' ? '.pdf' : '.jpg';
+      const filename = `${req.params.id}-${Date.now()}${ext}`;
+      fs.writeFileSync(path.join(vendorInvoiceDir, filename), req.file.buffer);
+
+      const previous = po.vendor_invoice_url;
+      if (previous && previous.startsWith('/uploads/purchase-orders/')) {
+        const prevPath = path.join(__dirname, '../..', previous.replace(/^\/+/, ''));
+        if (fs.existsSync(prevPath)) {
+          try {
+            fs.unlinkSync(prevPath);
+          } catch {
+            /* ignore */
+          }
+        }
+      }
+
+      po.vendor_invoice_url = `/uploads/purchase-orders/${filename}`;
+      po.vendor_invoice_name = req.file.originalname || filename;
+      po.vendor_invoice_uploaded_at = new Date();
+      await po.save();
+
+      res.json({
+        id: po._id.toString(),
+        ...serializeVendorInvoice(po),
+      });
+    } catch (error: any) {
+      const message = error?.message || 'Failed to upload vendor invoice';
+      if (
+        message.includes('JPG') ||
+        message.includes('PDF') ||
+        message.includes('valid') ||
+        message.includes('Only')
+      ) {
+        return res.status(400).json({ error: message });
+      }
+      console.error('Vendor invoice upload error:', error);
+      res.status(500).json({ error: 'Failed to upload vendor invoice' });
+    }
+  }
+);
+
 // Get one PO
 router.get('/:id', authenticateAdmin, async (req: AuthRequest, res) => {
   try {
@@ -123,7 +262,7 @@ router.get('/:id', authenticateAdmin, async (req: AuthRequest, res) => {
       vendor_id: p.vendor_id?._id?.toString(),
       vendor: p.vendor_id,
       status: p.status,
-      items: p.items,
+      items: serializePoItems(p.items),
       subtotal: p.subtotal,
       tax_amount: p.tax_amount,
       total_amount: p.total_amount,
@@ -131,6 +270,7 @@ router.get('/:id', authenticateAdmin, async (req: AuthRequest, res) => {
       received_at: p.received_at,
       notes: p.notes,
       created_at: p.created_at,
+      ...serializeVendorInvoice(p),
     });
   } catch (error) {
     console.error('Get PO error:', error);
@@ -148,11 +288,11 @@ router.post('/', authenticateAdmin, async (req: AuthRequest, res) => {
         z.object({
           product_id: z.string(),
           product_name: z.string(),
-          quantity_ordered: z.number().int().positive(),
-          unit_cost: z.number().min(0),
+          quantity_ordered: z.coerce.number().int().positive(),
+          unit_cost: z.coerce.number().min(0),
         })
       ),
-      tax_amount: z.number().min(0).optional(),
+      tax_amount: z.coerce.number().min(0).optional(),
       expected_date: z.string().optional(),
       notes: z.string().optional(),
     });
@@ -222,12 +362,12 @@ router.put('/:id', authenticateAdmin, async (req: AuthRequest, res) => {
           z.object({
             product_id: z.string(),
             product_name: z.string(),
-            quantity_ordered: z.number().int().positive(),
-            unit_cost: z.number().min(0),
+            quantity_ordered: z.coerce.number().int().positive(),
+            unit_cost: z.coerce.number().min(0),
           })
         )
         .optional(),
-      tax_amount: z.number().min(0).optional(),
+      tax_amount: z.coerce.number().min(0).optional(),
       expected_date: z.string().optional(),
       notes: z.string().optional(),
     });
@@ -280,8 +420,13 @@ router.post('/:id/receive', authenticateAdmin, async (req: AuthRequest, res) => 
     const schema = z.object({
       items: z.array(
         z.object({
-          product_id: z.string(),
-          quantity_received: z.number().int().min(0),
+          product_id: z.preprocess((v) => {
+            if (v && typeof v === 'object' && (v as { _id?: unknown })._id) {
+              return String((v as { _id: unknown })._id);
+            }
+            return v;
+          }, z.string()),
+          quantity_received: z.coerce.number().int().min(0),
         })
       ),
     });
@@ -291,14 +436,15 @@ router.post('/:id/receive', authenticateAdmin, async (req: AuthRequest, res) => 
     if (po.status === 'cancelled') return res.status(400).json({ error: 'PO is cancelled' });
 
     for (const rec of receivedItems) {
-      const line = po.items.find((i: any) => i.product_id.toString() === rec.product_id);
+      const recId = String(rec.product_id);
+      const line = po.items.find((i: any) => poLineProductId(i) === recId);
       if (!line) continue;
       const qty = Math.min(rec.quantity_received, line.quantity_ordered - line.quantity_received);
       if (qty <= 0) continue;
       line.quantity_received += qty;
-      await Product.findByIdAndUpdate(rec.product_id, { $inc: { stock_quantity: qty } });
+      await Product.findByIdAndUpdate(recId, { $inc: { stock_quantity: qty } });
       await StockMovement.create({
-        product_id: rec.product_id,
+        product_id: recId,
         movement_type: 'purchase',
         quantity_change: qty,
         reference_type: 'purchase_order',

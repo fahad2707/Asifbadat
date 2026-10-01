@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { FolderTree, Layers, Percent, CreditCard, Landmark, Plus, Edit, Trash2, X, FileDown, Package, ImagePlus, Loader2 } from 'lucide-react';
 import adminApi, { uploadApi } from '@/lib/admin-api';
 import toast from 'react-hot-toast';
+import NumberInput from '@/components/admin/NumberInput';
 
 type TabId = 'categories' | 'subcategories' | 'tax' | 'payment' | 'bank';
 
@@ -1250,7 +1251,7 @@ export default function CatalogPage() {
                   </div>
                   <div>
                     <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">Display order</label>
-                    <input type="number" min={0} value={form.display_order ?? 0} onChange={(e) => setForm({ ...form, display_order: parseInt(e.target.value, 10) || 0 })} className="w-full bg-slate-950/60 border border-white/10 rounded-xl px-4 py-2 text-xs text-slate-200 focus:outline-none font-mono font-bold" />
+                    <NumberInput min={0} value={form.display_order} onValueChange={(n) => setForm({ ...form, display_order: n === '' ? undefined : n })} className="w-full bg-slate-950/60 border border-white/10 rounded-xl px-4 py-2 text-xs text-slate-200 focus:outline-none font-mono font-bold" />
                   </div>
                 </>
               )}
@@ -1269,7 +1270,7 @@ export default function CatalogPage() {
                   </div>
                   <div>
                     <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">{form.rate_type === 'amount' ? 'Flat Dollar Surcharge *' : 'Tax Bracket Percentage *'}</label>
-                    <input type="number" min={0} step={0.01} value={form.rate ?? ''} onChange={(e) => setForm({ ...form, rate: e.target.value })} className="w-full bg-slate-950/60 border border-white/10 rounded-xl px-4 py-2 text-xs text-slate-200 focus:outline-none font-mono font-bold" placeholder="e.g. 8.25" required />
+                    <NumberInput min={0} step={0.01} value={form.rate} onValueChange={(n) => setForm({ ...form, rate: n === '' ? '' : n })} className="w-full bg-slate-950/60 border border-white/10 rounded-xl px-4 py-2 text-xs text-slate-200 focus:outline-none font-mono font-bold" placeholder="e.g. 8.25" required />
                   </div>
                 </>
               )}

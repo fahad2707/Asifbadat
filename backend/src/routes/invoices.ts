@@ -43,15 +43,39 @@ async function loadProductsById(items: Array<{ product_id?: unknown }>) {
         .filter((id) => /^[a-f0-9A-F]{24}$/.test(id))
     ),
   ];
-  const map = new Map<string, { name?: string; tax_type_id?: unknown; price?: number; tax_rate?: number }>();
+  const map = new Map<string, { name?: string; tax_type_id?: unknown; price?: number; tax_rate?: number; cost_price?: number }>();
   if (ids.length === 0) return map;
   const docs = await Product.find({ _id: { $in: ids } })
     .populate('tax_type_id', 'name rate rate_type')
     .lean();
   for (const doc of docs) {
-    map.set(String((doc as { _id: unknown })._id), doc as { name?: string; tax_type_id?: unknown; price?: number; tax_rate?: number });
+    map.set(String((doc as { _id: unknown })._id), doc as { name?: string; tax_type_id?: unknown; price?: number; tax_rate?: number; cost_price?: number });
   }
   return map;
+}
+
+function minSellingPrice(cost: number): number {
+  return Math.round(Number(cost) * 1.05 * 100) / 100;
+}
+
+function sellingPriceFloorError(
+  items: { product_id?: unknown; price?: number; product_name?: string }[],
+  productsById: Map<string, { name?: string; cost_price?: number }>
+): string | null {
+  for (const item of items) {
+    const pid = item.product_id ? String(item.product_id) : '';
+    if (!pid) continue;
+    const product = productsById.get(pid);
+    const cost = Number(product?.cost_price);
+    if (!(cost > 0)) continue;
+    const min = minSellingPrice(cost);
+    const price = Number(item.price) || 0;
+    if (price + 1e-9 < min) {
+      const name = item.product_name || product?.name || 'Product';
+      return `"${name}" selling price must be at least $${min.toFixed(2)} (5% above cost $${cost.toFixed(2)}).`;
+    }
+  }
+  return null;
 }
 
 async function customerIsTaxExempt(customerId?: mongoose.Types.ObjectId | string | null): Promise<boolean> {
@@ -277,20 +301,10 @@ router.post('/', authenticateAdmin, async (req: AuthRequest, res) => {
       fallbackTaxAmount: Number(body.tax_amount) || 0,
     });
 
-    // Task 05: quotations never reserve or deduct stock. Invoices keep the existing guard.
-    if (shouldAdjustInventoryForDocumentType(docType)) {
-      for (const item of items) {
-        if (!item.product_id || (item.quantity || 0) <= 0) continue;
-        const product = await Product.findById(item.product_id);
-        if (!product) continue;
-        if ((product as any).product_type === 'service' || (product as any).product_type === 'non_inventory') continue;
-        const qty = Number(item.quantity) || 0;
-        const currentQty = (product as any).stock_quantity ?? 0;
-        if (currentQty - qty < 0) {
-          return res.status(400).json({ error: `Product "${product.name}" is out of stock. Please restock before invoicing.` });
-        }
-      }
-    }
+    const floorErr = sellingPriceFloorError(items, productsById);
+    if (floorErr) return res.status(400).json({ error: floorErr });
+
+    // Quotations never reserve or deduct stock. Invoices may go to zero or negative stock.
 
     const inv = await Invoice.create({
       invoice_number,
@@ -442,7 +456,7 @@ router.put('/:id', authenticateAdmin, async (req: AuthRequest, res) => {
       const existingHasLineTax = existingItems.some((item) => hasInvoiceLineTaxSnapshot(item));
       const incomingHasProduct = rawItems.some((item) => Boolean(item.product_id));
       const inheritFromProduct = incomingHasProduct && existingHasLineTax;
-      const productsById = inheritFromProduct ? await loadProductsById(rawItems) : new Map();
+      const productsById = incomingHasProduct ? await loadProductsById(rawItems) : new Map();
       const customerExempt = inheritFromProduct ? await customerIsTaxExempt(invoice.customer_id) : false;
       const built = buildInvoiceLines({
         items: rawItems,
@@ -461,6 +475,9 @@ router.put('/:id', authenticateAdmin, async (req: AuthRequest, res) => {
         usedLineTax,
         fallbackTaxAmount: fallbackTax,
       });
+
+      const floorErr = sellingPriceFloorError(items, productsById);
+      if (floorErr) return res.status(400).json({ error: floorErr });
 
       try {
         assertReceivableInvoiceEdit({
@@ -593,19 +610,9 @@ router.post('/:id/convert', authenticateAdmin, async (req: AuthRequest, res) => 
     const invoice_date = new Date();
     const due_date = (quote as any).due_date || invoice_date;
 
-    if (shouldAdjustInventoryForDocumentType(DOCUMENT_TYPE_INVOICE)) {
-      for (const item of items) {
-        if (!item.product_id || (item.quantity || 0) <= 0) continue;
-        const product = await Product.findById(item.product_id);
-        if (!product) continue;
-        if ((product as any).product_type === 'service' || (product as any).product_type === 'non_inventory') continue;
-        const qty = Number(item.quantity) || 0;
-        const currentQty = (product as any).stock_quantity ?? 0;
-        if (currentQty - qty < 0) {
-          return res.status(400).json({ error: `Product "${product.name}" is out of stock. Please restock before invoicing.` });
-        }
-      }
-    }
+    const productsById = await loadProductsById(items);
+    const floorErr = sellingPriceFloorError(items, productsById);
+    if (floorErr) return res.status(400).json({ error: floorErr });
 
     const inv = await Invoice.create({
       invoice_number,

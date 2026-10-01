@@ -118,7 +118,7 @@ function InvoicesPageInner() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchTerm, docTypeFilter]);
 
-  // Deep links: /admin/invoices?create=invoice | ?create=quotation (quick commands, sidebar, palette).
+  // Deep links: /admin/invoices?create=invoice | ?create=quotation | ?receive=1
   useEffect(() => {
     const create = searchParams?.get('create');
     if (create === 'invoice' || create === 'quotation') {
@@ -126,6 +126,11 @@ function InvoicesPageInner() {
       setDocTypeFilter(create);
       setEditId(null);
       setCreateOpen(true);
+    }
+    if (searchParams?.get('receive') === '1') {
+      setReceivePaymentCustomerId(undefined);
+      setReceivePaymentInvoiceId(undefined);
+      setReceivePaymentOpen(true);
     }
   }, [searchParams]);
 
@@ -587,7 +592,12 @@ function InvoicesPageInner() {
 
       <ReceivePaymentLightbox
         isOpen={receivePaymentOpen}
-        onClose={() => { setReceivePaymentOpen(false); setReceivePaymentCustomerId(undefined); setReceivePaymentInvoiceId(undefined); }}
+        onClose={() => {
+          setReceivePaymentOpen(false);
+          setReceivePaymentCustomerId(undefined);
+          setReceivePaymentInvoiceId(undefined);
+          if (searchParams?.get('receive')) router.replace('/admin/invoices');
+        }}
         onRecorded={() => { fetchInvoices(); fetchSummary(); setHistoryTick((n) => n + 1); }}
         preselectedCustomerId={receivePaymentCustomerId}
         preselectedInvoiceId={receivePaymentInvoiceId}

@@ -97,6 +97,12 @@ export function adminNavUtilityClass(active: boolean): string {
   }`;
 }
 
+export function adminCreateTagClass(active: boolean): string {
+  return `inline-flex items-center px-2.5 py-1 rounded-full text-[11px] font-medium leading-tight whitespace-nowrap ${
+    active ? 'bg-black text-white' : 'bg-[#F4F5F8] text-[#393A3D] hover:bg-[#E8E9EB] hover:text-[#1A1A1A]'
+  }`;
+}
+
 export function adminRailBtnClass(active: boolean): string {
   return `w-full text-left px-3 py-2 rounded-md text-sm ${
     active ? 'bg-[#F4F5F8] text-[#1A1A1A] font-medium' : 'text-[#393A3D] hover:bg-[#F4F5F8]'

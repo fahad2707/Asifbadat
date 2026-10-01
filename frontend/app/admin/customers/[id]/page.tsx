@@ -92,6 +92,7 @@ export default function Customer360Page() {
 
   // Modals
   const [invoiceLightboxOpen, setInvoiceLightboxOpen] = useState(false);
+  const [editInvoiceId, setEditInvoiceId] = useState<string | null>(null);
   const [receivePaymentOpen, setReceivePaymentOpen] = useState(false);
   const [receivePaymentInvoiceId, setReceivePaymentInvoiceId] = useState<string | undefined>();
   const [uploadingDoc, setUploadingDoc] = useState(false);
@@ -101,7 +102,7 @@ export default function Customer360Page() {
     try {
       const [custRes, invRes, receiptsRes, rfqRes] = await Promise.all([
         adminApi.get(`/customers/${id}`),
-        adminApi.get('/invoices', { params: { customer_id: id, limit: 200 } }),
+        adminApi.get('/invoices', { params: { customer_id: id, type: 'invoice', limit: 1000 } }),
         adminApi.get('/receipts'),
         adminApi.get('/rfq', { params: { limit: 100 } }),
       ]);
@@ -232,7 +233,7 @@ export default function Customer360Page() {
         </Link>
         <div className="flex items-center gap-2">
           <button
-            onClick={() => setInvoiceLightboxOpen(true)}
+            onClick={() => { setEditInvoiceId(null); setInvoiceLightboxOpen(true); }}
             className="inline-flex items-center gap-2 px-3.5 py-2.5 bg-[#0F9F8F] hover:bg-[#0B8275] border-transparent active:scale-[0.98] rounded-xl text-xs font-bold text-white transition-all shadow-md shadow-teal-500/10 cursor-pointer"
           >
             <PlusCircle className="w-4 h-4" /> Raise POS Invoice
@@ -471,44 +472,66 @@ export default function Customer360Page() {
         {/* Tab 3: Invoices */}
         {activeTab === 'invoices' && (
           <div className="overflow-x-auto">
-            <table className="w-full text-xs text-left">
-              <thead>
-                <tr className="border-b border-white/5 text-slate-400">
-                  <th className="py-2.5">Inv Date</th>
-                  <th className="py-2.5">Due Date</th>
-                  <th className="py-2.5">Doc #</th>
-                  <th className="py-2.5 font-right text-right">Unpaid Balance</th>
-                  <th className="py-2.5 font-right text-right">Total Invoice</th>
-                  <th className="py-2.5 text-right">Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {saleInvoices.map((inv, idx) => {
-                  const balance = inv.total_amount - (inv.amount_paid || 0);
-                  return (
-                    <tr key={idx} className="border-b border-white/5 hover:bg-white/[0.02]">
-                      <td className="py-3 text-slate-350">{new Date(inv.invoice_date || inv.created_at).toLocaleDateString()}</td>
-                      <td className="py-3 text-slate-500 font-semibold">{inv.due_date ? new Date(inv.due_date).toLocaleDateString() : 'Immediate'}</td>
-                      <td className="py-3 font-mono font-bold text-white">{inv.invoice_number}</td>
-                      <td className="py-3 text-right font-black text-rose-400">${balance.toFixed(2)}</td>
-                      <td className="py-3 text-right font-bold text-slate-200">${inv.total_amount.toFixed(2)}</td>
-                      <td className="py-3 text-right space-x-2">
-                        <Link href={`/admin/invoices?search=${inv.invoice_number}`} className="text-teal-400 hover:text-white font-medium">View Form</Link>
-                        {balance > 0 && (
-                          <button
-                            type="button"
-                            onClick={() => { setReceivePaymentInvoiceId(inv.id); setReceivePaymentOpen(true); }}
-                            className="bg-teal-500/10 text-teal-400 hover:bg-teal-500 hover:text-white px-2 py-0.5 rounded text-[10px] font-bold border border-teal-500/30"
-                          >
-                            Pay
-                          </button>
-                        )}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+            {saleInvoices.length === 0 ? (
+              <p className="text-sm text-slate-500 py-8 text-center">No invoices for this customer yet.</p>
+            ) : (
+              <table className="w-full text-xs text-left">
+                <thead>
+                  <tr className="border-b border-white/5 text-slate-400">
+                    <th className="py-2.5">Date</th>
+                    <th className="py-2.5">Due</th>
+                    <th className="py-2.5">Invoice #</th>
+                    <th className="py-2.5">Items</th>
+                    <th className="py-2.5">Status</th>
+                    <th className="py-2.5 text-right">Paid</th>
+                    <th className="py-2.5 text-right">Balance</th>
+                    <th className="py-2.5 text-right">Total</th>
+                    <th className="py-2.5 text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {saleInvoices.map((inv) => {
+                    const balance = (inv.total_amount || 0) - (inv.amount_paid || 0);
+                    const status = String(inv.payment_status || 'unpaid').toLowerCase();
+                    const items = Array.isArray(inv.items) ? inv.items : [];
+                    const itemsLabel = items
+                      .map((it: { product_name?: string; quantity?: number }) => `${it.product_name || 'Item'}${it.quantity ? ` × ${it.quantity}` : ''}`)
+                      .join(', ');
+                    return (
+                      <tr
+                        key={inv.id || inv.invoice_number}
+                        className="border-b border-white/5 hover:bg-white/[0.04] cursor-pointer"
+                        onClick={() => { setEditInvoiceId(inv.id); setInvoiceLightboxOpen(true); }}
+                      >
+                        <td className="py-3 text-slate-350 whitespace-nowrap">{inv.invoice_date || inv.created_at ? new Date(inv.invoice_date || inv.created_at).toLocaleDateString() : '—'}</td>
+                        <td className="py-3 text-slate-500 font-semibold whitespace-nowrap">{inv.due_date ? new Date(inv.due_date).toLocaleDateString() : '—'}</td>
+                        <td className="py-3 font-mono font-bold text-white">{inv.invoice_number}</td>
+                        <td className="py-3 text-slate-300 max-w-[220px] truncate" title={itemsLabel || undefined}>{itemsLabel || '—'}</td>
+                        <td className="py-3">
+                          <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${status === 'paid' ? 'bg-teal-500/10 text-teal-400 border border-teal-500/20' : status === 'partial' ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20' : 'bg-rose-500/10 text-rose-400 border border-rose-500/20'}`}>
+                            {status.toUpperCase()}
+                          </span>
+                        </td>
+                        <td className="py-3 text-right text-slate-200">${Number(inv.amount_paid || 0).toFixed(2)}</td>
+                        <td className="py-3 text-right font-black text-rose-400">${balance.toFixed(2)}</td>
+                        <td className="py-3 text-right font-bold text-slate-200">${Number(inv.total_amount || 0).toFixed(2)}</td>
+                        <td className="py-3 text-right" onClick={(e) => e.stopPropagation()}>
+                          {balance > 0 && (
+                            <button
+                              type="button"
+                              onClick={() => { setReceivePaymentInvoiceId(inv.id); setReceivePaymentOpen(true); }}
+                              className="bg-teal-500/10 text-teal-400 hover:bg-teal-500 hover:text-white px-2 py-0.5 rounded text-[10px] font-bold border border-teal-500/30"
+                            >
+                              Pay
+                            </button>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            )}
           </div>
         )}
 
@@ -760,9 +783,10 @@ export default function Customer360Page() {
       {/* Embedded Invoice / Payment lightboxes from the CRM details page */}
       <InvoiceFormLightbox
         isOpen={invoiceLightboxOpen}
-        onClose={() => setInvoiceLightboxOpen(false)}
-        onSaved={() => { fetchCustomerData(); setInvoiceLightboxOpen(false); }}
-        initialCustomerId={id}
+        onClose={() => { setInvoiceLightboxOpen(false); setEditInvoiceId(null); }}
+        onSaved={() => { fetchCustomerData(); setInvoiceLightboxOpen(false); setEditInvoiceId(null); }}
+        initialCustomerId={editInvoiceId ? undefined : id}
+        editId={editInvoiceId}
       />
       <ReceivePaymentLightbox
         isOpen={receivePaymentOpen}

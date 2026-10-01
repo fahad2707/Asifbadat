@@ -21,6 +21,9 @@ export interface IPurchaseOrder extends Document {
   received_at?: Date;
   notes?: string;
   created_by?: mongoose.Types.ObjectId;
+  vendor_invoice_url?: string;
+  vendor_invoice_name?: string;
+  vendor_invoice_uploaded_at?: Date;
   created_at: Date;
   updated_at: Date;
 }
@@ -47,6 +50,9 @@ const PurchaseOrderSchema = new Schema<IPurchaseOrder>(
     received_at: Date,
     notes: String,
     created_by: { type: Schema.Types.ObjectId, ref: 'Admin' },
+    vendor_invoice_url: String,
+    vendor_invoice_name: String,
+    vendor_invoice_uploaded_at: Date,
   },
   { timestamps: { createdAt: 'created_at', updatedAt: 'updated_at' } }
 );

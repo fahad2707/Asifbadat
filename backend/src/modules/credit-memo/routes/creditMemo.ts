@@ -45,12 +45,18 @@ async function generateCreditMemoPDFBuffer(cm: any): Promise<Buffer> {
   });
 }
 
+function mongoIdOrUndef(value?: string): string | undefined {
+  if (!value || typeof value !== 'string') return undefined;
+  const v = value.trim();
+  return /^[a-fA-F0-9]{24}$/.test(v) ? v : undefined;
+}
+
 const itemSchema = z.object({
-  product_id: z.string(),
+  product_id: z.string().min(1),
   product_name: z.string().optional(),
-  quantity: z.number().positive(),
-  unit_price: z.number().min(0),
-  tax_percent: z.number().min(0).max(100).default(0),
+  quantity: z.coerce.number().positive(),
+  unit_price: z.coerce.number().min(0),
+  tax_percent: z.coerce.number().min(0).max(100).optional().default(0),
 });
 
 const createSchema = z.object({
@@ -60,9 +66,9 @@ const createSchema = z.object({
   vendor_id: z.string().optional(),
   customer_id: z.string().optional(),
   reason: z.enum(['DAMAGED', 'RATE_DIFFERENCE', 'RETURN', 'SCHEME', 'OTHER']),
-  affects_inventory: z.boolean().default(true),
+  affects_inventory: z.preprocess((v) => (v === 'false' || v === false ? false : v === 'true' || v === true ? true : v), z.boolean().default(true)),
   items: z.array(itemSchema).min(1),
-  document_url: z.string().url().optional(),
+  document_url: z.string().url().optional().or(z.literal('')),
   notes: z.string().optional(),
 });
 
@@ -160,8 +166,10 @@ router.get('/:id', authenticateAdmin, async (req: AuthRequest, res) => {
       reference_invoice_id: c.reference_invoice_id?._id?.toString(),
       reference_shipment_id: c.reference_shipment_id?.toString(),
       vendor_id: c.vendor_id?._id?.toString(),
+      vendor_name: c.vendor_id?.name,
       vendor: c.vendor_id,
       customer_id: c.customer_id?._id?.toString(),
+      customer_name: c.customer_id?.name,
       customer: c.customer_id,
       reason: c.reason,
       affects_inventory: c.affects_inventory,
@@ -185,11 +193,16 @@ router.get('/:id', authenticateAdmin, async (req: AuthRequest, res) => {
 router.post('/', authenticateAdmin, async (req: AuthRequest, res) => {
   try {
     const data = createSchema.parse(req.body);
-    if (data.type === 'VENDOR' && !data.vendor_id) {
-      return res.status(400).json({ error: 'Vendor credit memo requires vendor_id' });
+    if (data.type === 'VENDOR' && !mongoIdOrUndef(data.vendor_id)) {
+      return res.status(400).json({ error: 'Vendor credit memo requires a vendor' });
     }
-    if (data.type === 'CUSTOMER' && !data.customer_id) {
-      return res.status(400).json({ error: 'Customer credit memo requires customer_id' });
+    if (data.type === 'CUSTOMER' && !mongoIdOrUndef(data.customer_id)) {
+      return res.status(400).json({ error: 'Customer credit memo requires a customer' });
+    }
+    for (const i of data.items) {
+      if (!mongoIdOrUndef(i.product_id)) {
+        return res.status(400).json({ error: `"${i.product_name || 'A line'}" needs a valid product` });
+      }
     }
 
     const items = data.items.map((i) => {
@@ -208,23 +221,28 @@ router.post('/', authenticateAdmin, async (req: AuthRequest, res) => {
     const subtotal = items.reduce((s, i) => s + i.quantity * i.unit_price, 0);
     const tax_amount = items.reduce((s, i) => s + i.tax_amount, 0);
     const total_amount = subtotal + tax_amount;
+    const referenceInvoiceId = mongoIdOrUndef(data.reference_invoice_id);
+    let notes = data.notes || '';
+    if (data.reference_invoice_id && !referenceInvoiceId) {
+      notes = [notes, `Reference: ${data.reference_invoice_id}`].filter(Boolean).join('\n');
+    }
 
     const cm = await CreditMemo.create({
       credit_memo_number: generateCreditMemoNumber(),
       type: data.type,
-      reference_invoice_id: data.reference_invoice_id || undefined,
-      reference_shipment_id: data.reference_shipment_id || undefined,
-      vendor_id: data.vendor_id || undefined,
-      customer_id: data.customer_id || undefined,
+      reference_invoice_id: referenceInvoiceId,
+      reference_shipment_id: mongoIdOrUndef(data.reference_shipment_id),
+      vendor_id: data.type === 'VENDOR' ? mongoIdOrUndef(data.vendor_id) : undefined,
+      customer_id: data.type === 'CUSTOMER' ? mongoIdOrUndef(data.customer_id) : undefined,
       reason: data.reason,
       affects_inventory: data.affects_inventory,
       subtotal,
       tax_amount,
       total_amount,
       status: 'DRAFT',
-      document_url: data.document_url,
-      notes: data.notes,
-      created_by: req.userId,
+      document_url: data.document_url || undefined,
+      notes: notes || undefined,
+      created_by: mongoIdOrUndef(req.userId),
       items,
     });
 
@@ -238,6 +256,9 @@ router.post('/', authenticateAdmin, async (req: AuthRequest, res) => {
     });
   } catch (e: any) {
     if (e.name === 'ZodError') return res.status(400).json({ error: e.errors?.[0]?.message || 'Validation error' });
+    if (e.name === 'CastError' || e.name === 'ValidationError') {
+      return res.status(400).json({ error: e.message || 'Invalid credit memo data' });
+    }
     console.error('Create credit memo:', e);
     res.status(500).json({ error: 'Failed to create credit memo' });
   }

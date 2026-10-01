@@ -5,6 +5,7 @@ import { Plus, Edit, Trash2, X, Wallet, TrendingUp, Tag, Award, Search } from 'l
 import adminApi from '@/lib/admin-api';
 import { adminUi } from '@/lib/admin-ui';
 import toast from 'react-hot-toast';
+import NumberInput from '@/components/admin/NumberInput';
 
 interface Expense {
   id: string;
@@ -423,7 +424,7 @@ export default function ExpensesPage() {
               </div>
               <div>
                 <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">Grand Amount (USD) *</label>
-                <input type="number" min={0} step={0.01} value={form.amount} onChange={(e) => setForm((f) => ({ ...f, amount: e.target.value }))} className="w-full bg-slate-955/65 border border-white/10 rounded-xl px-4 py-2 text-xs text-slate-100 font-mono font-semibold focus:outline-none focus:ring-1 focus:ring-teal-500" required />
+                <NumberInput min={0} step={0.01} value={form.amount} onValueChange={(n) => setForm((f) => ({ ...f, amount: n === '' ? '' : String(n) }))} className="w-full bg-slate-955/65 border border-white/10 rounded-xl px-4 py-2 text-xs text-slate-100 font-mono font-semibold focus:outline-none focus:ring-1 focus:ring-teal-500" required />
               </div>
               <div>
                 <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">Mode of payment *</label>

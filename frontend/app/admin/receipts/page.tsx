@@ -6,6 +6,7 @@ import { Download, Plus, Printer, Search, Trash2, X } from 'lucide-react';
 import adminApi from '@/lib/admin-api';
 import { isAdminAuthRedirectError } from '@/lib/admin-auth-redirect';
 import toast from 'react-hot-toast';
+import NumberInput from '@/components/admin/NumberInput';
 import { adminUi } from '@/lib/admin-ui';
 import { exportBankTransactionsToExcel } from '@/lib/export-bank-transactions-excel';
 import { printBankTransactions } from '@/lib/print-bank-transactions';
@@ -112,7 +113,7 @@ function ReceiptsPageInner() {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [showCreate, setShowCreate] = useState(false);
-  const [depositTarget, setDepositTarget] = useState<{ kind: 'receipt' | 'expense'; id: string; label: string; amount: number } | null>(null);
+  const [depositTarget, setDepositTarget] = useState<{ kind: 'receipt' | 'expense'; id: string; label: string; amount: number }[] | null>(null);
   const [depositBank, setDepositBank] = useState('');
   const [depositDate, setDepositDate] = useState(new Date().toISOString().slice(0, 10));
   const [depositTime, setDepositTime] = useState(new Date().toISOString().slice(11, 16));
@@ -320,32 +321,39 @@ function ReceiptsPageInner() {
     await load();
   };
 
-  const openDeposit = (row: { kind: 'receipt' | 'expense'; id: string; trx_id: string; amount: number }) => {
-    setDepositTarget({ kind: row.kind, id: row.id, label: row.trx_id, amount: row.amount });
+  const openDeposit = (list: Array<{ kind: 'receipt' | 'expense'; id: string; trx_id: string; amount: number }>) => {
+    if (list.length === 0) return;
+    setDepositTarget(list.map((row) => ({ kind: row.kind, id: row.id, label: row.trx_id, amount: row.amount })));
     setDepositBank(bankAccounts[0]?.id || '');
     setDepositDate(new Date().toISOString().slice(0, 10));
     setDepositTime(new Date().toTimeString().slice(0, 5));
   };
 
   const submitDeposit = async () => {
-    if (!depositTarget) return;
+    if (!depositTarget?.length) return;
     if (!depositBank) {
       toast.error('Select a bank');
       return;
     }
     setDepositing(true);
-    try {
-      const path = depositTarget.kind === 'receipt' ? `/receipts/${depositTarget.id}/deposit` : `/expenses/${depositTarget.id}/deposit`;
-      await adminApi.post(path, { bank_account_id: depositBank, deposit_date: depositDate, deposit_time: depositTime });
-      toast.success('Marked as deposited');
-      setDepositTarget(null);
-      setTab('deposited');
-      await load();
-    } catch (err: any) {
-      toast.error(err?.response?.data?.error || 'Could not mark as deposited');
-    } finally {
-      setDepositing(false);
+    let ok = 0;
+    const failures: string[] = [];
+    for (const item of depositTarget) {
+      try {
+        const path = item.kind === 'receipt' ? `/receipts/${item.id}/deposit` : `/expenses/${item.id}/deposit`;
+        await adminApi.post(path, { bank_account_id: depositBank, deposit_date: depositDate, deposit_time: depositTime });
+        ok += 1;
+      } catch (err: any) {
+        failures.push(err?.response?.data?.error || `Could not deposit ${item.label}`);
+      }
     }
+    setDepositing(false);
+    if (ok) toast.success(ok === 1 ? 'Marked as deposited' : `Marked ${ok} transactions as deposited`);
+    if (failures.length) toast.error(failures.slice(0, 3).join(' · '));
+    setDepositTarget(null);
+    clearSelection();
+    if (ok) setTab('deposited');
+    await load();
   };
 
   const generateTrxId = async () => {
@@ -520,6 +528,11 @@ function ReceiptsPageInner() {
             <Printer className="w-4 h-4" />
             Print selected
           </button>
+          {tab === 'pending' && (
+            <button type="button" onClick={() => openDeposit(selectedRows)} disabled={bulkBusy} className={`${adminUi.btnPrimary} disabled:opacity-50`}>
+              {bulkBusy ? 'Working…' : `Mark ${selectedRows.length} as deposited`}
+            </button>
+          )}
           {tab !== 'archived' && (
             <button type="button" onClick={handleArchiveSelected} disabled={bulkBusy} className={`${adminUi.btnSecondary} disabled:opacity-50`}>
               {bulkBusy ? 'Working…' : 'Archive selected'}
@@ -611,7 +624,7 @@ function ReceiptsPageInner() {
                       </td>
                       <td className="px-4 py-3 text-right whitespace-nowrap">
                         {tab === 'pending' ? (
-                          <button type="button" onClick={() => openDeposit(row)} className="text-[#0077C5] hover:underline">
+                          <button type="button" onClick={() => openDeposit([row])} className="text-[#0077C5] hover:underline">
                             Mark as deposited
                           </button>
                         ) : tab === 'archived' ? (
@@ -629,18 +642,32 @@ function ReceiptsPageInner() {
         </div>
       )}
 
-      {depositTarget && (
+      {depositTarget && depositTarget.length > 0 && (
         <div className={adminUi.modalBackdrop} onClick={() => setDepositTarget(null)}>
           <div className={`${adminUi.modal} max-w-md w-full p-6`} onClick={(e) => e.stopPropagation()}>
             <div className="flex items-start justify-between gap-3 mb-4">
               <div>
-                <h3 className="text-lg font-medium">Mark as deposited</h3>
-                <p className={adminUi.meta}>{depositTarget.label} · {money(depositTarget.amount)}</p>
+                <h3 className="text-lg font-medium">{depositTarget.length === 1 ? 'Mark as deposited' : `Deposit ${depositTarget.length} transactions`}</h3>
+                <p className={adminUi.meta}>
+                  {depositTarget.length === 1
+                    ? `${depositTarget[0].label} · ${money(depositTarget[0].amount)}`
+                    : `${depositTarget.length} selected · ${money(depositTarget.reduce((s, i) => s + i.amount, 0))} total`}
+                </p>
               </div>
               <button type="button" onClick={() => setDepositTarget(null)} className={adminUi.btnIcon} aria-label="Close">
                 <X className="w-5 h-5" />
               </button>
             </div>
+            {depositTarget.length > 1 && (
+              <ul className="mb-4 max-h-32 overflow-y-auto text-sm text-[#1A1A1A] space-y-1">
+                {depositTarget.map((item) => (
+                  <li key={`${item.kind}:${item.id}`} className="flex justify-between gap-3">
+                    <span className="truncate">{item.label}</span>
+                    <span className="tabular-nums shrink-0">{money(item.amount)}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
             <div className="space-y-3">
               <div>
                 <label className={adminUi.label}>Bank</label>
@@ -665,7 +692,7 @@ function ReceiptsPageInner() {
             <div className="flex justify-end gap-2 mt-5">
               <button type="button" onClick={() => setDepositTarget(null)} className={adminUi.btnSecondary}>Cancel</button>
               <button type="button" onClick={submitDeposit} disabled={depositing} className={`${adminUi.btnPrimary} disabled:opacity-50`}>
-                {depositing ? 'Saving…' : 'Mark deposited'}
+                {depositing ? 'Saving…' : depositTarget.length === 1 ? 'Mark deposited' : `Deposit ${depositTarget.length}`}
               </button>
             </div>
           </div>
@@ -726,7 +753,7 @@ function ReceiptsPageInner() {
               </div>
               <div>
                 <label className={adminUi.label}>Amount</label>
-                <input type="number" min="0" step="0.01" value={form.amount_received} onChange={(e) => setForm((f) => ({ ...f, amount_received: e.target.value }))} className={`${adminUi.field} mt-1`} required />
+                <NumberInput min={0} step={0.01} value={form.amount_received} onValueChange={(n) => setForm((f) => ({ ...f, amount_received: n === '' ? '' : String(n) }))} className={`${adminUi.field} mt-1`} required />
               </div>
               <div className="flex justify-end gap-2 pt-2">
                 <button type="button" onClick={() => setShowCreate(false)} className={adminUi.btnSecondary}>Cancel</button>

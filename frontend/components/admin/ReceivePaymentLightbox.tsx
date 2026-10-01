@@ -5,6 +5,7 @@ import { X } from 'lucide-react';
 import adminApi from '@/lib/admin-api';
 import { formatApiError } from '@/lib/format-api-error';
 import toast from 'react-hot-toast';
+import NumberInput from './NumberInput';
 
 interface Customer {
   id: string;
@@ -215,13 +216,12 @@ export default function ReceivePaymentLightbox({ isOpen, onClose, onRecorded, pr
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Amount received</label>
-                <input
-                  type="number"
+                <NumberInput
                   min={0}
                   step={0.01}
                   value={amountReceived}
-                  onChange={(e) => {
-                    const val = e.target.value;
+                  onValueChange={(n) => {
+                    const val = n === '' ? '' : String(n);
                     setAmountReceived(val);
                     setDirty(true);
                     if (outstandingInvoices.length === 1) {
@@ -326,7 +326,7 @@ export default function ReceivePaymentLightbox({ isOpen, onClose, onRecorded, pr
                               <td className="py-2 px-2">{inv.invoice_number}</td>
                               <td className="py-2 px-2 text-right">${openBal.toFixed(2)}</td>
                               <td className="py-2 px-2">
-                                <input type="number" min={0} max={openBal} step={0.01} value={allocations[inv.id] ?? ''} onChange={(e) => setAllocation(inv.id, e.target.value)} className="w-full text-right border border-gray-300 rounded px-2 py-1" placeholder="0" />
+                                <NumberInput min={0} max={openBal} step={0.01} value={allocations[inv.id] ?? ''} onValueChange={(n) => setAllocation(inv.id, n === '' ? '' : String(n))} className="w-full text-right border border-gray-300 rounded px-2 py-1" />
                               </td>
                             </tr>
                           );

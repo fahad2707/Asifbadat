@@ -126,6 +126,9 @@ test('mixed GST / VAT / No Tax lines sum independently', () => {
   assert.equal(totals.subtotal_amount, 22.49);
   assert.equal(totals.tax_amount, 2.1);
   assert.equal(totals.total_amount, 24.59);
+  const withBillTax = invoiceTaxTotals(items, { usedLineTax: true, fallbackTaxAmount: 5 });
+  assert.equal(withBillTax.tax_amount, 5);
+  assert.equal(withBillTax.total_amount, 27.49);
 });
 
 test('edit recomputes tax from stored snapshot, not a new Product TaxType', () => {

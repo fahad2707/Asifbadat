@@ -128,7 +128,7 @@ export function ProductsAdminView({ mode }: { mode: ProductsAdminMode }) {
     setLoading(true);
     try {
       const response = await adminApi.get('/products', {
-        params: { limit: 5000, visibility: mode === 'inactive' ? 'inactive' : 'active' },
+        params: { limit: 5000, visibility: mode === 'inactive' ? 'inactive' : 'all' },
       });
       setProducts(response.data.products || []);
       setTotalCount(response.data.pagination?.total ?? (response.data.products?.length ?? 0));
@@ -315,8 +315,14 @@ export function ProductsAdminView({ mode }: { mode: ProductsAdminMode }) {
     setTogglingId(id);
     try {
       await adminApi.put(`/products/${id}`, { is_active: next });
+      setProducts((prev) => {
+        const updated = prev.map((p) => (String(p.id) === id ? { ...p, is_active: next } : p));
+        if (mode === 'inactive' && next) {
+          return updated.filter((p) => String(p.id) !== id);
+        }
+        return updated;
+      });
       toast.success(next ? 'Product is visible on the website' : 'Product hidden from the website');
-      await fetchProducts();
     } catch (err: unknown) {
       toast.error(formatApiError(err, 'Could not update visibility'));
     } finally {
@@ -431,12 +437,18 @@ export function ProductsAdminView({ mode }: { mode: ProductsAdminMode }) {
           </h1>
           {mode === 'inactive' ? (
             <p className="text-[#6B6C72] mt-2 max-w-2xl text-sm">
-              Hidden from the public storefront. Use <strong>Set active</strong> or edit the product and turn on &ldquo;Active on website&rdquo;.
+              Hidden from the public storefront. Use <strong>Set active</strong> or the <strong>On website</strong> checkbox to show them in the store again.
             </p>
-          ) : null}
+          ) : (
+            <p className="text-[#6B6C72] mt-2 max-w-2xl text-sm">
+              Uncheck <strong>On website</strong> to hide a product from the storefront. It stays in this table so you can see which items are live.
+            </p>
+          )}
           {totalCount !== null && (
             <p className="text-teal-400 mt-1.5 font-bold text-xs uppercase tracking-wider">
-              {mode === 'inactive' ? 'Inactive' : 'Active'}: {totalCount.toLocaleString()} product{totalCount !== 1 ? 's' : ''}
+              {mode === 'inactive'
+                ? `Inactive: ${totalCount.toLocaleString()} product${totalCount !== 1 ? 's' : ''}`
+                : `${totalCount.toLocaleString()} product${totalCount !== 1 ? 's' : ''} · ${products.filter((p) => p.is_active !== false).length.toLocaleString()} on website`}
             </p>
           )}
         </div>
@@ -807,8 +819,8 @@ export function ProductsAdminView({ mode }: { mode: ProductsAdminMode }) {
           <div className="animate-spin rounded-full h-10 w-10 border-2 border-teal-500 border-t-transparent" />
         </div>
       ) : (
-        <div className="bg-white border border-[#E2E8F0] rounded-lg overflow-hidden">
-          <table className="w-full text-xs font-semibold">
+        <div className="bg-white border border-[#E2E8F0] rounded-lg overflow-x-auto">
+          <table className="w-full text-xs font-semibold min-w-[1100px]">
             <thead className="bg-slate-950/60 sticky top-0 z-10 border-b border-white/5 text-slate-400">
               <tr>
                 <th className="w-12 py-3.5 px-4 text-center">#</th>
@@ -827,7 +839,8 @@ export function ProductsAdminView({ mode }: { mode: ProductsAdminMode }) {
                 <th className="text-right py-3.5 px-4 font-bold tracking-wider uppercase text-[10px]">Stock</th>
                 <th className="text-left py-3.5 px-4 font-bold tracking-wider uppercase text-[10px]">Product ID</th>
                 <th className="text-left py-3.5 px-4 font-bold tracking-wider uppercase text-[10px]">SKU</th>
-                <th className="text-right py-3.5 px-4 font-bold tracking-wider uppercase text-[10px] min-w-[200px]">Actions</th>
+                <th className="text-center py-3.5 px-4 font-bold tracking-wider uppercase text-[10px] whitespace-nowrap">On website</th>
+                <th className="text-right py-3.5 px-4 font-bold tracking-wider uppercase text-[10px] sticky right-0 bg-white min-w-[88px]">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-white/5">
@@ -862,21 +875,23 @@ export function ProductsAdminView({ mode }: { mode: ProductsAdminMode }) {
                   </td>
                   <td className="py-3 px-4 text-slate-400 font-mono text-[10px] font-semibold">{product.product_id || '-'}</td>
                   <td className="py-3 px-4 text-slate-400 font-mono text-[10px]">{product.sku || '-'}</td>
-                  <td className="py-3 px-4" onClick={(e) => e.stopPropagation()}>
-                    <div className="flex items-center justify-end gap-3 flex-wrap">
-                      <label className="inline-flex items-center gap-2 cursor-pointer select-none text-[10px] font-bold text-slate-400 uppercase tracking-wider">
-                        <input
-                          type="checkbox"
-                          className="rounded bg-slate-900 border-white/10 text-teal-500 focus:ring-teal-500 h-3.5 w-3.5 shrink-0 disabled:opacity-50"
-                          checked={product.is_active !== false}
-                          disabled={togglingId === String(product.id)}
-                          onChange={(e) => {
-                            const next = e.target.checked;
-                            void handleWebsiteToggle(String(product.id), next);
-                          }}
-                        />
-                        <span className="whitespace-nowrap">On website</span>
-                      </label>
+                  <td className="py-3 px-4 text-center" onClick={(e) => e.stopPropagation()}>
+                    <label className="inline-flex items-center justify-center cursor-pointer select-none">
+                      <input
+                        type="checkbox"
+                        aria-label={`Show ${product.name} on website`}
+                        className="rounded bg-slate-900 border-white/10 text-teal-500 focus:ring-teal-500 h-3.5 w-3.5 shrink-0 disabled:opacity-50"
+                        checked={product.is_active !== false}
+                        disabled={togglingId === String(product.id)}
+                        onChange={(e) => {
+                          const next = e.target.checked;
+                          void handleWebsiteToggle(String(product.id), next);
+                        }}
+                      />
+                    </label>
+                  </td>
+                  <td className="py-3 px-4 sticky right-0 bg-white" onClick={(e) => e.stopPropagation()}>
+                    <div className="flex items-center justify-end">
                       <button
                         type="button"
                         onClick={() => {

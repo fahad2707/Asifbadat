@@ -161,7 +161,7 @@ export default function SearchableProductDropdown({
                 }}
                 className={`w-full text-left px-3 py-2 text-sm hover:bg-gray-50 flex items-center justify-between gap-2 ${
                   p.id === value ? 'bg-[#F1F5F9] text-[#0F172A] font-medium' : 'text-[#0F172A]'
-                }${p.stock_quantity != null && p.stock_quantity <= 0 ? ' opacity-50' : ''}`}
+                }`}
               >
                 <span className="truncate">
                   {p.name}
@@ -170,6 +170,7 @@ export default function SearchableProductDropdown({
                 </span>
                 <span className="text-xs text-gray-500 whitespace-nowrap shrink-0">
                   {showPrice && p.price != null ? `$${Number(p.price).toFixed(2)}` : ''}
+                  {!showPrice && p.stock_quantity != null ? `${p.stock_quantity} in stock` : ''}
                   {p.stock_quantity != null && p.stock_quantity <= 0 ? ' · Out of stock' : ''}
                 </span>
               </button>

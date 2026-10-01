@@ -552,6 +552,12 @@ body.category-mode #homeContent{display:none}
     <h1 id="catPageTitle"><i>Products</i></h1>
     <p id="catPageMeta">Browse all products in this category.</p>
   </div>
+  <div class="shop-search rv">
+    <div class="shop-search-row">
+      <input id="catPageSearch" type="text" placeholder="Search name, SKU / barcode, or category…" inputmode="search" autocomplete="off">
+      <button type="button" class="shop-scan-btn" id="catPageScanBtn" aria-label="Scan barcode">Scan barcode</button>
+    </div>
+  </div>
   <div class="filter-wrap" style="margin-bottom:36px">
     <button type="button" class="filt-scroll-btn" id="catPageFiltPrev" aria-label="Scroll categories left">‹</button>
     <div class="filters" id="catPageFiltBar"></div>
@@ -565,7 +571,6 @@ body.category-mode #homeContent{display:none}
 <section id="highlights"><div class="hl-head"><h2 class="rv">Our <i>Premier</i><br/>Product Lines</h2><p class="rv">A curated selection across industries, maintained to the highest standards.</p></div><div class="hl-scene"><div class="hl-wheel" id="hlWheel"></div></div><div class="hl-ctrl rv"><button class="hl-btn" id="hlPrev">←</button><div class="hl-dots" id="hlDots"></div><button class="hl-btn" id="hlNext">→</button></div></section>
 <div style="height:1px;background:linear-gradient(90deg,transparent,var(--line),transparent)"></div>
 <section id="shop"><div class="shop-head rv"><div class="about-tag">Browse &amp; Buy</div><h2><i>All</i> Products</h2><p>Explore our complete catalog. Quality-assured, competitively priced, ready to ship.</p></div><div class="shop-search rv"><div class="shop-search-row"><input id="shopSearch" type="text" placeholder="Search name, SKU / barcode, or category…" inputmode="search" autocomplete="off"><button type="button" class="shop-scan-btn" id="scanBtn" aria-label="Scan barcode">Scan barcode</button></div></div>
-<div class="scan-ov" id="scanOv" role="dialog" aria-modal="true" aria-labelledby="scanTitle"><div class="scan-box"><h4 id="scanTitle">Point camera at barcode</h4><div id="scanReader"></div><p id="scanErr" style="display:none;font-size:12px;color:#f87171;margin-top:10px"></p><div class="scan-actions"><button type="button" class="primary" id="scanCloseBtn">Close</button></div></div></div>
 <div class="cart-pop-ov" id="cartPopOv" onclick="closeCartPop()" aria-hidden="true"></div>
 <div id="cartPop" class="cart-pop" role="dialog" aria-label="Cart quick view"><div class="cart-pop-hd"><span>Your cart</span><button type="button" onclick="closeCartPop()" aria-label="Close">×</button></div><div id="cartPopList" class="cart-pop-list"><p class="cart-pop-empty">Your cart is empty</p></div><div class="cart-pop-ft"><div class="cart-pop-sub"><span style="font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--gold)">Prices shared via WhatsApp after submit</span></div><button type="button" class="btn-fill" onclick="closeCartPop();openCart();"><span>Review &amp; request quote</span></button><button type="button" class="btn-ghost" onclick="closeCartPop();">Continue browsing</button></div></div>
 <button type="button" class="cart-fab" id="cartFab" onclick="openCart()" aria-label="Open cart"><span aria-hidden="true">🛒</span><span class="cart-fab-n" id="cartFabN">0</span></button>
@@ -593,6 +598,7 @@ body.category-mode #homeContent{display:none}
 <section id="cta"><div class="cta-glow"></div><div class="cta-border"></div><div class="cta-inner"><div class="about-tag rv" style="justify-content:center">Get In Touch</div><h2 class="rv">Ready to <i>grow</i><br/>together?</h2><p class="rv">Join over 500 companies who trust Express Distributors Inc. to power their supply chain.</p><div class="cta-btns rv"><button class="btn-fill"><span>Schedule a Walkthrough</span></button><button class="btn-ghost">Download Catalogue</button></div></div></section>
 </div>
 <footer><div class="ft-top"><div><div class="ft-brand">Express <b>Distributors</b> Inc.</div><p class="ft-about">Bridging world-class manufacturers with the markets that need them most. Precision, speed, and trust — delivered since 1998.</p><div class="ft-about-contact"><a href="tel:+12674692156">+1 (267) 469-2156</a><a href="mailto:expressinc511@gmail.com">expressinc511@gmail.com</a></div></div><div class="ft-map-wrap"><iframe class="ft-map" loading="lazy" referrerpolicy="no-referrer-when-downgrade" src="https://maps.google.com/maps?q=511%20W%20Germantown%20Pike%2C%20Plymouth%20Meeting%2C%20PA%2019462-1303&z=15&output=embed" title="Express Distributors Inc location"></iframe><div class="ft-contact"><h5>Location</h5><p>Express Distributors Inc<br/>511 W Germantown Pike, Plymouth Meeting, PA 19462-1303</p></div></div></div><div class="ft-btm"><span>© 2024 Express Distributors Inc. All rights reserved.</span><span>Crafted with precision.</span></div></footer>
+<div class="scan-ov" id="scanOv" role="dialog" aria-modal="true" aria-labelledby="scanTitle"><div class="scan-box"><h4 id="scanTitle">Point camera at barcode</h4><div id="scanReader"></div><p id="scanErr" style="display:none;font-size:12px;color:#f87171;margin-top:10px"></p><div class="scan-actions"><button type="button" class="primary" id="scanCloseBtn">Close</button></div></div></div>
 <div class="rfq-ov" id="rfqOv" role="dialog" aria-modal="true" aria-labelledby="rfqTitle" onclick="closeRfqLightbox(event)">
   <div class="rfq-box" onclick="event.stopPropagation()" id="rfqBox">
     <button type="button" class="rfq-close" onclick="closeRfqLightbox()" aria-label="Close">×</button>
@@ -869,6 +875,24 @@ function normCode(v){
   // Scanner input may include spaces/newlines/separators; normalize for SKU/barcode matching.
   return normText(v).replace(/[^a-z0-9]/g,'');
 }
+function productMatchesSearch(p){
+  if(!searchQuery) return true;
+  const q=normText(searchQuery);
+  const qCode=normCode(searchQuery);
+  const tokens=q.split(/\s+/).filter(Boolean);
+  const name=normText(p.n);
+  const desc=normText(p.d);
+  const sku=normText(p.sku);
+  const cat=normText(p.c);
+  const skuCode=normCode(p.sku);
+  const pid=normText(p.pid);
+  const pidCode=normCode(p.pid);
+  const hay=(name+' '+desc+' '+cat+' '+sku+' '+pid);
+  const tokenMatch=tokens.length?tokens.every(t=>hay.includes(t)):q.length>0;
+  const barcodeMatch=qCode && skuCode && (skuCode===qCode||skuCode.includes(qCode)||qCode.includes(skuCode));
+  const productIdMatch=qCode && pidCode && (pidCode===qCode||pidCode.includes(qCode));
+  return tokenMatch || barcodeMatch || productIdMatch;
+}
 const getFiltered=()=>{
   let source;
   if(actFilt==='All'&&!actFiltCatId){
@@ -882,23 +906,7 @@ const getFiltered=()=>{
   // When searching, prioritize matching regardless of the active wheel/category selection.
   // This avoids "search shows nothing" when the user expects global search behavior.
   source=MIXED_ALL;
-  const q=normText(searchQuery);
-  const qCode=normCode(searchQuery);
-  const tokens=q.split(/\s+/).filter(Boolean);
-  return source.filter(p=>{
-    const name=normText(p.n);
-    const desc=normText(p.d);
-    const sku=normText(p.sku);
-    const cat=normText(p.c);
-    const skuCode=normCode(p.sku);
-    const pid=normText(p.pid);
-    const pidCode=normCode(p.pid);
-    const hay=(name+' '+desc+' '+cat+' '+sku+' '+pid);
-    const tokenMatch=tokens.length?tokens.every(t=>hay.includes(t)):q.length>0;
-    const barcodeMatch=qCode && skuCode && (skuCode===qCode||skuCode.includes(qCode)||qCode.includes(skuCode));
-    const productIdMatch=qCode && pidCode && (pidCode===qCode||pidCode.includes(qCode));
-    return tokenMatch || barcodeMatch || productIdMatch;
-  });
+  return source.filter(productMatchesSearch);
 };
 
 function htmlPcCartSlot(p){
@@ -989,11 +997,13 @@ function getCategoryPageProducts(){
   if(!cat)return [];
   const slug=normText(getCategorySlug(cat));
   const cid=cat.id||'';
-  return PRODS.filter(p=>{
+  const inCategory=PRODS.filter(p=>{
     if(cid&&p.cid===cid)return true;
     if(slug&&normText(p.cslug||'')===slug)return true;
     return normText(p.c)===normText(cat.name||'');
   });
+  if(!searchQuery) return inCategory;
+  return inCategory.filter(productMatchesSearch);
 }
 let catPageRenderedCount=0;
 function renderProductCardsIntoGrid(grid,products,visibleCount,opts){
@@ -1140,13 +1150,26 @@ if(browseTopBtn){
     if(target) target.scrollIntoView({behavior:'smooth',block:'start'});
   });
 }
-document.getElementById('shopSearch').addEventListener('input',e=>{
-  searchQuery=(e.target.value||'').replace(/&/g,'and').trim();
+function applyShopSearch(raw){
+  const value=String(raw||'');
+  searchQuery=value.replace(/&/g,'and').trim();
+  ['shopSearch','catPageSearch'].forEach(function(id){
+    const inp=document.getElementById(id);
+    if(inp && inp.value!==value) inp.value=value;
+  });
   visCount=24;
-  renderShop();
-});
+  catPageVisCount=48;
+  if(isCategoryPage) renderCategoryPage();
+  else renderShop();
+}
+const shopSearchEl=document.getElementById('shopSearch');
+if(shopSearchEl) shopSearchEl.addEventListener('input',e=>{applyShopSearch(e.target.value||'');});
+const catPageSearchEl=document.getElementById('catPageSearch');
+if(catPageSearchEl) catPageSearchEl.addEventListener('input',e=>{applyShopSearch(e.target.value||'');});
 const scanBtn=document.getElementById('scanBtn');
 if(scanBtn) scanBtn.addEventListener('click',()=>{openScanOverlay();});
+const catPageScanBtn=document.getElementById('catPageScanBtn');
+if(catPageScanBtn) catPageScanBtn.addEventListener('click',()=>{openScanOverlay();});
 const scanCloseBtn=document.getElementById('scanCloseBtn');
 if(scanCloseBtn) scanCloseBtn.addEventListener('click',()=>{closeScanOverlay();});
 
@@ -1265,11 +1288,11 @@ async function openScanOverlay(){
     const code=String(decodedText||'').trim();
     if(!code)return;
     html5QrCode.stop().then(()=>{try{html5QrCode.clear();}catch(e){}scanActive=null;reader.innerHTML='';ov.classList.remove('show');setScanErr('');
-      const inp=document.getElementById('shopSearch');
-      if(inp) inp.value=code;
-      searchQuery=code.replace(/&/g,'and').trim();
+      applyShopSearch(code);
       visCount=5000;
-      renderShop();
+      catPageVisCount=5000;
+      if(isCategoryPage) renderCategoryPage();
+      else renderShop();
       showToast('Showing matches for scanned code');
     }).catch(()=>{closeScanOverlay();});
   };

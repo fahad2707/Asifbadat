@@ -50,7 +50,7 @@ const QUICK_COMMANDS = [
   { label: 'Create vendor', href: '/admin/vendors?create=1', icon: Truck },
   { label: 'Create bank transaction', href: '/admin/receipts?create=1', icon: Landmark },
   { label: 'Create purchase order', href: '/admin/purchase-orders?create=1', icon: ClipboardList },
-  { label: 'Create credit memo', href: '/admin/credit-memos?new=1', icon: RotateCcw },
+  { label: 'Create credit memo', href: '/admin/credit-memos/customers?new=1', icon: RotateCcw },
 ] as const;
 
 export default function AdminDashboard() {

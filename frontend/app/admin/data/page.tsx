@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { FolderTree, Layers, Percent, Users, Truck, Plus, Edit, Trash2 } from 'lucide-react';
 import adminApi from '@/lib/admin-api';
 import toast from 'react-hot-toast';
+import NumberInput from '@/components/admin/NumberInput';
 
 type TabId = 'categories' | 'subcategories' | 'tax' | 'vendors' | 'customers';
 
@@ -162,7 +163,7 @@ export default function DataPage() {
   const openAdd = (type: TabId) => {
     if (type === 'categories') setForm({ name: '', description: '', display_order: 0 });
     if (type === 'subcategories') setForm({ name: '', category_id: categories[0]?.id || '', display_order: 0 });
-    if (type === 'tax') setForm({ name: '', rate: 0, rate_type: 'percent' });
+    if (type === 'tax') setForm({ name: '', rate: '', rate_type: 'percent' });
     if (type === 'vendors') setForm({ name: '', contact_name: '', phone: '', email: '' });
     if (type === 'customers') setForm({ name: '', phone: '', email: '', company: '' });
     setModal({ type });
@@ -187,8 +188,13 @@ export default function DataPage() {
         else await adminApi.post('/sub-categories', { name: form.name, category_id: form.category_id, display_order: form.display_order ?? 0 });
       }
       if (type === 'tax') {
-        if (edit) await adminApi.put(`/tax-types/${edit.id}`, { name: form.name, rate: form.rate, rate_type: form.rate_type || 'percent' });
-        else await adminApi.post('/tax-types', { name: form.name, rate: form.rate, rate_type: form.rate_type || 'percent' });
+        const rate = Number(form.rate);
+        if (form.rate === '' || form.rate == null || Number.isNaN(rate) || rate < 0) {
+          toast.error('Enter a tax rate');
+          return;
+        }
+        if (edit) await adminApi.put(`/tax-types/${edit.id}`, { name: form.name, rate, rate_type: form.rate_type || 'percent' });
+        else await adminApi.post('/tax-types', { name: form.name, rate, rate_type: form.rate_type || 'percent' });
       }
       if (type === 'vendors') {
         if (edit) await adminApi.put(`/vendors/${edit.id}`, form);
@@ -533,7 +539,7 @@ export default function DataPage() {
                     </div>
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">{form.rate_type === 'amount' ? 'Amount (USD) *' : 'Rate % *'}</label>
-                      <input type="number" min={0} step={0.01} value={form.rate ?? ''} onChange={(e) => setForm({ ...form, rate: parseFloat(e.target.value) || 0 })} className="w-full px-3 py-2 border border-gray-300 rounded-lg" required />
+                      <NumberInput min={0} step={0.01} value={form.rate} onValueChange={(n) => setForm({ ...form, rate: n === '' ? '' : n })} className="w-full px-3 py-2 border border-gray-300 rounded-lg" required />
                     </div>
                   </>
                 )}
