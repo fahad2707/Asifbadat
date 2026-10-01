@@ -4,6 +4,7 @@ import mongoose from 'mongoose';
 import Product from '../models/Product';
 import Category from '../models/Category';
 import SubCategory from '../models/SubCategory';
+import TaxType from '../models/TaxType';
 import { authenticateAdmin, optionalAuthenticateAdmin, AuthRequest } from '../middleware/auth';
 import { z } from 'zod';
 import { buildPreview, executeImport } from '../services/productImportService';
@@ -12,6 +13,7 @@ import {
   migrateProductIdAndSku,
 } from '../utils/productCodes';
 import { toPublicProduct, toStaffProduct } from '../utils/productProjection';
+import { parseTaxTypeIdInput } from '../utils/productTaxType';
 
 /**
  * Any response that contains internal product fields (cost_price, vendor_id,
@@ -45,6 +47,27 @@ function toObjectIdOrUndefined(id: string | undefined): mongoose.Types.ObjectId 
   if (!id || typeof id !== 'string' || id.length !== 24) return undefined;
   if (!/^[a-f0-9A-F]{24}$/.test(id)) return undefined;
   return new mongoose.Types.ObjectId(id);
+}
+
+async function resolveTaxTypeAssignment(raw: unknown): Promise<
+  { kind: 'omit' } | { kind: 'no_tax' } | { kind: 'assigned'; id: mongoose.Types.ObjectId }
+> {
+  let parsed;
+  try {
+    parsed = parseTaxTypeIdInput(raw);
+  } catch {
+    const err: any = new Error('Invalid tax_type_id');
+    err.status = 400;
+    throw err;
+  }
+  if (parsed.kind !== 'assigned') return parsed;
+  const exists = await TaxType.findById(parsed.id).select('_id').lean();
+  if (!exists) {
+    const err: any = new Error('Tax type not found');
+    err.status = 400;
+    throw err;
+  }
+  return parsed;
 }
 
 function toSlug(value: string): string {
@@ -168,6 +191,7 @@ router.get('/', optionalAuthenticateAdmin, async (req: AuthRequest, res) => {
     const products = await Product.find(query)
       .populate('category_id', 'name slug')
       .populate('sub_category_id', 'name slug')
+      .populate('tax_type_id', 'name rate rate_type')
       .sort({ created_at: -1 })
       .skip(skip)
       .limit(limitNum)
@@ -257,6 +281,7 @@ router.get('/:id', optionalAuthenticateAdmin, async (req: AuthRequest, res) => {
     const product = await Product.findById(req.params.id)
       .populate('category_id', 'name slug')
       .populate('sub_category_id', 'name slug')
+      .populate('tax_type_id', 'name rate rate_type')
       .lean();
 
     if (!product) {
@@ -319,6 +344,7 @@ router.post('/', authenticateAdmin, async (req: AuthRequest, res) => {
       sub_category_id: z.string().optional().or(z.literal('')),
       vendor_id: z.string().optional().or(z.literal('')),
       tax_rate: z.coerce.number().min(0).optional(),
+      tax_type_id: z.union([z.string(), z.null()]).optional(),
       image_url: z.union([z.string().url(), z.literal('')]).optional(),
       barcode: z.string().optional(),
       cost_price: z.coerce.number().min(0).optional(),
@@ -342,6 +368,7 @@ router.post('/', authenticateAdmin, async (req: AuthRequest, res) => {
     const categoryId = toObjectIdOrUndefined(data.category_id);
     const subCategoryId = toObjectIdOrUndefined(data.sub_category_id);
     const vendorId = toObjectIdOrUndefined(data.vendor_id);
+    const taxAssignment = await resolveTaxTypeAssignment(data.tax_type_id);
 
     const product = await Product.create({
       name: data.name,
@@ -356,6 +383,11 @@ router.post('/', authenticateAdmin, async (req: AuthRequest, res) => {
       sub_category_id: subCategoryId,
       vendor_id: vendorId,
       tax_rate: data.tax_rate ?? 0,
+      ...(taxAssignment.kind === 'assigned'
+        ? { tax_type_id: taxAssignment.id }
+        : taxAssignment.kind === 'no_tax'
+          ? { tax_type_id: null }
+          : {}),
       image_url: data.image_url || undefined,
       barcode: data.barcode || undefined,
       stock_quantity: data.stock_quantity ?? 0,
@@ -371,6 +403,9 @@ router.post('/', authenticateAdmin, async (req: AuthRequest, res) => {
   } catch (error: any) {
     if (error instanceof z.ZodError) {
       return res.status(400).json({ error: error.errors[0].message });
+    }
+    if (error?.status === 400) {
+      return res.status(400).json({ error: error.message });
     }
     if (error.code === 11000) {
       return res.status(400).json({ error: 'A product with this name or SKU/barcode already exists.' });
@@ -392,6 +427,7 @@ router.put('/:id', authenticateAdmin, async (req: AuthRequest, res) => {
       sub_category_id: z.union([z.string(), z.null()]).optional(),
       vendor_id: z.string().optional(),
       tax_rate: z.number().min(0).optional(),
+      tax_type_id: z.union([z.string(), z.null()]).optional(),
       image_url: z.union([z.string().url(), z.literal('')]).optional(),
       barcode: z.string().optional(),
       sku: z.string().optional(),
@@ -425,9 +461,15 @@ router.put('/:id', authenticateAdmin, async (req: AuthRequest, res) => {
       if (data.sub_category_id === null || data.sub_category_id === '') unset.sub_category_id = 1;
       else update.sub_category_id = data.sub_category_id;
     }
+    if (data.tax_type_id !== undefined) {
+      const taxAssignment = await resolveTaxTypeAssignment(data.tax_type_id);
+      if (taxAssignment.kind === 'no_tax') update.tax_type_id = null;
+      if (taxAssignment.kind === 'assigned') update.tax_type_id = taxAssignment.id;
+    }
     const rest = { ...data };
     delete rest.category_id;
     delete rest.sub_category_id;
+    delete (rest as any).tax_type_id;
     // Client cannot set or change product_id; assign on first save if missing.
     const existingPid = String((existing as any).product_id || '').trim();
     delete (rest as any).product_id;
@@ -469,6 +511,9 @@ router.put('/:id', authenticateAdmin, async (req: AuthRequest, res) => {
   } catch (error: any) {
     if (error instanceof z.ZodError) {
       return res.status(400).json({ error: error.errors[0].message });
+    }
+    if (error?.status === 400) {
+      return res.status(400).json({ error: error.message });
     }
     console.error('Update product error:', error);
     res.status(500).json({ error: 'Failed to update product' });
@@ -564,6 +609,48 @@ router.post('/bulk-assign-category', authenticateAdmin, async (req: AuthRequest,
     if (error instanceof z.ZodError) return res.status(400).json({ error: error.errors[0].message });
     console.error('Bulk assign category error:', error);
     res.status(500).json({ error: 'Failed to assign category' });
+  }
+});
+
+// Admin: Assign TaxType (or explicit No Tax) to selected products only.
+// Does not change price, tax_rate, stock, category, SKU, or product_id.
+router.post('/bulk-assign-tax-type', authenticateAdmin, async (req: AuthRequest, res) => {
+  try {
+    const schema = z.object({
+      ids: z.array(z.string()).min(1),
+      tax_type_id: z.union([z.string(), z.null()]),
+    });
+    const { ids, tax_type_id } = schema.parse(req.body);
+    const taxAssignment = await resolveTaxTypeAssignment(tax_type_id);
+    if (taxAssignment.kind === 'omit') {
+      return res.status(400).json({ error: 'tax_type_id is required' });
+    }
+
+    const validIds = ids.filter((id) => /^[a-f0-9A-F]{24}$/.test(id));
+    if (validIds.length === 0) return res.status(400).json({ error: 'No valid product IDs' });
+
+    const existingCount = await Product.countDocuments({ _id: { $in: validIds } });
+    if (existingCount === 0) return res.status(400).json({ error: 'No matching products' });
+
+    const result = await Product.updateMany(
+      { _id: { $in: validIds } },
+      {
+        $set: {
+          tax_type_id: taxAssignment.kind === 'assigned' ? taxAssignment.id : null,
+          updated_at: new Date(),
+        },
+      }
+    );
+    res.json({
+      message: `Updated ${result.modifiedCount} product(s)`,
+      modified: result.modifiedCount,
+      matched: result.matchedCount,
+    });
+  } catch (error: any) {
+    if (error instanceof z.ZodError) return res.status(400).json({ error: error.errors[0].message });
+    if (error?.status === 400) return res.status(400).json({ error: error.message });
+    console.error('Bulk assign tax type error:', error);
+    res.status(500).json({ error: 'Failed to assign tax type' });
   }
 });
 

@@ -19,8 +19,9 @@
  */
 
 import type mongoose from 'mongoose';
+import { staffTaxTypeFields } from './productTaxType';
 
-type PopulatedRef = { _id: mongoose.Types.ObjectId | string; name?: string; slug?: string };
+type PopulatedRef = { _id: mongoose.Types.ObjectId | string; name?: string; slug?: string; rate?: number; rate_type?: string };
 
 /** Loose input shape — the caller passes a `.lean()` result with optional populated refs. */
 export interface RawProductDoc {
@@ -45,6 +46,7 @@ export interface RawProductDoc {
   reorder_point?: number;
   is_active?: boolean | 'false' | 0;
   tax_rate?: number;
+  tax_type_id?: mongoose.Types.ObjectId | string | PopulatedRef | null;
   created_at?: Date | string;
   updated_at?: Date | string;
 }
@@ -150,6 +152,7 @@ export function toStaffProduct(product: RawProductDoc) {
       product.is_active !== 0,
     created_at: product.created_at,
     updated_at: product.updated_at,
+    ...staffTaxTypeFields(product),
   } as const;
 }
 

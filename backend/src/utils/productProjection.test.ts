@@ -96,6 +96,32 @@ test('public shape never exposes negative availability', () => {
   assert.strictEqual(pub.available_quantity, 0);
 });
 
+test('staff tax type is not configured when tax_type_id is absent', () => {
+  const staff = toStaffProduct(raw);
+  assert.equal(staff.tax_type_configured, false);
+  assert.equal(staff.tax_type_label, 'Not configured');
+  assert.equal(staff.tax_rate, 8.5);
+});
+
+test('staff tax type can be explicit No Tax without changing tax_rate', () => {
+  const staff = toStaffProduct({ ...raw, tax_type_id: null });
+  assert.equal(staff.tax_type_configured, true);
+  assert.equal(staff.tax_type_id, null);
+  assert.equal(staff.tax_type_label, 'No Tax');
+  assert.equal(staff.tax_rate, 8.5);
+  assert.equal(staff.price, 100);
+});
+
+test('staff tax type label comes from populated TaxType', () => {
+  const staff = toStaffProduct({
+    ...raw,
+    tax_type_id: { _id: '64b1c2d3e4f5a6b7c8d9e0f1', name: 'GST', rate: 18, rate_type: 'percent' },
+  });
+  assert.equal(staff.tax_type_id, '64b1c2d3e4f5a6b7c8d9e0f1');
+  assert.equal(staff.tax_type_label, 'GST — 18%');
+  assert.equal(staff.tax_rate, 8.5);
+});
+
 test('staff shape includes internal fields', () => {
   const staff = toStaffProduct(raw);
   assert.strictEqual(staff.cost_price, 42);

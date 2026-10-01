@@ -4,6 +4,7 @@ import { useState, useEffect, useRef } from 'react';
 import { X, Upload, Image as ImageIcon, Loader2 } from 'lucide-react';
 import adminApi, { uploadApi } from '@/lib/admin-api';
 import { formatApiError } from '@/lib/format-api-error';
+import { formatTaxTypeLabel } from '@/lib/tax-type';
 import toast from 'react-hot-toast';
 
 const ADD_CATEGORY = '__add_category__';
@@ -21,6 +22,8 @@ interface Product {
   sub_category_id?: string | number;
   vendor_id?: string | number;
   tax_rate?: number;
+  tax_type_id?: string | null;
+  tax_type_configured?: boolean;
   image_url?: string;
   product_id?: string;
   sku?: string;
@@ -45,6 +48,7 @@ interface TaxType {
   id: string | number;
   name: string;
   rate: number;
+  rate_type?: string;
 }
 
 interface Vendor {
@@ -337,6 +341,7 @@ export default function ProductModal({ product, onClose, onSuccess }: ProductMod
     sub_category_id: undefined,
     vendor_id: undefined,
     tax_rate: 0,
+    tax_type_id: null,
     image_url: '',
     product_id: '',
     sku: '',
@@ -352,6 +357,8 @@ export default function ProductModal({ product, onClose, onSuccess }: ProductMod
   const [showAddVendor, setShowAddVendor] = useState(false);
   const [marginPct, setMarginPct] = useState<string>('');
   const [marginUsd, setMarginUsd] = useState<string>('');
+  const [taxTypeId, setTaxTypeId] = useState<string | null | undefined>(null);
+  const [initialTaxTypeId, setInitialTaxTypeId] = useState<string | null | undefined>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Defensive: never call .map/.find on a non-array (e.g. error object from a bad response).
@@ -420,7 +427,16 @@ export default function ProductModal({ product, onClose, onSuccess }: ProductMod
         price: product.price,
         tax_rate: product.tax_rate ?? 0,
       });
+      const assigned =
+        product.tax_type_configured === false || (product.tax_type_id === undefined && product.tax_type_configured !== true)
+          ? undefined
+          : product.tax_type_id ?? null;
+      setTaxTypeId(assigned);
+      setInitialTaxTypeId(assigned);
       if (product.image_url) setImagePreview(product.image_url);
+    } else {
+      setTaxTypeId(null);
+      setInitialTaxTypeId(null);
     }
   }, [product]);
 
@@ -445,8 +461,8 @@ export default function ProductModal({ product, onClose, onSuccess }: ProductMod
       setShowAddTax(true);
       return;
     }
-    const tax = taxTypeList.find((t) => String(t.id) === value);
-    setFormData({ ...formData, tax_rate: tax ? tax.rate : 0 });
+    if (value === '__unconfigured__') return;
+    setTaxTypeId(value === '' ? null : value);
   };
 
   const handleVendorChange = (value: string) => {
@@ -486,8 +502,15 @@ export default function ProductModal({ product, onClose, onSuccess }: ProductMod
     e.preventDefault();
     setLoading(true);
     try {
-      const payload = { ...formData, price: Number(formData.price) || 0 };
-      delete (payload as { product_id?: string }).product_id;
+      const payload: Record<string, unknown> = { ...formData, price: Number(formData.price) || 0 };
+      delete payload.product_id;
+      if (!product?.id) {
+        payload.tax_type_id = taxTypeId ?? null;
+      } else if (taxTypeId !== initialTaxTypeId) {
+        payload.tax_type_id = taxTypeId ?? null;
+      } else {
+        delete payload.tax_type_id;
+      }
       if (product?.id) {
         const { data } = await adminApi.put(`/products/${product.id}`, payload);
         const assigned = data?.product_id ? String(data.product_id) : '';
@@ -709,15 +732,16 @@ export default function ProductModal({ product, onClose, onSuccess }: ProductMod
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">Tax type</label>
               <select
-                value={taxTypeList.find((t) => t.rate === formData.tax_rate)?.id ?? ''}
+                value={taxTypeId === undefined ? '__unconfigured__' : taxTypeId ?? ''}
                 onChange={(e) => handleTaxChange(e.target.value)}
                 className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500"
               >
-                <option value="">No tax</option>
+                {taxTypeId === undefined && <option value="__unconfigured__">Not configured</option>}
+                <option value="">No Tax</option>
                 <option value={ADD_TAX}>+ Add tax type</option>
                 {taxTypeList.map((t) => (
                   <option key={t.id} value={t.id}>
-                    {t.name} ({t.rate}%)
+                    {formatTaxTypeLabel({ name: t.name, rate: t.rate, rate_type: t.rate_type })}
                   </option>
                 ))}
               </select>
@@ -827,9 +851,9 @@ export default function ProductModal({ product, onClose, onSuccess }: ProductMod
       {showAddTax && (
         <AddTaxTypeModal
           onClose={() => setShowAddTax(false)}
-          onSaved={(id, _name, rate) => {
+          onSaved={(id) => {
             fetchTaxTypes();
-            setFormData((f) => ({ ...f, tax_rate: rate }));
+            setTaxTypeId(id);
             setShowAddTax(false);
           }}
         />

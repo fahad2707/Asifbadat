@@ -29,6 +29,7 @@
     "test:invoice-route-harness": "tsx --test src/routes/invoiceRouteHarness.test.ts",
     "test:invoice-edit-financial": "tsx --test src/utils/invoiceEditFinancial.test.ts src/routes/invoiceEditFinancial.test.ts",
     "test:customer-balances": "tsx --test src/routes/customerBalances.test.ts",
+    "test:product-tax-type": "tsx --test src/utils/productTaxType.test.ts src/utils/productProjection.test.ts src/routes/productsTaxType.test.ts",
     "test:online-order-delivery": "tsx --test src/routes/onlineOrderDelivery.test.ts",
     "test:pos-return-model": "tsx --test src/models/Return.test.ts",
     "test:pos-return-calc": "tsx --test src/utils/posReturnCalc.test.ts",

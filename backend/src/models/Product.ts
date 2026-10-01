@@ -22,7 +22,14 @@ export interface IProduct extends Document {
   reorder_point?: number; // Alert when stock falls below (for purchasing)
   vendor_id?: mongoose.Types.ObjectId; // Primary vendor for this product
   is_active: boolean;
-  tax_rate?: number; // Tax percentage (e.g., 8.5 for 8.5%)
+  tax_rate?: number; // Tax percentage used by POS / online checkout. Do not remove.
+  /**
+   * Optional TaxType assignment for admin / future invoice inheritance.
+   * Missing field = not configured (legacy products).
+   * null = explicit No Tax.
+   * ObjectId = assigned TaxType.
+   */
+  tax_type_id?: mongoose.Types.ObjectId | null;
   created_at: Date;
   updated_at: Date;
 }
@@ -48,7 +55,8 @@ const ProductSchema = new Schema<IProduct>(
     reorder_point: Number,
     vendor_id: { type: Schema.Types.ObjectId, ref: 'Vendor' },
     is_active: { type: Boolean, default: true },
-    tax_rate: { type: Number, default: 0 }, // Tax percentage
+    tax_rate: { type: Number, default: 0 }, // Tax percentage — POS / online snapshot source
+    tax_type_id: { type: Schema.Types.ObjectId, ref: 'TaxType', default: undefined },
   },
   {
     timestamps: { createdAt: 'created_at', updatedAt: 'updated_at' },

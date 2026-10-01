@@ -25,6 +25,7 @@ import toast from 'react-hot-toast';
 import ProductModal from '@/components/admin/ProductModal';
 import { StockAttentionBanner } from '@/components/admin/StockAttentionBanner';
 import { adminUi } from '@/lib/admin-ui';
+import { formatTaxTypeLabel, productTaxLabel, type TaxTypeOption } from '@/lib/tax-type';
 
 interface Product {
   id: string | number;
@@ -41,6 +42,10 @@ interface Product {
   description?: string;
   cost_price?: number;
   tax_rate?: number;
+  tax_type_id?: string | null;
+  tax_type_configured?: boolean;
+  tax_type_label?: string;
+  tax_type?: TaxTypeOption | null;
 }
 
 interface CategoryOption {
@@ -111,6 +116,9 @@ export function ProductsAdminView({ mode }: { mode: ProductsAdminMode }) {
   const [bulkCategoryId, setBulkCategoryId] = useState('');
   const [bulkSubId, setBulkSubId] = useState('');
   const [bulkAssigning, setBulkAssigning] = useState(false);
+  const [taxTypes, setTaxTypes] = useState<TaxTypeOption[]>([]);
+  const [bulkTaxTypeId, setBulkTaxTypeId] = useState('');
+  const [bulkTaxAssigning, setBulkTaxAssigning] = useState(false);
   const [togglingId, setTogglingId] = useState<string | null>(null);
   const [categoryFilter, setCategoryFilter] = useState('');
   const [page, setPage] = useState(1);
@@ -136,10 +144,20 @@ export function ProductsAdminView({ mode }: { mode: ProductsAdminMode }) {
 
   const fetchTaxonomy = async () => {
     try {
-      const [catRes, subRes] = await Promise.all([
+      const [catRes, subRes, taxRes] = await Promise.all([
         adminApi.get('/categories'),
         adminApi.get('/sub-categories'),
+        adminApi.get('/tax-types'),
       ]);
+      const taxes = Array.isArray(taxRes.data) ? taxRes.data : [];
+      setTaxTypes(
+        taxes.map((t: TaxTypeOption) => ({
+          id: String(t.id),
+          name: t.name,
+          rate: Number(t.rate) || 0,
+          rate_type: t.rate_type,
+        }))
+      );
       const cats = Array.isArray(catRes.data) ? catRes.data : [];
       setCategories(cats.map((c: { id?: string; name?: string }) => ({ id: String(c.id), name: c.name || '' })));
       const subs = Array.isArray(subRes.data) ? subRes.data : [];
@@ -155,6 +173,32 @@ export function ProductsAdminView({ mode }: { mode: ProductsAdminMode }) {
         return;
       }
       toast.error('Failed to load categories');
+    }
+  };
+
+  const handleBulkAssignTaxType = async () => {
+    if (selectedIds.size === 0 || !bulkTaxTypeId) {
+      toast.error('Select products and choose a tax type');
+      return;
+    }
+    const selectedTax = taxTypes.find((t) => t.id === bulkTaxTypeId);
+    const label = bulkTaxTypeId === '__no_tax__' ? 'No Tax' : selectedTax ? formatTaxTypeLabel(selectedTax) : 'the selected tax type';
+    if (!confirm(`Assign ${label} to ${selectedIds.size} selected product(s)? Selling prices will not change.`)) {
+      return;
+    }
+    setBulkTaxAssigning(true);
+    try {
+      const { data } = await adminApi.post<{ modified: number }>('/products/bulk-assign-tax-type', {
+        ids: Array.from(selectedIds),
+        tax_type_id: bulkTaxTypeId === '__no_tax__' ? null : bulkTaxTypeId,
+      });
+      toast.success(`Assigned ${label} to ${data.modified} product(s)`);
+      setBulkTaxTypeId('');
+      await fetchProducts();
+    } catch (err: unknown) {
+      toast.error(formatApiError(err, 'Failed to assign tax type'));
+    } finally {
+      setBulkTaxAssigning(false);
     }
   };
 
@@ -694,6 +738,30 @@ export function ProductsAdminView({ mode }: { mode: ProductsAdminMode }) {
               </button>
             </div>
             )}
+            <div className="flex flex-wrap items-center gap-2 p-2 border border-white/5 bg-slate-950/40 rounded-xl w-full lg:w-auto">
+              <span className="text-slate-350 shrink-0">Tax Type:</span>
+              <select
+                value={bulkTaxTypeId}
+                onChange={(e) => setBulkTaxTypeId(e.target.value)}
+                className="border border-white/10 rounded-lg px-2.5 py-1 bg-slate-950/60 font-medium text-white focus:outline-none focus:ring-1 focus:ring-teal-500"
+              >
+                <option value="">Select tax type…</option>
+                <option value="__no_tax__">No Tax</option>
+                {taxTypes.map((t) => (
+                  <option key={t.id} value={t.id}>
+                    {formatTaxTypeLabel(t)}
+                  </option>
+                ))}
+              </select>
+              <button
+                type="button"
+                disabled={!bulkTaxTypeId || bulkTaxAssigning}
+                onClick={handleBulkAssignTaxType}
+                className="bg-teal-600 hover:bg-teal-500 text-white px-3 py-1.5 rounded-lg border border-white/10 font-bold whitespace-nowrap active:scale-95 disabled:opacity-40 transition-all cursor-pointer"
+              >
+                {bulkTaxAssigning ? 'Applying…' : 'Apply'}
+              </button>
+            </div>
             <div className="flex items-center gap-2 flex-wrap">
               <button
                 type="button"
@@ -755,6 +823,7 @@ export function ProductsAdminView({ mode }: { mode: ProductsAdminMode }) {
                 <th className="text-left py-3.5 px-4 font-bold tracking-wider uppercase text-[10px]">Product name</th>
                 <th className="text-left py-3.5 px-4 font-bold tracking-wider uppercase text-[10px]">Category</th>
                 <th className="text-right py-3.5 px-4 font-bold tracking-wider uppercase text-[10px]">Price</th>
+                <th className="text-left py-3.5 px-4 font-bold tracking-wider uppercase text-[10px]">Tax</th>
                 <th className="text-right py-3.5 px-4 font-bold tracking-wider uppercase text-[10px]">Stock</th>
                 <th className="text-left py-3.5 px-4 font-bold tracking-wider uppercase text-[10px]">Product ID</th>
                 <th className="text-left py-3.5 px-4 font-bold tracking-wider uppercase text-[10px]">SKU</th>
@@ -785,6 +854,7 @@ export function ProductsAdminView({ mode }: { mode: ProductsAdminMode }) {
                   <td className="py-3 px-4 text-right font-bold text-slate-200">
                     ${parseFloat(product.price.toString()).toFixed(2)}
                   </td>
+                  <td className="py-3 px-4 text-slate-350 font-semibold whitespace-nowrap">{productTaxLabel(product)}</td>
                   <td className="py-3 px-4 text-right">
                     <span className={product.stock_quantity <= 10 ? 'text-rose-400 font-black' : 'text-slate-200'}>
                       {product.stock_quantity}

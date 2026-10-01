@@ -20,6 +20,7 @@ import {
 import adminApi from '@/lib/admin-api';
 import toast from 'react-hot-toast';
 import ProductModal from '@/components/admin/ProductModal';
+import { productTaxLabel } from '@/lib/tax-type';
 
 type TabId = 'overview' | 'inventory' | 'pricing' | 'sales' | 'suppliers' | 'analytics';
 
@@ -37,6 +38,9 @@ interface Product {
   sku?: string;
   description?: string;
   tax_rate?: number;
+  tax_type_id?: string | null;
+  tax_type_configured?: boolean;
+  tax_type_label?: string;
   vendor_id?: string;
 }
 
@@ -125,7 +129,7 @@ export default function Product360Page() {
               <p className="text-xs text-slate-500 mt-1">Item ID: {product.product_id || '90123'} | SKU: {product.sku || 'N/A'}</p>
               
               <div className="flex items-center gap-3 mt-4 text-[11px] text-slate-400">
-                <span>Tax Class: <span className="font-semibold text-slate-200">{product.tax_rate ?? 0}% Tax Standard</span></span>
+                <span>Tax type: <span className="font-semibold text-slate-200">{productTaxLabel(product)}</span></span>
                 <span className="text-slate-700">|</span>
                 <span>Active Status: <span className="font-semibold text-teal-400">Live on Web</span></span>
               </div>
@@ -199,7 +203,7 @@ export default function Product360Page() {
                 <div><span className="text-slate-500 block text-[11px]">SKU Number</span><span className="font-mono text-slate-200">{product.sku || 'N/A'}</span></div>
                 <div><span className="text-slate-500 block text-[11px]">Product Code</span><span className="font-mono text-slate-200">{product.product_id || '90123'}</span></div>
                 <div><span className="text-slate-500 block text-[11px]">Primary Brand</span><span className="font-semibold text-slate-200">Express House Brand</span></div>
-                <div><span className="text-slate-500 block text-[11px]">Tax Rate standard</span><span className="font-semibold text-slate-200">{product.tax_rate ?? 0}%</span></div>
+                <div><span className="text-slate-500 block text-[11px]">Tax type</span><span className="font-semibold text-slate-200">{productTaxLabel(product)}</span></div>
               </div>
               <div className="pt-2"><span className="text-slate-500 block text-[11px]">Sales Description</span><span className="text-slate-200 text-xs">{product.description || 'Standard corporate catalog component.'}</span></div>
             </div>
