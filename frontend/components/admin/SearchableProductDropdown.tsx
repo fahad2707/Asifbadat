@@ -13,6 +13,10 @@ export interface ProductOption {
   stock_quantity?: number;
   category_name?: string;
   category_slug?: string;
+  tax_type_configured?: boolean;
+  tax_type_id?: string | null;
+  tax_type_label?: string;
+  tax_type?: { id: string; name: string; rate: number; rate_type?: string } | null;
 }
 
 interface Props {

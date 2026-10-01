@@ -7,6 +7,15 @@ export interface IInvoiceItem {
   quantity: number;
   price: number;
   subtotal: number;
+  /** Selling price is tax-exclusive. taxable means a percent TaxType applied at create/edit time. */
+  taxable?: boolean;
+  tax_type_id?: mongoose.Types.ObjectId | null;
+  tax_type_name?: string | null;
+  tax_rate_type?: 'percent' | 'amount' | null;
+  tax_rate?: number;
+  tax_amount?: number;
+  tax_type_label?: string;
+  total?: number;
 }
 
 export interface IInvoice extends Document {
@@ -45,6 +54,14 @@ const InvoiceItemSchema = new Schema<IInvoiceItem>({
   quantity: { type: Number, required: true },
   price: { type: Number, required: true },
   subtotal: { type: Number, required: true },
+  taxable: { type: Boolean },
+  tax_type_id: { type: Schema.Types.ObjectId, ref: 'TaxType', default: undefined },
+  tax_type_name: { type: String },
+  tax_rate_type: { type: String, enum: ['percent', 'amount'] },
+  tax_rate: { type: Number },
+  tax_amount: { type: Number },
+  tax_type_label: { type: String },
+  total: { type: Number },
 });
 
 const InvoiceSchema = new Schema<IInvoice>(

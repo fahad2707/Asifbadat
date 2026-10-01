@@ -1,5 +1,7 @@
 import express from 'express';
+import mongoose from 'mongoose';
 import TaxType from '../models/TaxType';
+import Product from '../models/Product';
 import { authenticateAdmin, AuthRequest } from '../middleware/auth';
 import { z } from 'zod';
 
@@ -58,7 +60,17 @@ router.put('/:id', authenticateAdmin, async (req: AuthRequest, res) => {
 // Admin: Delete tax type
 router.delete('/:id', authenticateAdmin, async (req: AuthRequest, res) => {
   try {
-    await TaxType.findByIdAndDelete(req.params.id);
+    if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+      return res.status(400).json({ error: 'Invalid tax type id' });
+    }
+    const assigned = await Product.countDocuments({ tax_type_id: new mongoose.Types.ObjectId(req.params.id) });
+    if (assigned > 0) {
+      return res.status(400).json({
+        error: `Cannot delete a tax type assigned to ${assigned} product${assigned === 1 ? '' : 's'}.`,
+      });
+    }
+    const deleted = await TaxType.findByIdAndDelete(req.params.id);
+    if (!deleted) return res.status(404).json({ error: 'Tax type not found' });
     res.json({ message: 'Deleted' });
   } catch (error) {
     res.status(500).json({ error: 'Failed to delete' });

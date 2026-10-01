@@ -5,6 +5,12 @@ import Customer from '../models/Customer';
 import StoreSettings from '../models/StoreSettings';
 import Product from '../models/Product';
 import CustomerProductPrice from '../models/CustomerProductPrice';
+import {
+  InvoiceLineTaxError,
+  buildInvoiceLines,
+  copyInvoiceLineSnapshots,
+  invoiceTaxTotals,
+} from '../utils/invoiceLineTax';
 import { authenticateAdmin, AuthRequest } from '../middleware/auth';
 import nodemailer from 'nodemailer';
 import { buildInvoicePdfBuffer } from '../utils/invoicePdfLayout';
@@ -27,6 +33,25 @@ import { httpErrorFromPayment, paymentApplication } from '../services/paymentApp
 const router = express.Router();
 
 const LOCATION_OF_SALE = '511 W Germantown Pike, Plymouth Meeting, PA 19462-1303';
+
+async function loadProductsById(items: Array<{ product_id?: unknown }>) {
+  const ids = [
+    ...new Set(
+      items
+        .map((item) => (item.product_id ? String(item.product_id) : ''))
+        .filter((id) => /^[a-f0-9A-F]{24}$/.test(id))
+    ),
+  ];
+  const map = new Map<string, { name?: string; tax_type_id?: unknown; price?: number; tax_rate?: number }>();
+  if (ids.length === 0) return map;
+  const docs = await Product.find({ _id: { $in: ids } })
+    .populate('tax_type_id', 'name rate rate_type')
+    .lean();
+  for (const doc of docs) {
+    map.set(String((doc as { _id: unknown })._id), doc as { name?: string; tax_type_id?: unknown; price?: number; tax_rate?: number });
+  }
+  return map;
+}
 
 function quotationMark(shippingType?: string | null): { quote_status: 'open' | 'rejected' | 'converted'; converted_invoice_number?: string } {
   const raw = String(shippingType || '');
@@ -229,17 +254,19 @@ router.post('/', authenticateAdmin, async (req: AuthRequest, res) => {
     const invoice_date = body.invoice_date ? new Date(body.invoice_date) : new Date();
     const due_date = body.due_date ? new Date(body.due_date) : invoice_date;
     const customer_id = body.customer_id ? new mongoose.Types.ObjectId(body.customer_id) : undefined;
-    const items = (body.items || []).map((i: any) => ({
-      product_id: i.product_id ? new mongoose.Types.ObjectId(i.product_id) : undefined,
-      product_name: i.product_name || '',
-      category_name: i.category_name,
-      quantity: Number(i.quantity) || 0,
-      price: Number(i.price) || 0,
-      subtotal: Number(i.subtotal) || 0,
-    }));
-    const subtotal_amount = items.reduce((s: number, i: any) => s + (i.subtotal || 0), 0);
-    const tax_amount = Number(body.tax_amount) || 0;
-    const total_amount = subtotal_amount + tax_amount;
+    const rawItems = (body.items || []) as Record<string, unknown>[];
+    const inheritFromProduct = rawItems.some((item) => Boolean(item.product_id));
+    const productsById = inheritFromProduct ? await loadProductsById(rawItems) : new Map();
+    const built = buildInvoiceLines({
+      items: rawItems,
+      productsById,
+      inheritFromProduct,
+    });
+    const items = built.items;
+    const { subtotal_amount, tax_amount, total_amount } = invoiceTaxTotals(items, {
+      usedLineTax: built.usedLineTax,
+      fallbackTaxAmount: Number(body.tax_amount) || 0,
+    });
 
     // Task 05: quotations never reserve or deduct stock. Invoices keep the existing guard.
     if (shouldAdjustInventoryForDocumentType(docType)) {
@@ -295,10 +322,16 @@ router.post('/', authenticateAdmin, async (req: AuthRequest, res) => {
       invoice_number: (doc as any).invoice_number,
       customer_id: (doc as any).customer_id?.toString(),
       total_amount: (doc as any).total_amount,
+      tax_amount: (doc as any).tax_amount,
+      subtotal_amount: (doc as any).subtotal_amount,
       payment_status: (doc as any).payment_status,
+      items: (doc as any).items || items,
       created_at: (doc as any).created_at,
     });
   } catch (error) {
+    if (error instanceof InvoiceLineTaxError) {
+      return res.status(error.status).json({ error: error.message });
+    }
     console.error('Create invoice error:', error);
     res.status(500).json({ error: 'Failed to create invoice' });
   }
@@ -395,17 +428,28 @@ router.put('/:id', authenticateAdmin, async (req: AuthRequest, res) => {
     if (body.customer_address !== undefined) invoice.customer_address = body.customer_address;
     if (body.terms !== undefined) invoice.terms = body.terms;
     if (body.items !== undefined) {
-      const items = body.items.map((i: any) => ({
-        product_id: i.product_id ? new mongoose.Types.ObjectId(i.product_id) : undefined,
-        product_name: i.product_name || '',
-        category_name: i.category_name,
-        quantity: Number(i.quantity) || 0,
-        price: Number(i.price) || 0,
-        subtotal: Number(i.subtotal) || 0,
-      }));
-      const subtotal_amount = items.reduce((s: number, i: any) => s + (i.subtotal || 0), 0);
-      const tax_amount = Number(body.tax_amount) ?? invoice.tax_amount;
-      const proposedTotal = subtotal_amount + tax_amount;
+      const rawItems = (body.items || []) as Record<string, unknown>[];
+      const existingItems = ((invoice as any).items || []) as unknown[];
+      const existingHasLineTax = existingItems.some((item) => item && typeof item === 'object' && Object.prototype.hasOwnProperty.call(item, 'taxable'));
+      const incomingHasProduct = rawItems.some((item) => Boolean(item.product_id));
+      const inheritFromProduct = incomingHasProduct && existingHasLineTax;
+      const productsById = inheritFromProduct ? await loadProductsById(rawItems) : new Map();
+      const built = buildInvoiceLines({
+        items: rawItems,
+        productsById,
+        existingItems,
+        inheritFromProduct,
+      });
+      const items = built.items;
+      const usedLineTax = built.usedLineTax || existingHasLineTax;
+      const fallbackTax =
+        body.tax_amount !== undefined && body.tax_amount !== null
+          ? Number(body.tax_amount) || 0
+          : Number((invoice as any).tax_amount) || 0;
+      const { subtotal_amount, tax_amount, total_amount: proposedTotal } = invoiceTaxTotals(items, {
+        usedLineTax,
+        fallbackTaxAmount: fallbackTax,
+      });
 
       try {
         assertReceivableInvoiceEdit({
@@ -461,6 +505,9 @@ router.put('/:id', authenticateAdmin, async (req: AuthRequest, res) => {
       payment_status: (doc as any).payment_status,
     });
   } catch (error) {
+    if (error instanceof InvoiceLineTaxError) {
+      return res.status(error.status).json({ error: error.message });
+    }
     console.error('Update invoice error:', error);
     res.status(500).json({ error: 'Failed to update invoice' });
   }
@@ -520,17 +567,17 @@ router.post('/:id/convert', authenticateAdmin, async (req: AuthRequest, res) => 
       return res.status(400).json({ error: `This quotation was already converted to ${mark.converted_invoice_number}.` });
     }
 
-    const items = ((quote as any).items || []).map((i: any) => ({
-      product_id: i.product_id,
-      product_name: i.product_name || '',
-      category_name: i.category_name,
-      quantity: Number(i.quantity) || 0,
-      price: Number(i.price) || 0,
-      subtotal: Number(i.subtotal) || 0,
-    }));
-    const subtotal_amount = items.reduce((s: number, i: any) => s + (i.subtotal || 0), 0);
-    const tax_amount = Number((quote as any).tax_amount) || 0;
-    const total_amount = Number((quote as any).total_amount) || subtotal_amount + tax_amount;
+    const items = copyInvoiceLineSnapshots((quote as any).items || []);
+    const usedLineTax = items.some((item) => Object.prototype.hasOwnProperty.call(item, 'taxable'));
+    const totals = invoiceTaxTotals(items, {
+      usedLineTax,
+      fallbackTaxAmount: Number((quote as any).tax_amount) || 0,
+    });
+    const subtotal_amount = totals.subtotal_amount;
+    const tax_amount = usedLineTax ? totals.tax_amount : Number((quote as any).tax_amount) || 0;
+    const total_amount = usedLineTax
+      ? totals.total_amount
+      : Number((quote as any).total_amount) || subtotal_amount + tax_amount;
     const invoice_number = await getNextInvoiceNumber();
     const invoice_date = new Date();
     const due_date = (quote as any).due_date || invoice_date;
@@ -594,6 +641,9 @@ router.post('/:id/convert', authenticateAdmin, async (req: AuthRequest, res) => 
       payment_status: doc.payment_status,
     });
   } catch (error) {
+    if (error instanceof InvoiceLineTaxError) {
+      return res.status(error.status).json({ error: error.message });
+    }
     console.error('Convert quotation error:', error);
     res.status(500).json({ error: 'Failed to convert quotation' });
   }

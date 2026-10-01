@@ -7,12 +7,55 @@ import adminApi from '@/lib/admin-api';
 import toast from 'react-hot-toast';
 import { downloadPdfFromResponse, openPdfFromResponse } from '@/lib/download-pdf';
 import { shareDocumentOnWhatsApp, composeEmailWithPdf } from '@/lib/share-document';
-import SearchableProductDropdown, { type ProductOption } from './SearchableProductDropdown';
+import SearchableProductDropdown from './SearchableProductDropdown';
+import {
+  emptyInvoiceLineTax,
+  inheritInvoiceLineTax,
+  recalculateInvoiceLineTax,
+  type InvoiceLineTaxState,
+} from '@/lib/tax-type';
 
 const LOCATION_OF_SALE = '511 W Germantown Pike, Plymouth Meeting, PA 19462-1303';
 const INITIAL_LINES = 15;
 /** Payment terms offered on invoices/quotations. Stored as plain text (no schema change). */
 export const TERMS_OPTIONS = ['Due on receipt', 'Net 15', 'Net 30', 'Net 60'];
+
+function emptyLine(): LineItem {
+  return {
+    product_id: '',
+    product_name: '',
+    category_name: '',
+    quantity: 1,
+    price: 0,
+    subtotal: 0,
+    ...emptyInvoiceLineTax(0),
+  };
+}
+
+function lineWithMoney(line: LineItem, quantity: number, price: number): LineItem {
+  const qty = Math.max(0, Number(quantity) || 0);
+  const unit = Number(price) || 0;
+  const subtotal = qty * unit;
+  return { ...line, quantity: qty, price: unit, subtotal, ...recalculateInvoiceLineTax(subtotal, line) };
+}
+
+function lineFromProduct(product: Product, quantity: number, price: number, extras?: Partial<LineItem>, inheritTax = true): LineItem {
+  const qty = Math.max(1, Number(quantity) || 1);
+  const unit = Number(price) || 0;
+  const subtotal = qty * unit;
+  return {
+    product_id: product.id,
+    product_name: product.name,
+    category_name: product.category_name || '',
+    quantity: qty,
+    price: unit,
+    subtotal,
+    cost_price: product.cost_price,
+    stock_quantity: product.stock_quantity,
+    ...(inheritTax ? inheritInvoiceLineTax(product, subtotal) : emptyInvoiceLineTax(subtotal)),
+    ...extras,
+  };
+}
 
 interface Customer {
   id: string;
@@ -38,9 +81,13 @@ interface Product {
   stock_quantity?: number;
   product_id?: string;
   sku?: string;
+  tax_type_configured?: boolean;
+  tax_type_id?: string | null;
+  tax_type_label?: string;
+  tax_type?: { id: string; name: string; rate: number; rate_type?: string } | null;
 }
 
-interface LineItem {
+interface LineItem extends InvoiceLineTaxState {
   product_id: string;
   product_name: string;
   category_name: string;
@@ -91,8 +138,7 @@ export default function InvoiceFormLightbox({ isOpen, onClose, onSaved, editId, 
   const [customerAddress, setCustomerAddress] = useState('');
   const [terms, setTerms] = useState('Due on receipt');
   const [taxAmount, setTaxAmount] = useState(0);
-  const [selectedTaxTypeId, setSelectedTaxTypeId] = useState('');
-  const [taxTypes, setTaxTypes] = useState<{ id: string; name: string; rate: number; rate_type: string }[]>([]);
+  const [usesLineTax, setUsesLineTax] = useState(false);
   const [lines, setLines] = useState<LineItem[]>([]);
   const [customerPrices, setCustomerPrices] = useState<Record<string, number>>({});
 
@@ -118,7 +164,6 @@ export default function InvoiceFormLightbox({ isOpen, onClose, onSaved, editId, 
     setDirty(false);
     adminApi.get('/customers', { params: { limit: 500 } }).then((r) => setCustomers(r.data.customers || [])).catch(() => {});
     adminApi.get('/products', { params: { limit: 500 } }).then((r) => setProducts(r.data.products || [])).catch(() => {});
-    adminApi.get('/tax-types').then((r) => setTaxTypes(Array.isArray(r.data) ? r.data : [])).catch(() => []);
     if (initialCustomerId && !editId) {
       setCustomerId(initialCustomerId);
       adminApi.get(`/customers/${initialCustomerId}`).then((r) => {
@@ -143,16 +188,35 @@ export default function InvoiceFormLightbox({ isOpen, onClose, onSaved, editId, 
         setCustomerAddress(d.customer_address || '');
         setTerms(d.terms || 'Due on receipt');
         setTaxAmount(Number(d.tax_amount) || 0);
-        const items = (d.items || []).map((i: any) => ({
-          product_id: i.product_id?.toString() || '',
-          product_name: i.product_name || '',
-          category_name: i.category_name || '',
-          quantity: Number(i.quantity) || 0,
-          price: Number(i.price) || 0,
-          subtotal: Number(i.subtotal) || 0,
-          cost_price: undefined,
-        }));
-        while (items.length < INITIAL_LINES) items.push({ product_id: '', product_name: '', category_name: '', quantity: 1, price: 0, subtotal: 0 });
+        const loadedHasLineTax = (d.items || []).some((i: any) => Object.prototype.hasOwnProperty.call(i || {}, 'taxable'));
+        setUsesLineTax(loadedHasLineTax);
+        const items = (d.items || []).map((i: any) => {
+          const quantity = Number(i.quantity) || 0;
+          const price = Number(i.price) || 0;
+          const subtotal = Number(i.subtotal) || quantity * price;
+          const snapshot = Object.prototype.hasOwnProperty.call(i || {}, 'taxable')
+            ? recalculateInvoiceLineTax(subtotal, {
+                taxable: i.taxable === true,
+                tax_type_configured: true,
+                tax_type_id: i.tax_type_id ? String(i.tax_type_id) : null,
+                tax_type_name: i.tax_type_name ?? null,
+                tax_rate_type: i.tax_rate_type ?? null,
+                tax_rate: Number(i.tax_rate) || 0,
+                tax_type_label: i.tax_type_label || '',
+              })
+            : emptyInvoiceLineTax(subtotal);
+          return {
+            product_id: i.product_id?.toString() || '',
+            product_name: i.product_name || '',
+            category_name: i.category_name || '',
+            quantity,
+            price,
+            subtotal,
+            cost_price: undefined,
+            ...snapshot,
+          };
+        });
+        while (items.length < INITIAL_LINES) items.push(emptyLine());
         setLines(items.slice(0, INITIAL_LINES));
         setLoading(false);
       }).catch(() => setLoading(false));
@@ -164,24 +228,27 @@ export default function InvoiceFormLightbox({ isOpen, onClose, onSaved, editId, 
         const num = r.data.invoice_number || '';
         setInvoiceNumber(/^INV#\d+|^QTN#\d+/.test(num) ? num : (docType === 'quotation' ? 'QTN#001' : 'INV#001'));
       }).catch(() => setInvoiceNumber(docType === 'quotation' ? 'QTN#001' : 'INV#001'));
-      const empty: LineItem[] = Array.from({ length: INITIAL_LINES }, () => ({ product_id: '', product_name: '', category_name: '', quantity: 1, price: 0, subtotal: 0 }));
+      const empty: LineItem[] = Array.from({ length: INITIAL_LINES }, () => emptyLine());
+      setUsesLineTax(true);
       // Pre-fill lines from initialItems (e.g. generated from an RFQ). Prices passed in
       // are used directly; anything missing is resolved once the /products fetch finishes.
       if (initialItems && initialItems.length > 0) {
         const prefilled: LineItem[] = initialItems.map((it) => {
           const qty = Math.max(1, Number(it.quantity) || 1);
           const price = Number(it.price) > 0 ? Number(it.price) : 0;
+          const subtotal = qty * price;
           return {
+            ...emptyLine(),
             product_id: it.product_id || '',
             product_name: it.product_name || '',
             category_name: it.category_name || '',
             quantity: qty,
             price,
-            subtotal: qty * price,
+            subtotal,
             cost_price: Number(it.cost_price) > 0 ? Number(it.cost_price) : undefined,
           };
         });
-        while (prefilled.length < INITIAL_LINES) prefilled.push({ product_id: '', product_name: '', category_name: '', quantity: 1, price: 0, subtotal: 0 });
+        while (prefilled.length < INITIAL_LINES) prefilled.push(emptyLine());
         setLines(prefilled);
       } else {
         setLines(empty);
@@ -195,7 +262,6 @@ export default function InvoiceFormLightbox({ isOpen, onClose, onSaved, editId, 
       }
       setTerms('Due on receipt');
       setTaxAmount(0);
-      setSelectedTaxTypeId('');
     }
   }, [isOpen, editId, initialDocumentType, initialItems, initialCustomerId]);
 
@@ -215,15 +281,10 @@ export default function InvoiceFormLightbox({ isOpen, onClose, onSaved, editId, 
         const customerPrice = customerPrices[p.id];
         const usePrice = customerPrice ?? p.price ?? 0;
         changed = true;
-        return {
-          ...l,
+        return lineFromProduct(p, l.quantity, usePrice, {
           product_name: l.product_name || p.name,
           category_name: l.category_name || p.category_name || '',
-          price: usePrice,
-          subtotal: l.quantity * usePrice,
-          cost_price: p.cost_price,
-          stock_quantity: p.stock_quantity,
-        };
+        });
       });
       return changed ? next : prev;
     });
@@ -235,16 +296,14 @@ export default function InvoiceFormLightbox({ isOpen, onClose, onSaved, editId, 
   }, [isOpen, customerId, fetchCustomerPrices]);
 
   const subtotal = lines.reduce((s, l) => s + l.subtotal, 0);
+  const lineTaxTotal = lines.reduce((s, l) => s + (l.tax_amount || 0), 0);
+  const displayTax = usesLineTax ? lineTaxTotal : taxAmount;
+  const total = subtotal + displayTax;
 
   useEffect(() => {
-    if (!selectedTaxTypeId || selectedTaxTypeId === '__add_tax__') return;
-    const tt = taxTypes.find((t) => t.id === selectedTaxTypeId);
-    if (!tt) return;
-    if (tt.rate_type === 'amount') setTaxAmount(tt.rate);
-    else setTaxAmount(Math.round(subtotal * (tt.rate / 100) * 100) / 100);
-    setDirty(true);
-  }, [selectedTaxTypeId, subtotal, taxTypes]);
-  const total = subtotal + taxAmount;
+    if (!usesLineTax) return;
+    setTaxAmount(lineTaxTotal);
+  }, [usesLineTax, lineTaxTotal]);
 
 
   /** Cost price (product cost) for display in Cost price column */
@@ -273,28 +332,21 @@ export default function InvoiceFormLightbox({ isOpen, onClose, onSaved, editId, 
     const existingIdx = newLines.findIndex((l, i) => i !== index && l.product_id === product.id);
     if (existingIdx !== -1) {
       const existing = newLines[existingIdx];
-      existing.quantity += (line.quantity || 1);
-      existing.subtotal = existing.quantity * existing.price;
-      warnIfOverStock(product.name, existing.quantity, product.stock_quantity);
-      newLines[index] = { product_id: '', product_name: '', category_name: '', quantity: 1, price: 0, subtotal: 0 };
+      newLines[existingIdx] = lineWithMoney(existing, existing.quantity + (line.quantity || 1), existing.price);
+      warnIfOverStock(product.name, newLines[existingIdx].quantity, product.stock_quantity);
+      newLines[index] = emptyLine();
     } else if (line.product_id === product.id) {
-      line.quantity += 1;
-      line.subtotal = line.quantity * line.price;
-      warnIfOverStock(product.name, line.quantity, product.stock_quantity);
+      newLines[index] = lineWithMoney(line, line.quantity + 1, line.price);
+      warnIfOverStock(product.name, newLines[index].quantity, product.stock_quantity);
     } else {
       const customerPrice = customerPrices[product.id];
       const usePrice = customerPrice ?? product.price;
-      newLines[index] = {
-        product_id: product.id,
-        product_name: product.name,
-        category_name: product.category_name || '',
-        quantity: 1,
-        price: usePrice,
-        subtotal: usePrice,
-        cost_price: product.cost_price,
-        stock_quantity: product.stock_quantity,
-      };
-      if (customerPrice != null && customerPrice !== product.price) {
+      newLines[index] = lineFromProduct(product, 1, usePrice, undefined, usesLineTax);
+      if (usesLineTax && newLines[index].issue === 'not_configured') {
+        toast.error(`"${product.name}" has no configured tax type.`, { duration: 5000 });
+      } else if (usesLineTax && newLines[index].issue === 'amount_unsupported') {
+        toast.error(`"${product.name}" uses a fixed-amount tax type, which invoice lines cannot calculate.`, { duration: 5000 });
+      } else if (customerPrice != null && customerPrice !== product.price) {
         toast.success(`Using last price for ${product.name}: $${customerPrice.toFixed(2)} (default: $${product.price.toFixed(2)})`, { duration: 4000 });
       }
     }
@@ -310,30 +362,23 @@ export default function InvoiceFormLightbox({ isOpen, onClose, onSaved, editId, 
     let newLines = [...lines];
     const existingIdx = newLines.findIndex((l) => l.product_id === product.id);
     if (existingIdx !== -1) {
-      const existing = newLines[existingIdx];
-      existing.quantity += 1;
-      existing.subtotal = existing.quantity * existing.price;
-      warnIfOverStock(product.name, existing.quantity, product.stock_quantity);
+      newLines[existingIdx] = lineWithMoney(newLines[existingIdx], newLines[existingIdx].quantity + 1, newLines[existingIdx].price);
+      warnIfOverStock(product.name, newLines[existingIdx].quantity, product.stock_quantity);
     } else {
       const customerPrice = customerPrices[product.id];
       const usePrice = customerPrice ?? product.price;
       const emptyIdx = newLines.findIndex((l) => !l.product_id && !l.product_name);
       let targetIdx = emptyIdx;
       if (targetIdx === -1) {
-        newLines = [...newLines, ...Array.from({ length: 5 }, () => ({ product_id: '', product_name: '', category_name: '', quantity: 1, price: 0, subtotal: 0 }))];
+        newLines = [...newLines, ...Array.from({ length: 5 }, () => emptyLine())];
         targetIdx = newLines.length - 5;
       }
-      newLines[targetIdx] = {
-        product_id: product.id,
-        product_name: product.name,
-        category_name: product.category_name || '',
-        quantity: 1,
-        price: usePrice,
-        subtotal: usePrice,
-        cost_price: product.cost_price,
-        stock_quantity: product.stock_quantity,
-      };
-      if (customerPrice != null && customerPrice !== product.price) {
+      newLines[targetIdx] = lineFromProduct(product, 1, usePrice, undefined, usesLineTax);
+      if (usesLineTax && newLines[targetIdx].issue === 'not_configured') {
+        toast.error(`"${product.name}" has no configured tax type.`, { duration: 5000 });
+      } else if (usesLineTax && newLines[targetIdx].issue === 'amount_unsupported') {
+        toast.error(`"${product.name}" uses a fixed-amount tax type, which invoice lines cannot calculate.`, { duration: 5000 });
+      } else if (customerPrice != null && customerPrice !== product.price) {
         toast.success(`Using last price for ${product.name}: $${customerPrice.toFixed(2)} (default: $${product.price.toFixed(2)})`, { duration: 4000 });
       }
     }
@@ -351,7 +396,17 @@ export default function InvoiceFormLightbox({ isOpen, onClose, onSaved, editId, 
       .then((r) => {
         const p = r.data;
         if (p && p.id) {
-          addProductToLine({ id: p.id, name: p.name, price: p.price ?? 0, cost_price: p.cost_price, category_name: p.category_name });
+          addProductToLine({
+            id: p.id,
+            name: p.name,
+            price: p.price ?? 0,
+            cost_price: p.cost_price,
+            category_name: p.category_name,
+            tax_type_configured: p.tax_type_configured,
+            tax_type_id: p.tax_type_id,
+            tax_type_label: p.tax_type_label,
+            tax_type: p.tax_type,
+          });
         }
       })
       .catch(() => toast.error('Product not found for this barcode/ID'));
@@ -363,18 +418,16 @@ export default function InvoiceFormLightbox({ isOpen, onClose, onSaved, editId, 
     if (!line) return;
     if (field === 'quantity') {
       const newQty = Math.max(0, Number(value));
-      line.quantity = newQty;
-      line.subtotal = line.quantity * line.price;
       if (line.stock_quantity == null && line.product_id) {
         const p = products.find((x) => x.id === line.product_id);
         if (p) line.stock_quantity = p.stock_quantity;
       }
+      newLines[index] = lineWithMoney(line, newQty, line.price);
       if (line.stock_quantity != null && newQty > line.stock_quantity) {
         toast.error(`Warning: "${line.product_name}" has only ${line.stock_quantity} in stock but quantity is set to ${newQty}.`, { duration: 5000 });
       }
     } else if (field === 'price') {
-      line.price = Number(value) || 0;
-      line.subtotal = line.quantity * line.price;
+      newLines[index] = lineWithMoney(line, line.quantity, Number(value) || 0);
     }
     setLines(newLines);
     setDirty(true);
@@ -382,7 +435,7 @@ export default function InvoiceFormLightbox({ isOpen, onClose, onSaved, editId, 
 
   const removeLine = (index: number) => {
     const newLines = [...lines];
-    newLines[index] = { product_id: '', product_name: '', category_name: '', quantity: 1, price: 0, subtotal: 0 };
+    newLines[index] = emptyLine();
     setLines(newLines);
     setDirty(true);
   };
@@ -433,6 +486,15 @@ export default function InvoiceFormLightbox({ isOpen, onClose, onSaved, editId, 
       toast.error('Add at least one product');
       return false;
     }
+    const blocked = validLines.find((l) => l.issue === 'not_configured' || l.issue === 'amount_unsupported');
+    if (blocked) {
+      toast.error(
+        blocked.issue === 'not_configured'
+          ? `"${blocked.product_name}" has no configured tax type. Assign a tax type before invoicing.`
+          : `"${blocked.product_name}" uses a fixed-amount tax type, which invoice lines cannot calculate.`
+      );
+      return false;
+    }
     const overStockLines = validLines.filter((l) => {
       const stock = l.stock_quantity ?? products.find((p) => p.id === l.product_id)?.stock_quantity;
       return stock != null && l.quantity > stock;
@@ -458,7 +520,7 @@ export default function InvoiceFormLightbox({ isOpen, onClose, onSaved, editId, 
       customer_address: customerAddress,
       location_of_sale: LOCATION_OF_SALE,
       terms,
-      tax_amount: taxAmount,
+      tax_amount: displayTax,
       items: validLines.map((l) => ({
         product_id: l.product_id,
         product_name: l.product_name,
@@ -466,6 +528,18 @@ export default function InvoiceFormLightbox({ isOpen, onClose, onSaved, editId, 
         quantity: l.quantity,
         price: l.price,
         subtotal: l.subtotal,
+        ...(usesLineTax
+          ? {
+              taxable: l.taxable,
+              tax_type_id: l.tax_type_id,
+              tax_type_name: l.tax_type_name,
+              tax_rate_type: l.tax_rate_type,
+              tax_rate: l.tax_rate,
+              tax_amount: l.tax_amount,
+              tax_type_label: l.tax_type_label,
+              total: l.total,
+            }
+          : {}),
       })),
     };
     try {
@@ -645,9 +719,10 @@ export default function InvoiceFormLightbox({ isOpen, onClose, onSaved, editId, 
                         <th className="text-left py-3 px-4 min-w-[200px]">Product</th>
                         <th className="text-left py-3 px-4 min-w-[120px]">Category</th>
                         <th className="text-right py-3 px-4 w-24">Cost price</th>
-                        <th className="text-right py-3 px-4 w-24">Selling price</th>
+                        <th className="text-right py-3 px-4 w-28">Selling price</th>
+                        <th className="text-left py-3 px-4 w-32">Tax</th>
                         <th className="text-right py-3 px-4 w-20">Qty</th>
-                        <th className="text-right py-3 px-4 w-28">Amount</th>
+                        <th className="text-right py-3 px-4 w-28">Total</th>
                         <th className="w-12 px-4" />
                       </tr>
                     </thead>
@@ -664,12 +739,36 @@ export default function InvoiceFormLightbox({ isOpen, onClose, onSaved, editId, 
                                 products={products}
                                 value={line.product_id}
                                 displayName={line.product_name || undefined}
-                                onSelect={(p) => selectProductForLine(idx, { id: p.id, name: p.name, price: p.price ?? 0, cost_price: p.cost_price, category_name: p.category_name, stock_quantity: p.stock_quantity })}
+                                onSelect={(p) => selectProductForLine(idx, {
+                                  id: p.id,
+                                  name: p.name,
+                                  price: p.price ?? 0,
+                                  cost_price: p.cost_price,
+                                  category_name: p.category_name,
+                                  stock_quantity: p.stock_quantity,
+                                  tax_type_configured: p.tax_type_configured,
+                                  tax_type_id: p.tax_type_id,
+                                  tax_type_label: p.tax_type_label,
+                                  tax_type: p.tax_type,
+                                })}
                                 onBarcodeScan={(code) => {
                                   adminApi.get(`/products/barcode/${encodeURIComponent(code)}`)
                                     .then((r) => {
                                       const prod = r.data;
-                                      if (prod?.id) selectProductForLine(idx, { id: prod.id, name: prod.name, price: prod.price ?? 0, cost_price: prod.cost_price, category_name: prod.category_name, stock_quantity: prod.stock_quantity });
+                                      if (prod?.id) {
+                                        selectProductForLine(idx, {
+                                          id: prod.id,
+                                          name: prod.name,
+                                          price: prod.price ?? 0,
+                                          cost_price: prod.cost_price,
+                                          category_name: prod.category_name,
+                                          stock_quantity: prod.stock_quantity,
+                                          tax_type_configured: prod.tax_type_configured,
+                                          tax_type_id: prod.tax_type_id,
+                                          tax_type_label: prod.tax_type_label,
+                                          tax_type: prod.tax_type,
+                                        });
+                                      }
                                     })
                                     .catch(() => toast.error('Product not found for this barcode'));
                                 }}
@@ -692,6 +791,9 @@ export default function InvoiceFormLightbox({ isOpen, onClose, onSaved, editId, 
                                     onChange={(e) => updateLine(idx, 'price', e.target.value)}
                                     className="w-20 text-right border border-gray-300 rounded px-2 py-1"
                                   />
+                                  {line.taxable && (
+                                    <span className="text-xs font-semibold text-[#0F9F8F]" title="Tax applies. Selling price is tax-exclusive.">T</span>
+                                  )}
                                   {(() => {
                                     const cost = getLineCostPrice(line);
                                     if (cost != null && line.price < cost * 1.05) {
@@ -711,6 +813,9 @@ export default function InvoiceFormLightbox({ isOpen, onClose, onSaved, editId, 
                                 <span className="text-gray-400">—</span>
                               )}
                             </td>
+                            <td className={`py-2 px-4 text-xs ${line.issue ? 'text-amber-700' : 'text-gray-600'}`}>
+                              {hasProduct ? (line.tax_type_label || '—') : ''}
+                            </td>
                             <td className="py-2 px-4 text-right">
                               {hasProduct ? (
                                 <input
@@ -724,7 +829,7 @@ export default function InvoiceFormLightbox({ isOpen, onClose, onSaved, editId, 
                                 <span className="text-gray-400">{line.quantity || ''}</span>
                               )}
                             </td>
-                            <td className="py-2 px-4 text-right font-medium">{hasProduct ? `$${line.subtotal.toFixed(2)}` : ''}</td>
+                            <td className="py-2 px-4 text-right font-medium">{hasProduct ? `$${(line.total ?? line.subtotal + (line.tax_amount || 0)).toFixed(2)}` : ''}</td>
                             <td className="py-2 px-4">
                               {hasProduct && (
                                 <button type="button" onClick={() => removeLine(idx)} className="text-red-600 hover:bg-red-50 p-1 rounded">
@@ -745,7 +850,7 @@ export default function InvoiceFormLightbox({ isOpen, onClose, onSaved, editId, 
                   <button
                     type="button"
                     onClick={() => {
-                      setLines((prev) => [...prev, { product_id: '', product_name: '', category_name: '', quantity: 1, price: 0, subtotal: 0 }]);
+                      setLines((prev) => [...prev, emptyLine()]);
                       setDirty(true);
                     }}
                     className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg border border-gray-300 text-xs font-medium text-gray-700 hover:bg-gray-50"
@@ -759,29 +864,9 @@ export default function InvoiceFormLightbox({ isOpen, onClose, onSaved, editId, 
                 <div className="flex flex-wrap items-start justify-end gap-8">
                   <div className="space-y-2 min-w-[200px]">
                     <p className="text-sm text-gray-600">Subtotal: <span className="font-medium text-gray-900">${subtotal.toFixed(2)}</span></p>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">Select sales tax rate{documentType === 'quotation' ? ' (optional)' : ''}</label>
-                      <select
-                        value={selectedTaxTypeId}
-                        onChange={(e) => { const v = e.target.value; setSelectedTaxTypeId(v); if (v === '') setTaxAmount(0); setDirty(true); }}
-                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
-                      >
-                        <option value="">No tax</option>
-                        <option value="__add_tax__">+ Add new tax type</option>
-                        {taxTypes.map((t) => (
-                          <option key={t.id} value={t.id}>
-                            {t.name} {t.rate_type === 'percent' ? `(${t.rate}%)` : `($${t.rate.toFixed(2)})`}
-                          </option>
-                        ))}
-                      </select>
-                      {selectedTaxTypeId === '__add_tax__' && (
-                        <p className="text-xs text-gray-500 mt-1">
-                          <Link href="/admin/data" className="text-[#0F9F8F] hover:underline">Go to Master Data</Link> to add tax types, then return here.
-                        </p>
-                      )}
-                    </div>
-                    <p className="text-sm text-gray-600">Tax: <span className="font-medium text-gray-900">${taxAmount.toFixed(2)}</span></p>
+                    <p className="text-sm text-gray-600">Tax: <span className="font-medium text-gray-900">${displayTax.toFixed(2)}</span></p>
                     <p className="font-semibold text-gray-900 text-base">Total: ${total.toFixed(2)}</p>
+                    <p className="text-xs text-gray-500 max-w-xs">Tax is inherited from each product. Selling prices stay tax-exclusive. T means tax applies.</p>
                   </div>
                 </div>
               </div>

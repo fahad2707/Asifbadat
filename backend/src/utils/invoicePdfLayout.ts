@@ -21,6 +21,7 @@ export type InvoicePdfItem = {
   price?: number;
   subtotal?: number;
   sku?: string;
+  taxable?: boolean;
 };
 
 export type InvoicePdfData = {
@@ -177,7 +178,8 @@ export async function buildInvoicePdfBuffer(
     doc.text(String(qty), col.qty + 6, y + 7);
     doc.text(String(productId).slice(0, 12), col.id, y + 7, { width: 54 });
     doc.text(name, col.name, y + 7, { width: col.unit - col.name - 8 });
-    doc.text(unit.toFixed(2), col.unit, y + 7, { width: 52, align: 'right' });
+    const unitLabel = item.taxable === true ? `${unit.toFixed(2)} T` : unit.toFixed(2);
+    doc.text(unitLabel, col.unit, y + 7, { width: 52, align: 'right' });
     doc.text(lineTotal.toFixed(2), col.amount, y + 7, { width: 52, align: 'right' });
     y += rowH;
   });

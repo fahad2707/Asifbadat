@@ -13,7 +13,7 @@ import {
   migrateProductIdAndSku,
 } from '../utils/productCodes';
 import { toPublicProduct, toStaffProduct } from '../utils/productProjection';
-import { parseTaxTypeIdInput } from '../utils/productTaxType';
+import { parseTaxTypeIdInput, staffTaxTypeFields } from '../utils/productTaxType';
 
 /**
  * Any response that contains internal product fields (cost_price, vendor_id,
@@ -231,12 +231,14 @@ router.get('/barcode/:barcode', authenticateAdmin, async (req, res) => {
       $and: [{ sku: code }, CATALOG_VISIBLE_MATCH],
     })
       .populate('category_id', 'name slug')
+      .populate('tax_type_id', 'name rate rate_type')
       .lean();
     if (!product) {
       product = await Product.findOne({
         $and: [{ product_id: code }, CATALOG_VISIBLE_MATCH],
       })
         .populate('category_id', 'name slug')
+        .populate('tax_type_id', 'name rate rate_type')
         .lean();
     }
     if (!product) {
@@ -244,6 +246,7 @@ router.get('/barcode/:barcode', authenticateAdmin, async (req, res) => {
         $and: [{ barcode: code }, CATALOG_VISIBLE_MATCH],
       })
         .populate('category_id', 'name slug')
+        .populate('tax_type_id', 'name rate rate_type')
         .lean();
     }
     if (!product) {
@@ -251,6 +254,7 @@ router.get('/barcode/:barcode', authenticateAdmin, async (req, res) => {
         $and: [{ plu: code }, CATALOG_VISIBLE_MATCH],
       })
         .populate('category_id', 'name slug')
+        .populate('tax_type_id', 'name rate rate_type')
         .lean();
     }
     if (!product) {
@@ -268,6 +272,7 @@ router.get('/barcode/:barcode', authenticateAdmin, async (req, res) => {
       product_id: p.product_id,
       sku: p.sku,
       barcode: p.barcode,
+      ...staffTaxTypeFields(p),
     });
   } catch (error) {
     console.error('Get product by barcode error:', error);

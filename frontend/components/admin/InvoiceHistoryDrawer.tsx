@@ -37,7 +37,16 @@ interface InvoiceDetail {
   tax_amount?: number;
   total_amount: number;
   amount_paid?: number;
-  items?: { product_name?: string; quantity?: number; price?: number; subtotal?: number }[];
+  items?: {
+    product_name?: string;
+    quantity?: number;
+    price?: number;
+    subtotal?: number;
+    taxable?: boolean;
+    tax_type_label?: string;
+    tax_amount?: number;
+    total?: number;
+  }[];
 }
 
 interface ReceiptRow {
@@ -262,6 +271,7 @@ export default function InvoiceHistoryDrawer({ invoiceId, refreshKey = 0, onClos
                         <th className="text-left px-2 py-1.5 font-medium">Item</th>
                         <th className="text-right px-2 py-1.5 font-medium">Qty</th>
                         <th className="text-right px-2 py-1.5 font-medium">Price</th>
+                        <th className="text-left px-2 py-1.5 font-medium">Tax</th>
                         <th className="text-right px-2 py-1.5 font-medium">Amount</th>
                       </tr>
                     </thead>
@@ -270,8 +280,12 @@ export default function InvoiceHistoryDrawer({ invoiceId, refreshKey = 0, onClos
                         <tr key={idx} className="border-t border-[#E3E5E8]">
                           <td className="px-2 py-1.5">{item.product_name || '—'}</td>
                           <td className="px-2 py-1.5 text-right tabular-nums">{Number(item.quantity || 0)}</td>
-                          <td className="px-2 py-1.5 text-right tabular-nums">{money(Number(item.price || 0))}</td>
-                          <td className="px-2 py-1.5 text-right tabular-nums">{money(Number(item.subtotal || 0))}</td>
+                          <td className="px-2 py-1.5 text-right tabular-nums">
+                            {money(Number(item.price || 0))}
+                            {item.taxable === true ? ' T' : ''}
+                          </td>
+                          <td className="px-2 py-1.5 text-[#6B6C72]">{item.tax_type_label || (item.taxable === false ? 'No Tax' : '—')}</td>
+                          <td className="px-2 py-1.5 text-right tabular-nums">{money(Number(item.total ?? (Number(item.subtotal || 0) + Number(item.tax_amount || 0))))}</td>
                         </tr>
                       ))}
                     </tbody>

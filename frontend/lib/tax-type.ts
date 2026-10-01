@@ -27,3 +27,142 @@ export function productTaxLabel(product: {
   if (product.tax_type_configured && !product.tax_type_id) return 'No Tax';
   return 'Not configured';
 }
+
+export type InvoiceLineTaxIssue = 'not_configured' | 'amount_unsupported' | null;
+
+export type InvoiceLineTaxState = {
+  taxable: boolean;
+  tax_type_configured: boolean;
+  tax_type_id: string | null;
+  tax_type_name: string | null;
+  tax_rate_type: 'percent' | 'amount' | null;
+  tax_rate: number;
+  tax_amount: number;
+  tax_type_label: string;
+  total: number;
+  issue: InvoiceLineTaxIssue;
+};
+
+function roundMoney(n: number): number {
+  return Math.round((Number(n) || 0) * 100) / 100;
+}
+
+export function computePercentLineTax(subtotal: number, rate: number): number {
+  return roundMoney((Number(subtotal) || 0) * ((Number(rate) || 0) / 100));
+}
+
+export function emptyInvoiceLineTax(subtotal = 0): InvoiceLineTaxState {
+  const sub = roundMoney(subtotal);
+  return {
+    taxable: false,
+    tax_type_configured: false,
+    tax_type_id: null,
+    tax_type_name: null,
+    tax_rate_type: null,
+    tax_rate: 0,
+    tax_amount: 0,
+    tax_type_label: '',
+    total: sub,
+    issue: null,
+  };
+}
+
+export function inheritInvoiceLineTax(
+  product: {
+    name?: string;
+    tax_type_configured?: boolean;
+    tax_type_id?: string | null;
+    tax_type_label?: string;
+    tax_type?: TaxTypeOption | null;
+  },
+  subtotal: number
+): InvoiceLineTaxState {
+  const sub = roundMoney(subtotal);
+  const configured = product.tax_type_configured === true;
+  if (!configured) {
+    return {
+      ...emptyInvoiceLineTax(sub),
+      tax_type_label: 'Not configured',
+      issue: 'not_configured',
+    };
+  }
+  if (!product.tax_type_id) {
+    return {
+      taxable: false,
+      tax_type_configured: true,
+      tax_type_id: null,
+      tax_type_name: 'No Tax',
+      tax_rate_type: null,
+      tax_rate: 0,
+      tax_amount: 0,
+      tax_type_label: 'No Tax',
+      total: sub,
+      issue: null,
+    };
+  }
+  const taxType = product.tax_type;
+  if (taxType?.rate_type === 'amount') {
+    return {
+      taxable: false,
+      tax_type_configured: true,
+      tax_type_id: String(product.tax_type_id),
+      tax_type_name: taxType.name || null,
+      tax_rate_type: 'amount',
+      tax_rate: Number(taxType.rate) || 0,
+      tax_amount: 0,
+      tax_type_label: productTaxLabel(product),
+      total: sub,
+      issue: 'amount_unsupported',
+    };
+  }
+  const rate = Number(taxType?.rate) || 0;
+  const tax_amount = computePercentLineTax(sub, rate);
+  return {
+    taxable: true,
+    tax_type_configured: true,
+    tax_type_id: String(product.tax_type_id),
+    tax_type_name: taxType?.name || null,
+    tax_rate_type: 'percent',
+    tax_rate: rate,
+    tax_amount,
+    tax_type_label: productTaxLabel(product),
+    total: roundMoney(sub + tax_amount),
+    issue: null,
+  };
+}
+
+export function recalculateInvoiceLineTax(
+  subtotal: number,
+  line: Partial<InvoiceLineTaxState>
+): InvoiceLineTaxState {
+  const sub = roundMoney(subtotal);
+  if (line.issue === 'not_configured' || line.issue === 'amount_unsupported') {
+    return {
+      taxable: false,
+      tax_type_configured: line.issue !== 'not_configured',
+      tax_type_id: line.tax_type_id ?? null,
+      tax_type_name: line.tax_type_name ?? null,
+      tax_rate_type: line.tax_rate_type ?? null,
+      tax_rate: Number(line.tax_rate) || 0,
+      tax_amount: 0,
+      tax_type_label: line.tax_type_label || (line.issue === 'not_configured' ? 'Not configured' : ''),
+      total: sub,
+      issue: line.issue,
+    };
+  }
+  const taxable = line.taxable === true;
+  const rate = Number(line.tax_rate) || 0;
+  const tax_amount = taxable && line.tax_rate_type === 'percent' ? computePercentLineTax(sub, rate) : 0;
+  return {
+    taxable,
+    tax_type_configured: line.tax_type_configured !== false && (line.taxable !== undefined || Boolean(line.tax_type_label)),
+    tax_type_id: line.tax_type_id ?? null,
+    tax_type_name: line.tax_type_name ?? (taxable ? null : 'No Tax'),
+    tax_rate_type: line.tax_rate_type ?? null,
+    tax_rate: taxable ? rate : 0,
+    tax_amount,
+    tax_type_label: line.tax_type_label || (taxable ? 'Tax' : line.taxable === false ? 'No Tax' : ''),
+    total: roundMoney(sub + tax_amount),
+    issue: null,
+  };
+}
