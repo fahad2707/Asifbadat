@@ -46,6 +46,14 @@ export function hasInvoiceLineTaxSnapshot(item: unknown): boolean {
   return Object.prototype.hasOwnProperty.call(invoiceLinePersistedFields(item), 'taxable');
 }
 
+/**
+ * Live Customer.tax_exempt for NEW invoice/quotation lines only.
+ * Missing or non-true values are not exempt — never invent true.
+ */
+export function customerIsCurrentlyExempt(customer: { tax_exempt?: unknown } | null | undefined): boolean {
+  return customer?.tax_exempt === true;
+}
+
 export const CUSTOMER_EXEMPT_TAX_LABEL = 'Customer Exempt';
 
 export type InvoiceLineTaxState = {

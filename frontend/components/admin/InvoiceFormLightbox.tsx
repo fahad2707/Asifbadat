@@ -9,6 +9,7 @@ import { downloadPdfFromResponse, openPdfFromResponse } from '@/lib/download-pdf
 import { shareDocumentOnWhatsApp, composeEmailWithPdf } from '@/lib/share-document';
 import SearchableProductDropdown from './SearchableProductDropdown';
 import {
+  customerIsCurrentlyExempt,
   emptyInvoiceLineTax,
   hasInvoiceLineTaxSnapshot,
   inheritInvoiceLineTax,
@@ -159,13 +160,15 @@ export default function InvoiceFormLightbox({ isOpen, onClose, onSaved, editId, 
     setCustomerName(c.name);
     setCustomerPhone(c.phone || '');
     setCustomerEmail(c.email || '');
-    setCustomerTaxExempt(c.tax_exempt === true);
+    setCustomerTaxExempt(customerIsCurrentlyExempt(c));
     setDirty(true);
   }, []);
 
   useEffect(() => {
     if (!isOpen) return;
     setDirty(false);
+    setCustomerTaxExempt(false);
+    if (editId) setCustomerId('');
     adminApi.get('/customers', { params: { limit: 500 } }).then((r) => setCustomers(r.data.customers || [])).catch(() => {});
     adminApi.get('/products', { params: { limit: 500 } }).then((r) => setProducts(r.data.products || [])).catch(() => {});
     if (initialCustomerId && !editId) {
@@ -329,6 +332,37 @@ export default function InvoiceFormLightbox({ isOpen, onClose, onSaved, editId, 
     if (isOpen && customerId) fetchCustomerPrices(customerId);
     if (!customerId) setCustomerPrices({});
   }, [isOpen, customerId, fetchCustomerPrices]);
+
+  /**
+   * Keep live Customer.tax_exempt for NEW lines only.
+   * Edit-mode line re-inherit stays skipped above so stored TAX-02 snapshots stay put.
+   */
+  useEffect(() => {
+    if (!isOpen) return;
+    if (!customerId) {
+      setCustomerTaxExempt(false);
+      return;
+    }
+    const listed = customers.find((c) => c.id === customerId);
+    if (listed) {
+      setCustomerTaxExempt(customerIsCurrentlyExempt(listed));
+      return;
+    }
+    let cancelled = false;
+    adminApi
+      .get(`/customers/${customerId}`)
+      .then((r) => {
+        if (!cancelled) setCustomerTaxExempt(customerIsCurrentlyExempt(r.data));
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setCustomerTaxExempt(false);
+        toast.error('Could not load customer tax exemption. New lines will preview as not exempt.');
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isOpen, customerId, customers]);
 
   const subtotal = lines.reduce((s, l) => s + l.subtotal, 0);
   const lineTaxTotal = lines.reduce((s, l) => s + (l.tax_amount || 0), 0);
@@ -622,9 +656,9 @@ export default function InvoiceFormLightbox({ isOpen, onClose, onSaved, editId, 
     try {
       const res = await adminApi.post('/customers', { ...newCustomerForm, email: newCustomerForm.email || undefined });
       const created = res.data;
-      setCustomers((prev) => [...prev, { id: created.id, customer_code: created.customer_code, name: created.name, company: created.company, phone: created.phone, email: created.email, address: created.address, billing_address: created.billing_address, city: created.city, state: created.state, zip: created.zip }]);
+      setCustomers((prev) => [...prev, { id: created.id, customer_code: created.customer_code, name: created.name, company: created.company, phone: created.phone, email: created.email, address: created.address, billing_address: created.billing_address, city: created.city, state: created.state, zip: created.zip, tax_exempt: customerIsCurrentlyExempt(created) }]);
       setCustomerId(created.id);
-      fillCustomer({ id: created.id, name: created.name, company: created.company, phone: created.phone, email: created.email, address: created.address, billing_address: created.billing_address, city: created.city, state: created.state, zip: created.zip });
+      fillCustomer({ id: created.id, name: created.name, company: created.company, phone: created.phone, email: created.email, address: created.address, billing_address: created.billing_address, city: created.city, state: created.state, zip: created.zip, tax_exempt: customerIsCurrentlyExempt(created) });
       const fileInput = document.getElementById('customer-docs-invoice') as HTMLInputElement;
       if (fileInput?.files?.length) {
         for (let i = 0; i < fileInput.files.length; i++) {
@@ -680,9 +714,11 @@ export default function InvoiceFormLightbox({ isOpen, onClose, onSaved, editId, 
                     <select
                       value={customerId}
                       onChange={(e) => {
-                        setCustomerId(e.target.value);
-                        const c = customers.find((x) => x.id === e.target.value);
+                        const id = e.target.value;
+                        setCustomerId(id);
+                        const c = customers.find((x) => x.id === id);
                         if (c) fillCustomer(c);
+                        else setCustomerTaxExempt(false);
                       }}
                       className="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm"
                       required
@@ -694,8 +730,12 @@ export default function InvoiceFormLightbox({ isOpen, onClose, onSaved, editId, 
                     </select>
                   </div>
                   <p className="text-xs text-gray-500 mt-1">Select a saved customer or add a new one. Customer is required.</p>
-                  {!editId && customerTaxExempt && (
-                    <p className="text-xs text-amber-700 mt-1">This customer is tax exempt. Line tax will be $0 (Customer Exempt).</p>
+                  {customerTaxExempt && (
+                    <p className="text-xs text-amber-700 mt-1">
+                      {editId
+                        ? 'This customer is tax exempt. New lines will be $0 (Customer Exempt). Existing lines keep their stored tax.'
+                        : 'This customer is tax exempt. Line tax will be $0 (Customer Exempt).'}
+                    </p>
                   )}
                 </div>
                 <div>
