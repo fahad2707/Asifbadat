@@ -232,3 +232,74 @@ test('POST /api/products without tax_type_id leaves assignment unconfigured', as
   assert.equal(created?.price, 9.99);
   assert.equal(created?.tax_rate, 0);
 });
+
+function stubUnconfiguredProductUpdate() {
+  const existing = { name: 'ABC', price: 4.99, tax_rate: 8.5, product_id: '10001' };
+  mock.method(Product, 'findById', () => ({
+    lean: async () => existing,
+  }));
+  let savedUpdate: Record<string, unknown> | undefined;
+  mock.method(Product, 'findByIdAndUpdate', async (_id: unknown, update: Record<string, unknown>) => {
+    savedUpdate = update;
+    return {
+      _id: { toString: () => PRODUCT_A },
+      toObject: () => ({ _id: PRODUCT_A, ...existing, ...update }),
+      ...existing,
+      ...update,
+    };
+  });
+  return {
+    existing,
+    getUpdate: () => savedUpdate,
+  };
+}
+
+test('PUT /api/products/:id without tax_type_id leaves Not configured product unconfigured', async () => {
+  assertNoMongoConnection();
+  stubTaxTypeLookup();
+  const { existing, getUpdate } = stubUnconfiguredProductUpdate();
+
+  const res = await request(createApp())
+    .put(`/api/products/${PRODUCT_A}`)
+    .set('Authorization', `Bearer ${adminTestToken()}`)
+    .send({ name: 'ABC' });
+
+  assert.equal(res.status, 200);
+  assert.equal(Object.prototype.hasOwnProperty.call(getUpdate() || {}, 'tax_type_id'), false);
+  assert.equal(getUpdate()?.price, undefined);
+  assert.equal(existing.price, 4.99);
+  assert.equal(existing.tax_rate, 8.5);
+});
+
+test('PUT /api/products/:id explicit No Tax writes tax_type_id null and keeps price', async () => {
+  assertNoMongoConnection();
+  stubTaxTypeLookup();
+  const { existing, getUpdate } = stubUnconfiguredProductUpdate();
+
+  const res = await request(createApp())
+    .put(`/api/products/${PRODUCT_A}`)
+    .set('Authorization', `Bearer ${adminTestToken()}`)
+    .send({ tax_type_id: null });
+
+  assert.equal(res.status, 200);
+  assert.equal(getUpdate()?.tax_type_id, null);
+  assert.equal(getUpdate()?.price, undefined);
+  assert.equal(existing.price, 4.99);
+});
+
+test('PUT /api/products/:id selecting GST writes TaxType ObjectId and keeps price', async () => {
+  assertNoMongoConnection();
+  stubTaxTypeLookup();
+  const { existing, getUpdate } = stubUnconfiguredProductUpdate();
+
+  const res = await request(createApp())
+    .put(`/api/products/${PRODUCT_A}`)
+    .set('Authorization', `Bearer ${adminTestToken()}`)
+    .send({ tax_type_id: GST_ID });
+
+  assert.equal(res.status, 200);
+  assert.equal(String(getUpdate()?.tax_type_id), GST_ID);
+  assert.equal(getUpdate()?.price, undefined);
+  assert.equal(getUpdate()?.tax_rate, undefined);
+  assert.equal(existing.price, 4.99);
+});

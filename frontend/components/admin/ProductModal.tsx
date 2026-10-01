@@ -341,7 +341,6 @@ export default function ProductModal({ product, onClose, onSuccess }: ProductMod
     sub_category_id: undefined,
     vendor_id: undefined,
     tax_rate: 0,
-    tax_type_id: null,
     image_url: '',
     product_id: '',
     sku: '',
@@ -357,8 +356,7 @@ export default function ProductModal({ product, onClose, onSuccess }: ProductMod
   const [showAddVendor, setShowAddVendor] = useState(false);
   const [marginPct, setMarginPct] = useState<string>('');
   const [marginUsd, setMarginUsd] = useState<string>('');
-  const [taxTypeId, setTaxTypeId] = useState<string | null | undefined>(null);
-  const [initialTaxTypeId, setInitialTaxTypeId] = useState<string | null | undefined>(null);
+  const [taxTypeId, setTaxTypeId] = useState<string | null | undefined>(undefined);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Defensive: never call .map/.find on a non-array (e.g. error object from a bad response).
@@ -432,11 +430,9 @@ export default function ProductModal({ product, onClose, onSuccess }: ProductMod
           ? undefined
           : product.tax_type_id ?? null;
       setTaxTypeId(assigned);
-      setInitialTaxTypeId(assigned);
       if (product.image_url) setImagePreview(product.image_url);
     } else {
-      setTaxTypeId(null);
-      setInitialTaxTypeId(null);
+      setTaxTypeId(undefined);
     }
   }, [product]);
 
@@ -461,7 +457,10 @@ export default function ProductModal({ product, onClose, onSuccess }: ProductMod
       setShowAddTax(true);
       return;
     }
-    if (value === '__unconfigured__') return;
+    if (value === '__unconfigured__') {
+      setTaxTypeId(undefined);
+      return;
+    }
     setTaxTypeId(value === '' ? null : value);
   };
 
@@ -504,12 +503,10 @@ export default function ProductModal({ product, onClose, onSuccess }: ProductMod
     try {
       const payload: Record<string, unknown> = { ...formData, price: Number(formData.price) || 0 };
       delete payload.product_id;
-      if (!product?.id) {
-        payload.tax_type_id = taxTypeId ?? null;
-      } else if (taxTypeId !== initialTaxTypeId) {
-        payload.tax_type_id = taxTypeId ?? null;
-      } else {
+      if (taxTypeId === undefined) {
         delete payload.tax_type_id;
+      } else {
+        payload.tax_type_id = taxTypeId;
       }
       if (product?.id) {
         const { data } = await adminApi.put(`/products/${product.id}`, payload);
@@ -736,7 +733,7 @@ export default function ProductModal({ product, onClose, onSuccess }: ProductMod
                 onChange={(e) => handleTaxChange(e.target.value)}
                 className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500"
               >
-                {taxTypeId === undefined && <option value="__unconfigured__">Not configured</option>}
+                <option value="__unconfigured__">Not configured</option>
                 <option value="">No Tax</option>
                 <option value={ADD_TAX}>+ Add tax type</option>
                 {taxTypeList.map((t) => (
