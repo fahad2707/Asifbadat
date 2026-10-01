@@ -188,6 +188,71 @@ test('quotation conversion copies snapshots without inheriting current product t
   assert.equal(copied[0].tax_amount, 0.9);
 });
 
+test('exempt customer zeros GST tax and labels Customer Exempt without dropping TaxType id', () => {
+  const product = {
+    name: 'ABC',
+    tax_type_id: { _id: GST_ID, name: 'GST', rate: 18, rate_type: 'percent' },
+  };
+  const snap = inheritLineTaxFromProduct(product, 100, { customerExempt: true });
+  assert.equal(snap.taxable, false);
+  assert.equal(snap.tax_exempt, true);
+  assert.equal(snap.tax_amount, 0);
+  assert.equal(snap.total, 100);
+  assert.equal(snap.tax_type_label, 'Customer Exempt');
+  assert.equal(String(snap.tax_type_id), GST_ID);
+  assert.equal(snap.tax_rate, 18);
+});
+
+test('exempt mixed GST/VAT/No Tax invoice tax is zero', () => {
+  const productsById = new Map([
+    [PRODUCT_A, { name: 'ABC', tax_type_id: { _id: GST_ID, name: 'GST', rate: 18, rate_type: 'percent' } }],
+    ['64c1c2d3e4f5a6b7c8d9e0a2', { name: 'DEF', tax_type_id: { _id: VAT_ID, name: 'VAT', rate: 12, rate_type: 'percent' } }],
+    ['64c1c2d3e4f5a6b7c8d9e0a3', { name: 'XYZ', tax_type_id: null }],
+  ]);
+  const { items, usedLineTax } = buildInvoiceLines({
+    items: [
+      { product_id: PRODUCT_A, product_name: 'ABC', quantity: 1, price: 4.99, subtotal: 4.99 },
+      { product_id: '64c1c2d3e4f5a6b7c8d9e0a2', product_name: 'DEF', quantity: 1, price: 10, subtotal: 10 },
+      { product_id: '64c1c2d3e4f5a6b7c8d9e0a3', product_name: 'XYZ', quantity: 1, price: 7.5, subtotal: 7.5 },
+    ],
+    productsById,
+    inheritFromProduct: true,
+    customerExempt: true,
+  });
+  assert.equal(usedLineTax, true);
+  assert.ok(items.every((item) => item.tax_amount === 0 && item.tax_exempt === true));
+  const totals = invoiceTaxTotals(items, { usedLineTax: true });
+  assert.equal(totals.subtotal_amount, 22.49);
+  assert.equal(totals.tax_amount, 0);
+  assert.equal(totals.total_amount, 22.49);
+});
+
+test('historical exempt snapshot is not recalculated from a taxable product', () => {
+  const { items } = buildInvoiceLines({
+    items: [{ product_id: PRODUCT_A, product_name: 'ABC', quantity: 1, price: 100, subtotal: 100 }],
+    productsById: new Map([
+      [PRODUCT_A, { name: 'ABC', tax_type_id: { _id: GST_ID, name: 'GST', rate: 18, rate_type: 'percent' } }],
+    ]),
+    existingItems: [
+      {
+        product_id: PRODUCT_A,
+        taxable: false,
+        tax_exempt: true,
+        tax_type_id: GST_ID,
+        tax_type_name: 'GST',
+        tax_rate_type: 'percent',
+        tax_rate: 18,
+        tax_type_label: 'Customer Exempt',
+      },
+    ],
+    inheritFromProduct: false,
+    customerExempt: false,
+  });
+  assert.equal(items[0].tax_exempt, true);
+  assert.equal(items[0].tax_amount, 0);
+  assert.equal(items[0].tax_type_label, 'Customer Exempt');
+});
+
 test('legacy lines without taxable keep fallback document tax', () => {
   const { items, usedLineTax } = buildInvoiceLines({
     items: [{ product_name: 'Line', quantity: 1, price: 100, subtotal: 100 }],

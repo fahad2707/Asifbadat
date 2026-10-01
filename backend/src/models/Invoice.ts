@@ -15,6 +15,8 @@ export interface IInvoiceItem {
   tax_rate?: number;
   tax_amount?: number;
   tax_type_label?: string;
+  /** True when this line was zeroed because the customer was tax-exempt at save time. */
+  tax_exempt?: boolean;
   total?: number;
 }
 
@@ -61,6 +63,7 @@ const InvoiceItemSchema = new Schema<IInvoiceItem>({
   tax_rate: { type: Number },
   tax_amount: { type: Number },
   tax_type_label: { type: String },
+  tax_exempt: { type: Boolean },
   total: { type: Number },
 });
 

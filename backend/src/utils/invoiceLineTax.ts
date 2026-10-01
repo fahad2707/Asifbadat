@@ -9,7 +9,10 @@
  * amount:  not implemented — existing invoice UI treats $N as document-level tax;
  *          per-unit vs per-line vs per-document is not defined for product lines.
  *
- * Does not read or write Product.price or Product.tax_rate.
+ * Customer.tax_exempt === true zeros tax on newly inherited lines and snapshots
+ * tax_exempt on the line. Historical documents keep that snapshot.
+ *
+ * Does not read or write Product.price, Product.tax_rate, or Customer.tax_exempt.
  */
 
 import mongoose from 'mongoose';
@@ -36,8 +39,11 @@ export type InvoiceLineTaxSnapshot = {
   tax_rate: number;
   tax_amount: number;
   tax_type_label: string;
+  tax_exempt?: boolean;
   total: number;
 };
+
+export const CUSTOMER_EXEMPT_TAX_LABEL = 'Customer Exempt';
 
 export type InvoiceLineRecord = {
   product_id?: mongoose.Types.ObjectId;
@@ -77,9 +83,22 @@ function objectIdOrUndefined(raw: unknown): mongoose.Types.ObjectId | undefined 
   return new mongoose.Types.ObjectId(id);
 }
 
+export function applyCustomerExemption(snapshot: InvoiceLineTaxSnapshot, subtotal: number): InvoiceLineTaxSnapshot {
+  const sub = roundMoney(subtotal);
+  return {
+    ...snapshot,
+    taxable: false,
+    tax_amount: 0,
+    tax_type_label: CUSTOMER_EXEMPT_TAX_LABEL,
+    tax_exempt: true,
+    total: sub,
+  };
+}
+
 export function inheritLineTaxFromProduct(
   product: { name?: string; tax_type_id?: unknown },
-  subtotal: number
+  subtotal: number,
+  opts?: { customerExempt?: boolean }
 ): InvoiceLineTaxSnapshot {
   const name = String(product?.name || 'Product').trim() || 'Product';
   const sub = roundMoney(subtotal);
@@ -89,7 +108,8 @@ export function inheritLineTaxFromProduct(
     );
   }
   if (product.tax_type_id == null) {
-    return noTaxLineSnapshot(sub);
+    const none = noTaxLineSnapshot(sub);
+    return opts?.customerExempt ? applyCustomerExemption(none, sub) : none;
   }
   const summary = summarizePopulatedTaxType(product.tax_type_id);
   if (!summary || !summary.name) {
@@ -101,7 +121,7 @@ export function inheritLineTaxFromProduct(
     );
   }
   const tax_amount = computePercentLineTax(sub, summary.rate);
-  return {
+  const assigned: InvoiceLineTaxSnapshot = {
     taxable: true,
     tax_type_id: new mongoose.Types.ObjectId(summary.id),
     tax_type_name: summary.name,
@@ -111,6 +131,7 @@ export function inheritLineTaxFromProduct(
     tax_type_label: formatTaxTypeLabel(summary),
     total: roundMoney(sub + tax_amount),
   };
+  return opts?.customerExempt ? applyCustomerExemption(assigned, sub) : assigned;
 }
 
 export function applyLineTaxSnapshot(
@@ -118,7 +139,8 @@ export function applyLineTaxSnapshot(
   raw: Record<string, unknown>
 ): InvoiceLineTaxSnapshot {
   const sub = roundMoney(subtotal);
-  const taxable = raw.taxable === true;
+  const tax_exempt = raw.tax_exempt === true;
+  const taxable = !tax_exempt && raw.taxable === true;
   const rateType =
     raw.tax_rate_type === 'amount' ? 'amount' : raw.tax_rate_type === 'percent' ? 'percent' : null;
   if (taxable && rateType === 'amount') {
@@ -132,9 +154,14 @@ export function applyLineTaxSnapshot(
       ? String(raw.tax_type_name)
       : taxable
         ? null
-        : 'No Tax';
-  const tax_type_label =
-    typeof raw.tax_type_label === 'string' && raw.tax_type_label.trim()
+        : tax_exempt
+          ? raw.tax_type_name != null
+            ? String(raw.tax_type_name)
+            : null
+          : 'No Tax';
+  const tax_type_label = tax_exempt
+    ? CUSTOMER_EXEMPT_TAX_LABEL
+    : typeof raw.tax_type_label === 'string' && raw.tax_type_label.trim()
       ? raw.tax_type_label
       : tax_type_name && rateType === 'percent'
         ? formatTaxTypeLabel({ name: tax_type_name, rate, rate_type: 'percent' })
@@ -144,9 +171,10 @@ export function applyLineTaxSnapshot(
     tax_type_id,
     tax_type_name,
     tax_rate_type: rateType,
-    tax_rate: taxable ? rate : 0,
+    tax_rate: taxable || tax_exempt ? rate : 0,
     tax_amount,
     tax_type_label,
+    tax_exempt,
     total: roundMoney(sub + tax_amount),
   };
 }
@@ -168,6 +196,7 @@ export function mapInvoiceLine(
     product?: { name?: string; tax_type_id?: unknown } | null;
     existing?: Record<string, unknown> | null;
     inheritFromProduct: boolean;
+    customerExempt?: boolean;
   }
 ): InvoiceLineRecord {
   const quantity = Number(raw.quantity) || 0;
@@ -193,7 +222,7 @@ export function mapInvoiceLine(
         `Product not found for invoice line "${base.product_name || product_id.toString()}".`
       );
     }
-    tax = inheritLineTaxFromProduct(opts.product, subtotal);
+    tax = inheritLineTaxFromProduct(opts.product, subtotal, { customerExempt: opts.customerExempt === true });
   } else if (opts.existing && hasInvoiceLineTaxSnapshot(opts.existing)) {
     tax = applyLineTaxSnapshot(subtotal, opts.existing);
   } else if (hasInvoiceLineTaxSnapshot(raw)) {
@@ -208,6 +237,7 @@ export function buildInvoiceLines(input: {
   productsById: Map<string, { name?: string; tax_type_id?: unknown }>;
   existingItems?: unknown[];
   inheritFromProduct: boolean;
+  customerExempt?: boolean;
 }): { items: InvoiceLineRecord[]; usedLineTax: boolean } {
   const existing = existingByProductId(input.existingItems || []);
   const items = input.items.map((raw) => {
@@ -218,6 +248,7 @@ export function buildInvoiceLines(input: {
       product: pid ? input.productsById.get(pid) || null : null,
       existing: existingLine,
       inheritFromProduct: input.inheritFromProduct && (input.existingItems == null || isNewProductLine),
+      customerExempt: input.customerExempt === true,
     });
   });
   const usedLineTax = items.some((item) => hasInvoiceLineTaxSnapshot(item));

@@ -30,6 +30,8 @@ export function productTaxLabel(product: {
 
 export type InvoiceLineTaxIssue = 'not_configured' | 'amount_unsupported' | null;
 
+export const CUSTOMER_EXEMPT_TAX_LABEL = 'Customer Exempt';
+
 export type InvoiceLineTaxState = {
   taxable: boolean;
   tax_type_configured: boolean;
@@ -39,6 +41,7 @@ export type InvoiceLineTaxState = {
   tax_rate: number;
   tax_amount: number;
   tax_type_label: string;
+  tax_exempt?: boolean;
   total: number;
   issue: InvoiceLineTaxIssue;
 };
@@ -75,7 +78,8 @@ export function inheritInvoiceLineTax(
     tax_type_label?: string;
     tax_type?: TaxTypeOption | null;
   },
-  subtotal: number
+  subtotal: number,
+  customerExempt = false
 ): InvoiceLineTaxState {
   const sub = roundMoney(subtotal);
   const configured = product.tax_type_configured === true;
@@ -87,7 +91,7 @@ export function inheritInvoiceLineTax(
     };
   }
   if (!product.tax_type_id) {
-    return {
+    const none: InvoiceLineTaxState = {
       taxable: false,
       tax_type_configured: true,
       tax_type_id: null,
@@ -95,10 +99,12 @@ export function inheritInvoiceLineTax(
       tax_rate_type: null,
       tax_rate: 0,
       tax_amount: 0,
-      tax_type_label: 'No Tax',
+      tax_type_label: customerExempt ? CUSTOMER_EXEMPT_TAX_LABEL : 'No Tax',
+      tax_exempt: customerExempt || undefined,
       total: sub,
       issue: null,
     };
+    return none;
   }
   const taxType = product.tax_type;
   if (taxType?.rate_type === 'amount') {
@@ -116,6 +122,21 @@ export function inheritInvoiceLineTax(
     };
   }
   const rate = Number(taxType?.rate) || 0;
+  if (customerExempt) {
+    return {
+      taxable: false,
+      tax_type_configured: true,
+      tax_type_id: String(product.tax_type_id),
+      tax_type_name: taxType?.name || null,
+      tax_rate_type: 'percent',
+      tax_rate: rate,
+      tax_amount: 0,
+      tax_type_label: CUSTOMER_EXEMPT_TAX_LABEL,
+      tax_exempt: true,
+      total: sub,
+      issue: null,
+    };
+  }
   const tax_amount = computePercentLineTax(sub, rate);
   return {
     taxable: true,
@@ -136,6 +157,21 @@ export function recalculateInvoiceLineTax(
   line: Partial<InvoiceLineTaxState>
 ): InvoiceLineTaxState {
   const sub = roundMoney(subtotal);
+  if (line.tax_exempt === true) {
+    return {
+      taxable: false,
+      tax_type_configured: true,
+      tax_type_id: line.tax_type_id ?? null,
+      tax_type_name: line.tax_type_name ?? null,
+      tax_rate_type: line.tax_rate_type ?? null,
+      tax_rate: Number(line.tax_rate) || 0,
+      tax_amount: 0,
+      tax_type_label: CUSTOMER_EXEMPT_TAX_LABEL,
+      tax_exempt: true,
+      total: sub,
+      issue: null,
+    };
+  }
   if (line.issue === 'not_configured' || line.issue === 'amount_unsupported') {
     return {
       taxable: false,

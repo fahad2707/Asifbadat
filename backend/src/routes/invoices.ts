@@ -53,6 +53,12 @@ async function loadProductsById(items: Array<{ product_id?: unknown }>) {
   return map;
 }
 
+async function customerIsTaxExempt(customerId?: mongoose.Types.ObjectId | string | null): Promise<boolean> {
+  if (!customerId) return false;
+  const customer = await Customer.findById(customerId).select('tax_exempt').lean();
+  return Boolean((customer as { tax_exempt?: boolean } | null)?.tax_exempt);
+}
+
 function quotationMark(shippingType?: string | null): { quote_status: 'open' | 'rejected' | 'converted'; converted_invoice_number?: string } {
   const raw = String(shippingType || '');
   if (raw === 'rejected') return { quote_status: 'rejected' };
@@ -257,10 +263,12 @@ router.post('/', authenticateAdmin, async (req: AuthRequest, res) => {
     const rawItems = (body.items || []) as Record<string, unknown>[];
     const inheritFromProduct = rawItems.some((item) => Boolean(item.product_id));
     const productsById = inheritFromProduct ? await loadProductsById(rawItems) : new Map();
+    const customerExempt = inheritFromProduct ? await customerIsTaxExempt(customer_id) : false;
     const built = buildInvoiceLines({
       items: rawItems,
       productsById,
       inheritFromProduct,
+      customerExempt,
     });
     const items = built.items;
     const { subtotal_amount, tax_amount, total_amount } = invoiceTaxTotals(items, {
@@ -434,11 +442,13 @@ router.put('/:id', authenticateAdmin, async (req: AuthRequest, res) => {
       const incomingHasProduct = rawItems.some((item) => Boolean(item.product_id));
       const inheritFromProduct = incomingHasProduct && existingHasLineTax;
       const productsById = inheritFromProduct ? await loadProductsById(rawItems) : new Map();
+      const customerExempt = inheritFromProduct ? await customerIsTaxExempt(invoice.customer_id) : false;
       const built = buildInvoiceLines({
         items: rawItems,
         productsById,
         existingItems,
         inheritFromProduct,
+        customerExempt,
       });
       const items = built.items;
       const usedLineTax = built.usedLineTax || existingHasLineTax;

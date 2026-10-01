@@ -39,7 +39,7 @@ function lineWithMoney(line: LineItem, quantity: number, price: number): LineIte
   return { ...line, quantity: qty, price: unit, subtotal, ...recalculateInvoiceLineTax(subtotal, line) };
 }
 
-function lineFromProduct(product: Product, quantity: number, price: number, extras?: Partial<LineItem>, inheritTax = true): LineItem {
+function lineFromProduct(product: Product, quantity: number, price: number, extras?: Partial<LineItem>, inheritTax = true, customerExempt = false): LineItem {
   const qty = Math.max(1, Number(quantity) || 1);
   const unit = Number(price) || 0;
   const subtotal = qty * unit;
@@ -52,7 +52,7 @@ function lineFromProduct(product: Product, quantity: number, price: number, extr
     subtotal,
     cost_price: product.cost_price,
     stock_quantity: product.stock_quantity,
-    ...(inheritTax ? inheritInvoiceLineTax(product, subtotal) : emptyInvoiceLineTax(subtotal)),
+    ...(inheritTax ? inheritInvoiceLineTax(product, subtotal, customerExempt) : emptyInvoiceLineTax(subtotal)),
     ...extras,
   };
 }
@@ -69,6 +69,7 @@ interface Customer {
   city?: string;
   state?: string;
   zip?: string;
+  tax_exempt?: boolean;
 }
 
 interface Product {
@@ -141,6 +142,7 @@ export default function InvoiceFormLightbox({ isOpen, onClose, onSaved, editId, 
   const [usesLineTax, setUsesLineTax] = useState(false);
   const [lines, setLines] = useState<LineItem[]>([]);
   const [customerPrices, setCustomerPrices] = useState<Record<string, number>>({});
+  const [customerTaxExempt, setCustomerTaxExempt] = useState(false);
 
   const fetchCustomerPrices = useCallback(async (cid: string) => {
     if (!cid) { setCustomerPrices({}); return; }
@@ -156,6 +158,7 @@ export default function InvoiceFormLightbox({ isOpen, onClose, onSaved, editId, 
     setCustomerName(c.name);
     setCustomerPhone(c.phone || '');
     setCustomerEmail(c.email || '');
+    setCustomerTaxExempt(c.tax_exempt === true);
     setDirty(true);
   }, []);
 
@@ -203,6 +206,7 @@ export default function InvoiceFormLightbox({ isOpen, onClose, onSaved, editId, 
                 tax_rate_type: i.tax_rate_type ?? null,
                 tax_rate: Number(i.tax_rate) || 0,
                 tax_type_label: i.tax_type_label || '',
+                tax_exempt: i.tax_exempt === true,
               })
             : emptyInvoiceLineTax(subtotal);
           return {
@@ -259,6 +263,7 @@ export default function InvoiceFormLightbox({ isOpen, onClose, onSaved, editId, 
         setCustomerPhone('');
         setCustomerEmail('');
         setCustomerAddress('');
+        setCustomerTaxExempt(false);
       }
       setTerms('Due on receipt');
       setTaxAmount(0);
@@ -284,11 +289,40 @@ export default function InvoiceFormLightbox({ isOpen, onClose, onSaved, editId, 
         return lineFromProduct(p, l.quantity, usePrice, {
           product_name: l.product_name || p.name,
           category_name: l.category_name || p.category_name || '',
-        });
+        }, true, customerTaxExempt);
       });
       return changed ? next : prev;
     });
-  }, [isOpen, editId, products, customerPrices]);
+  }, [isOpen, editId, products, customerPrices, customerTaxExempt]);
+
+  useEffect(() => {
+    if (!isOpen || editId || !usesLineTax) return;
+    setLines((prev) => {
+      let changed = false;
+      const next = prev.map((l) => {
+        if (!l.product_id) return l;
+        const p = products.find((q) => q.id === l.product_id);
+        if (!p) return l;
+        const nextLine = lineFromProduct(p, l.quantity, l.price, {
+          product_name: l.product_name,
+          category_name: l.category_name,
+          cost_price: l.cost_price,
+          stock_quantity: l.stock_quantity,
+        }, true, customerTaxExempt);
+        if (
+          nextLine.tax_exempt === l.tax_exempt &&
+          nextLine.tax_amount === l.tax_amount &&
+          nextLine.tax_type_label === l.tax_type_label &&
+          nextLine.taxable === l.taxable
+        ) {
+          return l;
+        }
+        changed = true;
+        return nextLine;
+      });
+      return changed ? next : prev;
+    });
+  }, [isOpen, editId, usesLineTax, customerTaxExempt, products]);
 
   useEffect(() => {
     if (isOpen && customerId) fetchCustomerPrices(customerId);
@@ -341,7 +375,7 @@ export default function InvoiceFormLightbox({ isOpen, onClose, onSaved, editId, 
     } else {
       const customerPrice = customerPrices[product.id];
       const usePrice = customerPrice ?? product.price;
-      newLines[index] = lineFromProduct(product, 1, usePrice, undefined, usesLineTax);
+      newLines[index] = lineFromProduct(product, 1, usePrice, undefined, usesLineTax, customerTaxExempt);
       if (usesLineTax && newLines[index].issue === 'not_configured') {
         toast.error(`"${product.name}" has no configured tax type.`, { duration: 5000 });
       } else if (usesLineTax && newLines[index].issue === 'amount_unsupported') {
@@ -373,7 +407,7 @@ export default function InvoiceFormLightbox({ isOpen, onClose, onSaved, editId, 
         newLines = [...newLines, ...Array.from({ length: 5 }, () => emptyLine())];
         targetIdx = newLines.length - 5;
       }
-      newLines[targetIdx] = lineFromProduct(product, 1, usePrice, undefined, usesLineTax);
+      newLines[targetIdx] = lineFromProduct(product, 1, usePrice, undefined, usesLineTax, customerTaxExempt);
       if (usesLineTax && newLines[targetIdx].issue === 'not_configured') {
         toast.error(`"${product.name}" has no configured tax type.`, { duration: 5000 });
       } else if (usesLineTax && newLines[targetIdx].issue === 'amount_unsupported') {
@@ -537,6 +571,7 @@ export default function InvoiceFormLightbox({ isOpen, onClose, onSaved, editId, 
               tax_rate: l.tax_rate,
               tax_amount: l.tax_amount,
               tax_type_label: l.tax_type_label,
+              tax_exempt: l.tax_exempt === true,
               total: l.total,
             }
           : {}),
@@ -658,6 +693,9 @@ export default function InvoiceFormLightbox({ isOpen, onClose, onSaved, editId, 
                     </select>
                   </div>
                   <p className="text-xs text-gray-500 mt-1">Select a saved customer or add a new one. Customer is required.</p>
+                  {!editId && customerTaxExempt && (
+                    <p className="text-xs text-amber-700 mt-1">This customer is tax exempt. Line tax will be $0 (Customer Exempt).</p>
+                  )}
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">{documentType === 'quotation' ? 'Quotation no.' : 'Invoice no.'}</label>
