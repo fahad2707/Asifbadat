@@ -4,7 +4,7 @@
   "description": "Backend API for Express Distributors",
   "main": "dist/server.js",
   "engines": {
-    "node": "20"
+    "node": "24.x"
   },
   "packageManager": "npm@10.9.2",
   "scripts": {
