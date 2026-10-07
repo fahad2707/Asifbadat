@@ -51,7 +51,7 @@ function createHrefIsActive(pathname: string | null | undefined, searchParams: {
   return [...params.entries()].every(([key, value]) => searchParams.get(key) === value);
 }
 
-function headerContextLabel(pathname: string | null | undefined, creatingInvoice = false, catalogTab = '', receivingPayment = false, adjustingStock = false): string {
+function headerContextLabel(pathname: string | null | undefined, creatingInvoice = false, catalogTab = '', receivingPayment = false, adjustingStock = false, countingStock = false): string {
   if (!pathname) return 'Express Distributors';
   if (pathname === '/admin/dashboard' || pathname.startsWith('/admin/dashboard/')) return 'Overview';
   if ((pathname === '/admin/invoices' || pathname.startsWith('/admin/invoices/')) && receivingPayment) return 'Receive payments';
@@ -61,6 +61,7 @@ function headerContextLabel(pathname: string | null | undefined, creatingInvoice
   if (pathname === '/admin/products/new') return 'Product';
   if (pathname === '/admin/products' || pathname.startsWith('/admin/products/')) return 'Products';
   if (pathname === '/admin/receipts' || pathname.startsWith('/admin/receipts/')) return 'Bank transactions';
+  if ((pathname === '/admin/inventory' || pathname.startsWith('/admin/inventory/')) && countingStock) return 'Physical count';
   if ((pathname === '/admin/inventory' || pathname.startsWith('/admin/inventory/')) && adjustingStock) return 'Stock adjustments';
   if (pathname === '/admin/inventory' || pathname.startsWith('/admin/inventory/')) return 'Inventory';
   if (pathname === '/admin/purchase-orders' || pathname.startsWith('/admin/purchase-orders/')) return 'Purchase order';
@@ -96,6 +97,7 @@ export default function AdminLayoutClient({ children }: { children: React.ReactN
   const creatingInvoice = searchParams.get('create') === 'invoice';
   const receivingPayment = searchParams.get('receive') === '1';
   const adjustingStock = searchParams.get('adjust') === '1';
+  const countingStock = searchParams.get('count') === '1';
   const [hasToken, setHasToken] = useState<boolean>(true);
 
   // Collapsible navigational groups
@@ -420,7 +422,8 @@ export default function AdminLayoutClient({ children }: { children: React.ReactN
             </button>
             {openGroups.inventory && (
               <div className="pl-2 mt-0.5 space-y-0.5">
-                <Link href="/admin/inventory" className={adminNavItemClass(pathMatches(pathname, '/admin/inventory') && !adjustingStock)}>Inventory</Link>
+                <Link href="/admin/inventory" className={adminNavItemClass(pathMatches(pathname, '/admin/inventory') && !adjustingStock && !countingStock)}>Inventory</Link>
+                <Link href="/admin/inventory?count=1" className={adminNavItemClass(countingStock)}>Physical count</Link>
                 <Link href="/admin/invoices?create=invoice" className={adminNavItemClass(creatingInvoice)}>Offline sales</Link>
                 <Link href="/admin/inventory?adjust=1" className={adminNavItemClass(adjustingStock)}>Stock adjustments</Link>
               </div>

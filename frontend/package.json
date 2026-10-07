@@ -13,7 +13,8 @@
     "start": "next start",
     "lint": "next lint",
     "test:dashboard": "tsx --test lib/dashboard-metrics.test.ts",
-    "test:customer-tally-ledger": "tsx --test lib/customerTallyLedger.test.ts"
+    "test:customer-tally-ledger": "tsx --test lib/customerTallyLedger.test.ts",
+    "test:physical-count": "tsx --test lib/physical-count.test.ts"
   },
   "dependencies": {
     "axios": "^1.6.2",

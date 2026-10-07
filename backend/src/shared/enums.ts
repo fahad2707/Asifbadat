@@ -100,5 +100,6 @@ export const StockMovementType = {
   CREDIT_MEMO: 'CREDIT_MEMO',
   SHIPMENT_OUT: 'SHIPMENT_OUT',
   SHIPMENT_IN: 'SHIPMENT_IN',
+  PHYSICAL_COUNT: 'PHYSICAL_COUNT',
 } as const;
 export type StockMovementType = (typeof StockMovementType)[keyof typeof StockMovementType];

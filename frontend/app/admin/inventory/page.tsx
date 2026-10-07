@@ -10,6 +10,7 @@ import { StockAttentionBanner } from '@/components/admin/StockAttentionBanner';
 import SearchableProductDropdown, { type ProductOption } from '@/components/admin/SearchableProductDropdown';
 import NumberInput from '@/components/admin/NumberInput';
 import { sellingBelowMin, minSellingPrice } from '@/lib/min-selling-price';
+import { formatStockDifference, physicalCountPreview } from '@/lib/physical-count';
 
 interface InventoryItem {
   id: string;
@@ -46,7 +47,30 @@ interface AdjustLine {
   selling_price: number | '';
 }
 
+interface CountLine {
+  product_id: string;
+  product_name: string;
+  sku?: string;
+  current_stock: number;
+  counted_quantity: number | '';
+}
+
+interface MovementRow {
+  id: string;
+  movement_type_label?: string;
+  movement_type?: string;
+  quantity_before?: number | null;
+  quantity_change: number;
+  quantity_after?: number | null;
+  reference_number?: string | null;
+  reason?: string | null;
+  notes?: string | null;
+  performed_by?: string | null;
+  created_at?: string;
+}
+
 const ADJUST_LINES = 12;
+const COUNT_LINES = 12;
 
 function emptyAdjustLine(): AdjustLine {
   return {
@@ -57,6 +81,16 @@ function emptyAdjustLine(): AdjustLine {
     quantity_change: 0,
     cost_price: '',
     selling_price: '',
+  };
+}
+
+function emptyCountLine(): CountLine {
+  return {
+    product_id: '',
+    product_name: '',
+    sku: '',
+    current_stock: 0,
+    counted_quantity: '',
   };
 }
 
@@ -97,6 +131,15 @@ function InventoryPageInner() {
   const [adjustNotes, setAdjustNotes] = useState('');
   const [adjustSaving, setAdjustSaving] = useState(false);
   const adjustScanRef = useRef<HTMLInputElement>(null);
+  const [showCountModal, setShowCountModal] = useState(false);
+  const [countLines, setCountLines] = useState<CountLine[]>(() => Array.from({ length: COUNT_LINES }, emptyCountLine));
+  const [countScan, setCountScan] = useState('');
+  const [countNotes, setCountNotes] = useState('');
+  const [countSaving, setCountSaving] = useState(false);
+  const countScanRef = useRef<HTMLInputElement>(null);
+  const [historyProduct, setHistoryProduct] = useState<InventoryItem | null>(null);
+  const [historyRows, setHistoryRows] = useState<MovementRow[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
   const [movementSummary, setMovementSummary] = useState<Record<string, { in: number; out: number }>>({});
   const [editing, setEditing] = useState<InventoryItem | null>(null);
   const [form, setForm] = useState({
@@ -188,8 +231,23 @@ function InventoryPageInner() {
     if (searchParams.get('adjust') === '1') router.replace('/admin/inventory');
   };
 
+  const openCount = () => {
+    setCountLines(Array.from({ length: COUNT_LINES }, emptyCountLine));
+    setCountScan('');
+    setCountNotes('');
+    setShowCountModal(true);
+    window.setTimeout(() => countScanRef.current?.focus(), 50);
+  };
+
+  const closeCount = () => {
+    if (countSaving) return;
+    setShowCountModal(false);
+    if (searchParams.get('count') === '1') router.replace('/admin/inventory');
+  };
+
   useEffect(() => {
-    if (searchParams.get('adjust') === '1') openAdjust();
+    if (searchParams.get('count') === '1') openCount();
+    else if (searchParams.get('adjust') === '1') openAdjust();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams]);
 
@@ -344,6 +402,129 @@ function InventoryPageInner() {
     });
   };
 
+  const addCountProduct = (product: { id: string; name: string; sku?: string; stock_quantity?: number }) => {
+    setCountLines((prev) => {
+      if (prev.some((l) => l.product_id === product.id)) return prev;
+      const emptyIdx = prev.findIndex((l) => !l.product_id);
+      const line: CountLine = {
+        product_id: product.id,
+        product_name: product.name,
+        sku: product.sku,
+        current_stock: product.stock_quantity ?? 0,
+        counted_quantity: '',
+      };
+      if (emptyIdx === -1) return [...prev, line];
+      const next = [...prev];
+      next[emptyIdx] = line;
+      return next;
+    });
+    setCountScan('');
+    window.setTimeout(() => countScanRef.current?.focus(), 0);
+  };
+
+  const selectCountLine = (index: number, product: ProductOption) => {
+    setCountLines((prev) => {
+      if (prev.some((l, i) => i !== index && l.product_id === product.id)) {
+        toast.error('That product is already on this count');
+        return prev;
+      }
+      const next = [...prev];
+      next[index] = {
+        product_id: product.id,
+        product_name: product.name,
+        sku: product.sku,
+        current_stock: product.stock_quantity ?? 0,
+        counted_quantity: next[index].counted_quantity,
+      };
+      return next;
+    });
+  };
+
+  const scanCountBarcode = (code: string) => {
+    const trimmed = code.trim();
+    if (!trimmed) return;
+    const listed = items.find(
+      (p) => p.sku === trimmed || p.id === trimmed || p.name.toLowerCase() === trimmed.toLowerCase()
+    );
+    if (listed) {
+      addCountProduct(listed);
+      return;
+    }
+    adminApi
+      .get(`/products/barcode/${encodeURIComponent(trimmed)}`)
+      .then((r) => {
+        const p = r.data;
+        if (p?.id) addCountProduct({ id: p.id, name: p.name, sku: p.sku, stock_quantity: p.stock_quantity });
+      })
+      .catch(() => toast.error('Product not found for this barcode/ID'));
+  };
+
+  const savePhysicalCount = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const valid = countLines.filter((l) => l.product_id && l.counted_quantity !== '');
+    if (valid.length === 0) {
+      toast.error('Enter a physical count for at least one product');
+      return;
+    }
+    for (const line of valid) {
+      const counted = Number(line.counted_quantity);
+      if (!Number.isInteger(counted) || counted < 0) {
+        toast.error(`"${line.product_name}" physical count must be a whole number 0 or greater`);
+        return;
+      }
+    }
+    setCountSaving(true);
+    try {
+      const res = await adminApi.post('/inventory/physical-count', {
+        lines: valid.map((l) => ({
+          product_id: l.product_id,
+          counted_quantity: Math.trunc(Number(l.counted_quantity)),
+          expected_current_quantity: l.current_stock,
+        })),
+        reason: 'PHYSICAL_COUNT',
+        notes: countNotes || undefined,
+      });
+      const changed = (res.data.lines || []).filter((row: { changed?: boolean }) => row.changed).length;
+      const ref = res.data.reference_number;
+      toast.success(
+        changed
+          ? `Physical count saved${ref ? ` · ${ref}` : ''} · ${changed} ${changed === 1 ? 'item' : 'items'} updated`
+          : 'Physical count matches system quantity. No stock change.'
+      );
+      fetchProducts();
+      fetchMovementSummary();
+      setShowCountModal(false);
+      if (searchParams.get('count') === '1') router.replace('/admin/inventory');
+    } catch (err: any) {
+      const data = err.response?.data;
+      if (err.response?.status === 409 && data?.code === 'STOCK_CONFLICT') {
+        toast.error(
+          data.product_name
+            ? `"${data.product_name}" is now ${data.actual_current_quantity} on hand (was ${data.expected_current_quantity}). Recount that line.`
+            : data.error || 'Stock changed since this count started.'
+        );
+      } else {
+        toast.error(data?.error || 'Failed to save physical count');
+      }
+    } finally {
+      setCountSaving(false);
+    }
+  };
+
+  const openHistory = async (item: InventoryItem) => {
+    setHistoryProduct(item);
+    setHistoryLoading(true);
+    setHistoryRows([]);
+    try {
+      const res = await adminApi.get(`/inventory/movements/${item.id}`, { params: { limit: 50 } });
+      setHistoryRows(res.data.movements || []);
+    } catch {
+      toast.error('Failed to load stock history');
+    } finally {
+      setHistoryLoading(false);
+    }
+  };
+
   const scanAdjustBarcode = (code: string) => {
     const trimmed = code.trim();
     if (!trimmed) return;
@@ -478,11 +659,18 @@ function InventoryPageInner() {
         <div className="flex items-center gap-2.5 flex-wrap">
           <button
             type="button"
-            onClick={openAdjust}
+            onClick={openCount}
             className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-teal-400 border border-teal-500/25 bg-teal-500/5 hover:bg-teal-500/10 font-bold text-xs transition-all"
           >
             <Package className="w-4 h-4" />
-            Stock Adjustments
+            Physical count
+          </button>
+          <button
+            type="button"
+            onClick={openAdjust}
+            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-slate-300 border border-white/10 bg-slate-950/40 hover:bg-white/5 font-bold text-xs transition-all"
+          >
+            Stock adjustments
           </button>
           <select value={filter} onChange={(e) => setFilter(e.target.value)} className="bg-slate-955/60 border border-white/10 rounded-xl px-3 py-2 text-xs text-slate-200 focus:outline-none focus:ring-1 focus:ring-teal-500">
             <option value="All">All Items</option>
@@ -545,6 +733,9 @@ function InventoryPageInner() {
                         </td>
                         <td className="py-3 px-4 text-right text-xs">
                           <div className="flex items-center justify-end gap-3">
+                            <button type="button" onClick={() => openHistory(p)} className="text-slate-400 hover:text-teal-350 hover:underline font-semibold">
+                              History
+                            </button>
                             <button type="button" onClick={() => openEdit(p)} className="text-teal-450 hover:text-teal-350 hover:underline font-semibold">
                               Edit
                             </button>
@@ -574,6 +765,20 @@ function InventoryPageInner() {
             </div>
             <form onSubmit={saveAdjustments} className="flex-1 min-h-0 flex flex-col">
               <div className="flex-1 overflow-y-auto p-4 space-y-4">
+                <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-950">
+                  This screen <span className="font-semibold">adds or subtracts</span> units (delta). To enter a warehouse total, use{' '}
+                  <button
+                    type="button"
+                    className="font-semibold text-[#0F9F8F] hover:underline"
+                    onClick={() => {
+                      closeAdjust();
+                      openCount();
+                    }}
+                  >
+                    Physical count
+                  </button>
+                  . Columns: current stock, adjustment qty (the change), new stock.
+                </div>
                 <div className="flex items-center gap-2">
                   <label className="block text-sm font-medium text-gray-700">Product or service</label>
                   <div className="flex-1 flex gap-2 items-center">
@@ -742,6 +947,211 @@ function InventoryPageInner() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {showCountModal && (
+        <div className="admin-lightbox fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50" onClick={closeCount}>
+          <div className="bg-white rounded-xl shadow-xl max-w-6xl w-full max-h-[90vh] overflow-hidden flex flex-col" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between p-4 border-b border-gray-200">
+              <div>
+                <h2 className="text-xl font-bold text-gray-900">Physical count</h2>
+                <p className="text-sm text-gray-500 mt-0.5">Enter the total units on the shelf. The system calculates the difference from current stock.</p>
+              </div>
+              <button type="button" onClick={closeCount} className="p-2 rounded-lg hover:bg-gray-100 text-gray-600" aria-label="Close">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <form onSubmit={savePhysicalCount} className="flex-1 min-h-0 flex flex-col">
+              <div className="flex-1 overflow-y-auto p-4 space-y-4">
+                <div className="flex items-center gap-2">
+                  <label className="block text-sm font-medium text-gray-700">Product</label>
+                  <div className="flex-1 flex gap-2 items-center">
+                    <input
+                      ref={countScanRef}
+                      type="text"
+                      value={countScan}
+                      onChange={(e) => setCountScan(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key !== 'Enter') return;
+                        e.preventDefault();
+                        scanCountBarcode(countScan);
+                      }}
+                      placeholder="Scan barcode / item ID and press Enter"
+                      className="flex-1 max-w-xs pl-3 py-1.5 border border-gray-300 rounded-lg text-sm"
+                    />
+                    <Link href="/admin/products/new" className="text-sm text-[#0F9F8F] font-medium hover:underline">+ Add product</Link>
+                  </div>
+                </div>
+                <div className="border border-gray-200 rounded-lg overflow-x-auto">
+                  <table className="w-full text-sm min-w-[920px]">
+                    <thead className="bg-gray-50">
+                      <tr>
+                        <th className="text-left py-3 px-4 w-10">#</th>
+                        <th className="text-left py-3 px-4 min-w-[240px]">Product</th>
+                        <th className="text-left py-3 px-4 min-w-[120px]">SKU</th>
+                        <th className="text-right py-3 px-4 w-36">Current system qty</th>
+                        <th className="text-right py-3 px-4 w-36">Physical count</th>
+                        <th className="text-right py-3 px-4 w-28">Difference</th>
+                        <th className="text-right py-3 px-4 w-36">New system qty</th>
+                        <th className="w-12 px-4" />
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {countLines.map((line, idx) => {
+                        const hasProduct = !!line.product_id;
+                        const preview = physicalCountPreview(line.current_stock, line.counted_quantity);
+                        return (
+                          <tr key={idx} className={`border-t border-gray-100 hover:bg-gray-50/50 ${hasProduct && preview.difference != null && preview.difference !== 0 ? 'bg-teal-50/40' : ''}`}>
+                            <td className="py-2 px-4">{idx + 1}</td>
+                            <td className="py-2 px-4">
+                              <SearchableProductDropdown
+                                products={productOptions}
+                                value={line.product_id}
+                                displayName={line.product_name || undefined}
+                                showPrice={false}
+                                onSelect={(p) => selectCountLine(idx, p)}
+                                onBarcodeScan={scanCountBarcode}
+                                placeholder="Search product or scan barcode…"
+                              />
+                            </td>
+                            <td className="py-2 px-4 text-gray-600">{hasProduct ? (line.sku || '—') : ''}</td>
+                            <td className="py-2 px-4 text-right text-gray-600 font-mono">{hasProduct ? line.current_stock : ''}</td>
+                            <td className="py-2 px-4 text-right">
+                              {hasProduct ? (
+                                <NumberInput
+                                  step={1}
+                                  showZero
+                                  min={0}
+                                  value={line.counted_quantity}
+                                  onValueChange={(n) => {
+                                    setCountLines((prev) => {
+                                      const next = [...prev];
+                                      next[idx] = { ...next[idx], counted_quantity: n === '' ? '' : Math.trunc(n) };
+                                      return next;
+                                    });
+                                  }}
+                                  className="w-24 text-right border border-gray-300 rounded-lg px-2 py-1.5 text-sm"
+                                  placeholder="Count"
+                                />
+                              ) : null}
+                            </td>
+                            <td className={`py-2 px-4 text-right font-mono font-semibold ${preview.difference == null ? 'text-gray-300' : preview.difference > 0 ? 'text-emerald-700' : preview.difference < 0 ? 'text-rose-600' : 'text-gray-500'}`}>
+                              {hasProduct && preview.difference != null ? formatStockDifference(preview.difference) : ''}
+                            </td>
+                            <td className="py-2 px-4 text-right font-mono font-semibold text-gray-900">
+                              {hasProduct && preview.newQty != null ? preview.newQty : ''}
+                            </td>
+                            <td className="py-2 px-4">
+                              {hasProduct && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setCountLines((prev) => {
+                                      const next = [...prev];
+                                      next[idx] = emptyCountLine();
+                                      return next;
+                                    });
+                                  }}
+                                  className="text-red-600 hover:bg-red-50 p-1 rounded"
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                </button>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+                <div className="flex items-center justify-between">
+                  <p className="text-xs text-gray-500">Physical count is the total on hand, not a plus/minus. Difference and new qty are previews; the server recalculates on save. All lines save together or none do.</p>
+                  <button
+                    type="button"
+                    onClick={() => setCountLines((prev) => [...prev, emptyCountLine()])}
+                    className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg border border-gray-300 text-xs font-medium text-gray-700 hover:bg-gray-50"
+                  >
+                    + Add line
+                  </button>
+                </div>
+                <div className="max-w-md">
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Notes (optional)</label>
+                  <input
+                    type="text"
+                    value={countNotes}
+                    onChange={(e) => setCountNotes(e.target.value)}
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                    placeholder="Warehouse recount"
+                  />
+                </div>
+              </div>
+              <div className="flex justify-end gap-2 p-4 border-t border-gray-200">
+                <button type="button" onClick={closeCount} className="px-4 py-2 text-gray-700 hover:bg-gray-100 rounded-lg">
+                  Cancel
+                </button>
+                <button type="submit" disabled={countSaving} className="px-4 py-2 bg-black text-white rounded-lg hover:bg-[#2C2C2C] disabled:opacity-50">
+                  {countSaving ? 'Saving…' : 'Save physical count'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {historyProduct && (
+        <div className="admin-lightbox fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50" onClick={() => setHistoryProduct(null)}>
+          <div className="bg-white rounded-xl shadow-xl max-w-4xl w-full max-h-[90vh] overflow-hidden flex flex-col" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between p-4 border-b border-gray-200">
+              <div>
+                <h2 className="text-xl font-bold text-gray-900">Stock history</h2>
+                <p className="text-sm text-gray-500 mt-0.5">{historyProduct.name}{historyProduct.sku ? ` · ${historyProduct.sku}` : ''}</p>
+              </div>
+              <button type="button" onClick={() => setHistoryProduct(null)} className="p-2 rounded-lg hover:bg-gray-100 text-gray-600" aria-label="Close">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="flex-1 overflow-y-auto p-4">
+              {historyLoading ? (
+                <div className="flex justify-center py-12">
+                  <div className="animate-spin rounded-full h-8 w-8 border-2 border-teal-500 border-t-transparent" />
+                </div>
+              ) : historyRows.length === 0 ? (
+                <p className="text-sm text-gray-500 py-8 text-center">No stock movements recorded for this product yet. Older invoice stock changes may not appear here.</p>
+              ) : (
+                <table className="w-full text-sm">
+                  <thead className="bg-gray-50">
+                    <tr>
+                      <th className="text-left py-2 px-3">Date/time</th>
+                      <th className="text-left py-2 px-3">Type</th>
+                      <th className="text-right py-2 px-3">Before</th>
+                      <th className="text-right py-2 px-3">Change</th>
+                      <th className="text-right py-2 px-3">After</th>
+                      <th className="text-left py-2 px-3">Reference</th>
+                      <th className="text-left py-2 px-3">Reason / notes</th>
+                      <th className="text-left py-2 px-3">User</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {historyRows.map((row) => (
+                      <tr key={row.id} className="border-t border-gray-100">
+                        <td className="py-2 px-3 whitespace-nowrap text-gray-600">
+                          {row.created_at ? new Date(row.created_at).toLocaleString() : '—'}
+                        </td>
+                        <td className="py-2 px-3">{row.movement_type_label || row.movement_type || '—'}</td>
+                        <td className="py-2 px-3 text-right font-mono">{row.quantity_before ?? '—'}</td>
+                        <td className="py-2 px-3 text-right font-mono">{formatStockDifference(Number(row.quantity_change) || 0)}</td>
+                        <td className="py-2 px-3 text-right font-mono">{row.quantity_after ?? '—'}</td>
+                        <td className="py-2 px-3 font-mono text-xs">{row.reference_number || '—'}</td>
+                        <td className="py-2 px-3 text-gray-600">{[row.reason, row.notes].filter(Boolean).join(' · ') || '—'}</td>
+                        <td className="py-2 px-3">{row.performed_by || '—'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
           </div>
         </div>
       )}
