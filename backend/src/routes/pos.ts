@@ -275,6 +275,7 @@ router.post('/sale', authenticateAdmin, async (req: AuthRequest, res) => {
           {
             invoice_number: invoiceNumber,
             invoice_type: sale_type,
+            source: 'POS',
             customer_name: customerName || undefined,
             customer_phone: customerPhone || undefined,
             customer_email: customerEmail || undefined,

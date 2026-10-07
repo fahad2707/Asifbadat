@@ -169,6 +169,7 @@ test('PUT delivered creates unpaid invoice then applies canonical payment', asyn
   assert.equal(res.body.status, 'delivered');
   assert.equal(created.length, 1);
   assert.equal(created[0].invoice_type, 'invoice');
+  assert.equal(created[0].source, 'ONLINE');
   assert.equal(created[0].amount_paid, 0);
   assert.equal(created[0].payment_status, 'unpaid');
   assert.equal(created[0].total_amount, 100);

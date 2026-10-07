@@ -241,6 +241,7 @@ router.put('/:id/status', authenticateAdmin, async (req: AuthRequest, res) => {
           amount_paid: 0,
           terms: 'Paid',
           payment_status: 'unpaid',
+          source: 'ONLINE',
           items: order.items.map((i: any) => ({
             product_id: i.product_id,
             product_name: i.product_name,

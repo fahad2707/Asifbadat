@@ -44,6 +44,8 @@ export interface IInvoice extends Document {
   payment_status: string;
   pdf_path?: string;
   email_sent: boolean;
+  /** Provenance of this row. Absent on historical documents. Never defaulted. */
+  source?: 'WHOLESALE' | 'ONLINE' | 'POS';
   items?: IInvoiceItem[];
   created_at: Date;
   updated_at: Date;
@@ -92,6 +94,7 @@ const InvoiceSchema = new Schema<IInvoice>(
     payment_status: { type: String, default: 'unpaid' },
     pdf_path: String,
     email_sent: { type: Boolean, default: false },
+    source: { type: String, enum: ['WHOLESALE', 'ONLINE', 'POS'] },
     items: [InvoiceItemSchema],
   },
   {

@@ -216,6 +216,7 @@ router.get('/', authenticateAdmin, async (req: AuthRequest, res) => {
           payment_status: state.payment_status,
           shipping_type: invoice.shipping_type,
           terms: invoice.terms,
+          source: invoice.source,
           ...quotationMark(invoice.shipping_type),
           invoice_date: invoice.invoice_date,
           due_date: invoice.due_date,
@@ -323,6 +324,7 @@ router.post('/', authenticateAdmin, async (req: AuthRequest, res) => {
       amount_paid: 0,
       terms: body.terms,
       payment_status: 'unpaid',
+      source: 'WHOLESALE',
       items,
     });
     // Task 05: only invoices deduct inventory. Quotations are proposals.
@@ -348,6 +350,7 @@ router.post('/', authenticateAdmin, async (req: AuthRequest, res) => {
       tax_amount: (doc as any).tax_amount,
       subtotal_amount: (doc as any).subtotal_amount,
       payment_status: (doc as any).payment_status,
+      source: (doc as any).source,
       items: (doc as any).items || items,
       created_at: (doc as any).created_at,
     });
@@ -418,6 +421,7 @@ router.get('/:id', authenticateAdmin, async (req: AuthRequest, res) => {
       payment_method: doc.payment_method,
       shipping_type: doc.shipping_type,
       payment_status: state.payment_status,
+      source: doc.source,
       ...quotationMark(doc.shipping_type),
       items: doc.items || [],
       created_at: doc.created_at,
@@ -631,6 +635,7 @@ router.post('/:id/convert', authenticateAdmin, async (req: AuthRequest, res) => 
       amount_paid: 0,
       terms: (quote as any).terms,
       payment_status: 'unpaid',
+      source: 'WHOLESALE',
       items,
     });
 
@@ -657,6 +662,7 @@ router.post('/:id/convert', authenticateAdmin, async (req: AuthRequest, res) => 
       quotation_number: (quote as any).invoice_number,
       total_amount: doc.total_amount,
       payment_status: doc.payment_status,
+      source: doc.source,
     });
   } catch (error) {
     if (error instanceof InvoiceLineTaxError) {

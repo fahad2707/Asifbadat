@@ -182,6 +182,7 @@ test('B — Invoice.create uses array form and the sale session', async () => {
   assert.equal(invoice.amount_paid, 100);
   assert.equal(invoice.payment_status, 'paid');
   assert.equal(invoice.invoice_type, 'pos');
+  assert.equal(invoice.source, 'POS');
 });
 
 test('C — POSSale.create uses array form, same session, and invoice_id from Invoice', async () => {
