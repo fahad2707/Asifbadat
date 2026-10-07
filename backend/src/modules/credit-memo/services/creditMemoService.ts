@@ -3,9 +3,21 @@ import CreditMemo from '../models/CreditMemo';
 import Product from '../../../models/Product';
 import Vendor from '../../../models/Vendor';
 import Customer from '../../../models/Customer';
-import StockMovement from '../../../models/StockMovement';
 import LedgerEntry from '../../../models/LedgerEntry';
 import { StockMovementType } from '../../../shared/enums';
+import { createStockMovement, StockMovementWriteError } from '../../../utils/createStockMovement';
+
+const CREDIT_MEMO_REFERENCE_TYPE = 'CreditMemo';
+
+export class CreditMemoInventoryError extends Error {
+  status: number;
+
+  constructor(message: string, status = 400) {
+    super(message);
+    this.name = 'CreditMemoInventoryError';
+    this.status = status;
+  }
+}
 
 function generateCreditMemoNumber(): string {
   return 'CM-' + Date.now().toString(36).toUpperCase() + '-' + Math.random().toString(36).substring(2, 6).toUpperCase();
@@ -100,35 +112,56 @@ async function postCustomerCreditMemoLedger(
 }
 
 /**
- * Increase stock and create stock movement (return inward)
+ * Apply signed inventory for a physical credit memo.
+ * Customer: +qty (return in). Vendor: -qty (return to supplier).
  */
 async function applyCreditMemoInventory(
-  items: { product_id: mongoose.Types.ObjectId; quantity: number; product_name?: string }[],
+  cm: {
+    type: 'VENDOR' | 'CUSTOMER';
+    credit_memo_number: string;
+    items: { product_id: mongoose.Types.ObjectId; quantity: number }[];
+  },
   referenceId: mongoose.Types.ObjectId,
   userId?: mongoose.Types.ObjectId,
   session?: mongoose.mongo.ClientSession
 ): Promise<void> {
-  for (const item of items) {
-    await Product.findByIdAndUpdate(item.product_id, { $inc: { stock_quantity: item.quantity } }, session ? { session } : {});
-    await StockMovement.create(
-      [
-        {
-          product_id: item.product_id,
-          movement_type: StockMovementType.CREDIT_MEMO,
-          quantity_change: item.quantity,
-          reference_type: 'CreditMemo',
-          reference_id: referenceId,
-          notes: 'Credit memo return',
-          admin_id: userId,
-        },
-      ],
-      session ? { session } : {}
+  for (const item of cm.items) {
+    const qty = Number(item.quantity);
+    const delta = cm.type === 'VENDOR' ? -qty : qty;
+    const updated = await Product.findOneAndUpdate(
+      { _id: item.product_id },
+      { $inc: { stock_quantity: delta } },
+      { session, new: true }
     );
+    if (!updated) {
+      throw new CreditMemoInventoryError('Product not found', 404);
+    }
+    const after = Number(updated.stock_quantity);
+    const before = after - delta;
+    try {
+      await createStockMovement({
+        session,
+        productId: item.product_id,
+        movementType: StockMovementType.CREDIT_MEMO,
+        quantityBefore: before,
+        quantityChange: delta,
+        quantityAfter: after,
+        referenceType: CREDIT_MEMO_REFERENCE_TYPE,
+        referenceId,
+        referenceNumber: cm.credit_memo_number,
+        adminId: userId,
+      });
+    } catch (error) {
+      if (error instanceof StockMovementWriteError) {
+        throw new CreditMemoInventoryError(error.message, error.status);
+      }
+      throw error;
+    }
   }
 }
 
 /**
- * Approve credit memo: post ledger, update AP/AR, optionally increase inventory.
+ * Approve credit memo: post ledger, update AP/AR, optionally apply signed inventory.
  * No hard delete after approval; only cancel (status = CANCELLED) allowed.
  */
 export async function approveCreditMemo(
@@ -189,7 +222,11 @@ export async function approveCreditMemo(
 
     if (cm.affects_inventory && cm.items && cm.items.length > 0) {
       await applyCreditMemoInventory(
-        cm.items.map((i) => ({ product_id: i.product_id, quantity: i.quantity, product_name: i.product_name })),
+        {
+          type: cm.type,
+          credit_memo_number: cm.credit_memo_number,
+          items: cm.items.map((i) => ({ product_id: i.product_id, quantity: i.quantity })),
+        },
         objId,
         adminId,
         session

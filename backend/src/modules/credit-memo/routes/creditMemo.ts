@@ -3,7 +3,7 @@ import mongoose from 'mongoose';
 import { z } from 'zod';
 import CreditMemo from '../models/CreditMemo';
 import { authenticateAdmin, AuthRequest } from '../../../middleware/auth';
-import { approveCreditMemo, cancelCreditMemo, generateCreditMemoNumber } from '../services/creditMemoService';
+import { approveCreditMemo, cancelCreditMemo, generateCreditMemoNumber, CreditMemoInventoryError } from '../services/creditMemoService';
 import { buildBusinessDocumentPdf } from '../../../utils/businessDocPdf';
 import { sendPdfResponse } from '../../../utils/pdfHelpers';
 
@@ -323,7 +323,10 @@ router.post('/:id/approve', authenticateAdmin, async (req: AuthRequest, res) => 
     const result = await approveCreditMemo(req.params.id, req.userId!);
     if (!result.success) return res.status(400).json({ error: result.error });
     res.json({ success: true, message: 'Credit memo approved' });
-  } catch (e) {
+  } catch (e: any) {
+    if (e instanceof CreditMemoInventoryError) {
+      return res.status(e.status).json({ error: e.message });
+    }
     console.error('Approve credit memo:', e);
     res.status(500).json({ error: 'Failed to approve credit memo' });
   }
@@ -350,6 +353,11 @@ router.delete('/:id', authenticateAdmin, async (req: AuthRequest, res) => {
     if (status === 'APPROVED' || status === 'ADJUSTED') {
       return res.status(400).json({
         error: `${cm.credit_memo_number || 'This credit memo'} is ${status.toLowerCase()} and cannot be deleted. Cancel it first, or export it instead.`,
+      });
+    }
+    if (status === 'CANCELLED' && cm.approved_at) {
+      return res.status(400).json({
+        error: `${cm.credit_memo_number || 'This credit memo'} was approved and cannot be deleted.`,
       });
     }
     await CreditMemo.deleteOne({ _id: cm._id });

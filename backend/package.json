@@ -40,6 +40,7 @@
     "test:physical-count": "tsx --test src/utils/physicalCount.test.ts src/utils/stockMovementDisplay.test.ts src/routes/physicalCount.test.ts",
     "test:stock-movement-write": "tsx --test src/utils/createStockMovement.test.ts",
     "test:po-receive": "tsx --test src/routes/purchaseOrderReceive.test.ts",
+    "test:credit-memo-inventory": "tsx --test src/modules/credit-memo/creditMemoInventory.test.ts",
     "test:pos-model-a": "tsx --test src/utils/posTender.test.ts src/utils/dashboardFinancial.test.ts src/routes/posSaleTender.test.ts src/routes/posSaleAtomicity.test.ts src/routes/posSaleStock.test.ts src/routes/posSaleUser.test.ts src/utils/posStock.test.ts src/utils/documentType.test.ts src/utils/posIdempotency.test.ts src/routes/posSaleIdempotency.test.ts src/routes/posInvoiceImmutability.test.ts src/routes/returnsDisabled.test.ts src/models/Return.test.ts src/utils/posReturnCalc.test.ts src/utils/posReturnQty.test.ts src/utils/posReturnWindow.test.ts src/routes/posReturnAtomicity.test.ts src/utils/posReturnSettlement.test.ts src/models/PosReturnSettlement.test.ts src/routes/posReturnSettlement.test.ts src/routes/posSaleCostBasis.test.ts src/utils/posFinancialReporting.test.ts"
   },
   "dependencies": {
