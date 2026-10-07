@@ -5,14 +5,12 @@ import fs from 'fs';
 import multer from 'multer';
 import PurchaseOrder from '../models/PurchaseOrder';
 import Product from '../models/Product';
-import StockMovement from '../models/StockMovement';
 import Vendor from '../models/Vendor';
 import { authenticateAdmin, AuthRequest } from '../middleware/auth';
 import { buildBusinessDocumentPdf } from '../utils/businessDocPdf';
 import { sendPdfResponse } from '../utils/pdfHelpers';
 import { z } from 'zod';
-import { postVendorLedger } from '../modules/vendors/services/vendorLedgerService';
-import { LedgerReferenceType } from '../shared/enums';
+import { receivePurchaseOrder, PurchaseOrderReceiveError } from '../services/purchaseOrderReceiveService';
 
 const router = express.Router();
 
@@ -430,47 +428,17 @@ router.post('/:id/receive', authenticateAdmin, async (req: AuthRequest, res) => 
         })
       ),
     });
-    const { items: receivedItems } = schema.parse(req.body);
-    const po = await PurchaseOrder.findById(req.params.id);
-    if (!po) return res.status(404).json({ error: 'Purchase order not found' });
-    if (po.status === 'cancelled') return res.status(400).json({ error: 'PO is cancelled' });
-
-    for (const rec of receivedItems) {
-      const recId = String(rec.product_id);
-      const line = po.items.find((i: any) => poLineProductId(i) === recId);
-      if (!line) continue;
-      const qty = Math.min(rec.quantity_received, line.quantity_ordered - line.quantity_received);
-      if (qty <= 0) continue;
-      line.quantity_received += qty;
-      await Product.findByIdAndUpdate(recId, { $inc: { stock_quantity: qty } });
-      await StockMovement.create({
-        product_id: recId,
-        movement_type: 'purchase',
-        quantity_change: qty,
-        reference_type: 'purchase_order',
-        reference_id: po._id,
-        admin_id: req.userId,
-      });
-    }
-    const allReceived = po.items.every((i: any) => i.quantity_received >= i.quantity_ordered);
-    po.status = allReceived ? 'received' : 'partial';
-    if (allReceived) po.received_at = new Date();
-    await po.save();
-
-    // Post vendor ledger on full receive: DR VENDOR (increase payable), CR PURCHASE
-    if (allReceived && po.total_amount > 0) {
-      await postVendorLedger(
-        po.vendor_id,
-        [
-          { account_type: 'VENDOR', debit: po.total_amount, credit: 0, reference_type: LedgerReferenceType.PURCHASE_ORDER, reference_id: po._id, description: `PO ${po.po_number} received` },
-          { account_type: 'PURCHASE', debit: 0, credit: po.total_amount, reference_type: LedgerReferenceType.PURCHASE_ORDER, reference_id: po._id, description: `PO ${po.po_number}` },
-        ],
-        req.userId ? new mongoose.Types.ObjectId(req.userId) : undefined
-      );
-    }
-
-    res.json({ id: po._id.toString(), status: po.status, items: po.items });
+    const { items } = schema.parse(req.body);
+    const result = await receivePurchaseOrder({
+      poId: String(req.params.id),
+      items,
+      adminId: req.userId,
+    });
+    res.json(result);
   } catch (error: any) {
+    if (error instanceof PurchaseOrderReceiveError) {
+      return res.status(error.status).json(error.body);
+    }
     if (error instanceof z.ZodError) return res.status(400).json({ error: error.errors[0].message });
     console.error('Receive PO error:', error);
     res.status(500).json({ error: 'Failed to receive PO' });
