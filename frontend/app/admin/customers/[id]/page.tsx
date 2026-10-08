@@ -70,6 +70,9 @@ interface Customer {
   credit_limit?: number;
   outstanding_balance?: number;
   created_at?: string;
+  account_status?: 'pending' | 'approved' | null;
+  user_id?: string | null;
+  is_active?: boolean;
 }
 
 
@@ -271,6 +274,32 @@ export default function Customer360Page() {
                 />
               </div>
               {headerMeta && <p className="text-xs text-slate-500 mt-1">{headerMeta}</p>}
+              <div className="flex items-center gap-2 mt-3 flex-wrap">
+                {customer.account_status === 'approved' ? (
+                  <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wide bg-teal-500/15 text-teal-300">Online approved</span>
+                ) : (
+                  <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wide bg-slate-800 text-slate-400">Online pending</span>
+                )}
+                {customer.is_active === false && (
+                  <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wide bg-rose-500/15 text-rose-300">CRM inactive</span>
+                )}
+                <button
+                  type="button"
+                  className={glassButtonClass}
+                  onClick={async () => {
+                    const next = customer.account_status === 'approved' ? 'pending' : 'approved';
+                    try {
+                      await adminApi.put(`/customers/${id}/account-status`, { account_status: next });
+                      setCustomer((prev) => (prev ? { ...prev, account_status: next } : prev));
+                      toast.success(next === 'approved' ? 'Customer approved for online ordering' : 'Online access revoked');
+                    } catch (err: any) {
+                      toast.error(err.response?.data?.error || 'Failed to update approval');
+                    }
+                  }}
+                >
+                  {customer.account_status === 'approved' ? 'Revoke online access' : 'Approve for online ordering'}
+                </button>
+              </div>
               
               {/* Action shortcuts */}
               <div className="flex items-center gap-3 mt-4 text-[11px] text-slate-400">

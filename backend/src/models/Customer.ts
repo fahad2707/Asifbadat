@@ -26,6 +26,8 @@ export interface ICustomer extends Document {
   notes?: string;
   documents?: ICustomerDocument[]; // PDF, JPG etc. for admin reference
   user_id?: mongoose.Types.ObjectId; // Link to User if has online account
+  /** Online-account approval. Missing on historical rows means not approved. Independent of is_active. */
+  account_status?: 'pending' | 'approved';
   is_active: boolean;
   created_at: Date;
   updated_at: Date;
@@ -58,6 +60,7 @@ const CustomerSchema = new Schema<ICustomer>(
     notes: String,
     documents: [CustomerDocumentSchema],
     user_id: { type: Schema.Types.ObjectId, ref: 'User' },
+    account_status: { type: String, enum: ['pending', 'approved'] },
     is_active: { type: Boolean, default: true },
   },
   { timestamps: { createdAt: 'created_at', updatedAt: 'updated_at' } }
@@ -65,6 +68,7 @@ const CustomerSchema = new Schema<ICustomer>(
 
 CustomerSchema.index({ phone: 1 });
 CustomerSchema.index({ email: 1 });
+CustomerSchema.index({ user_id: 1 }, { unique: true, sparse: true });
 // customer_code already has unique: true in schema, no need for duplicate index
 CustomerSchema.index({ name: 'text', company: 'text' });
 

@@ -31,6 +31,9 @@ interface Customer {
   credit_limit?: number;
   notes?: string;
   documents?: CustomerDoc[];
+  account_status?: 'pending' | 'approved' | null;
+  user_id?: string | null;
+  is_active?: boolean;
 }
 
 interface InvoiceSummary {
@@ -242,6 +245,19 @@ export default function CustomersPage() {
     else setSelectedIds(new Set(customers.map((c) => c.id)));
   };
 
+  const updateAccountStatus = async (customerId: string, account_status: 'pending' | 'approved') => {
+    try {
+      await adminApi.put(`/customers/${customerId}/account-status`, { account_status });
+      toast.success(account_status === 'approved' ? 'Customer approved for online ordering' : 'Online access revoked');
+      fetchCustomers();
+      if (detailCustomer?.id === customerId) {
+        await refreshDetailCustomer(customerId);
+      }
+    } catch (err: any) {
+      toast.error(err.response?.data?.error || 'Failed to update approval');
+    }
+  };
+
   const handleBulkDelete = async () => {
     if (selectedIds.size === 0) return;
     if (!confirm(`Deactivate ${selectedIds.size} selected customer(s)?`)) return;
@@ -446,6 +462,7 @@ export default function CustomersPage() {
                   <th className="text-left py-3.5 px-4 font-bold tracking-wider uppercase text-[10px]">NAME</th>
                   <th className="text-left py-3.5 px-4 font-bold tracking-wider uppercase text-[10px]">COMPANY NAME</th>
                   <th className="text-left py-3.5 px-4 font-bold tracking-wider uppercase text-[10px]">PHONE</th>
+                  <th className="text-left py-3.5 px-4 font-bold tracking-wider uppercase text-[10px]">ONLINE ACCESS</th>
                   <th className="text-right py-3.5 px-4 font-bold tracking-wider uppercase text-[10px]">OPEN BALANCE</th>
                   <th className="text-right py-3.5 px-4 font-bold tracking-wider uppercase text-[10px]">ACTION</th>
                 </tr>
@@ -467,6 +484,13 @@ export default function CustomersPage() {
                       </td>
                       <td className="py-3 px-4 text-slate-300 font-semibold">{c.company || '—'}</td>
                       <td className="py-3 px-4 text-slate-400 font-medium">{c.phone}</td>
+                      <td className="py-3 px-4">
+                        {c.account_status === 'approved' ? (
+                          <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wide bg-teal-500/15 text-teal-300">Approved</span>
+                        ) : (
+                          <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wide bg-slate-800 text-slate-400">Pending</span>
+                        )}
+                      </td>
                       <td className="py-3 px-4 text-right font-bold text-slate-200">${openBal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
                       <td className="py-3 px-4 text-right" onClick={(e) => e.stopPropagation()}>
                         <div className="relative inline-block">
@@ -524,6 +548,15 @@ export default function CustomersPage() {
               <button type="button" onClick={(e) => { e.stopPropagation(); openEdit(c); closeDropdown(); }} className="w-full text-left px-4 py-2.5 text-slate-200 hover:bg-white/5 transition-colors">
                 Edit customer info
               </button>
+              {c.account_status === 'approved' ? (
+                <button type="button" onClick={(e) => { e.stopPropagation(); updateAccountStatus(c.id, 'pending'); closeDropdown(); }} className="w-full text-left px-4 py-2.5 text-slate-200 hover:bg-white/5 transition-colors">
+                  Revoke online access
+                </button>
+              ) : (
+                <button type="button" onClick={(e) => { e.stopPropagation(); updateAccountStatus(c.id, 'approved'); closeDropdown(); }} className="w-full text-left px-4 py-2.5 text-slate-200 hover:bg-white/5 transition-colors">
+                  Approve for online ordering
+                </button>
+              )}
             </div>
           </>,
           document.body

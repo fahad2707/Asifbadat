@@ -3,8 +3,10 @@ import jwt from 'jsonwebtoken';
 import { z } from 'zod';
 import crypto from 'crypto';
 import User from '../models/User';
+import Customer from '../models/Customer';
 import Admin from '../models/Admin';
 import bcrypt from 'bcryptjs';
+import { linkOrCreateCustomerForNewUser } from '../utils/customerAccount';
 import { isSmtpConfigured, sendVerificationEmail, sendPasswordResetEmail } from '../utils/mail';
 import { logSecurityEvent } from '../utils/securityLog';
 import {
@@ -143,11 +145,33 @@ router.post('/register', registerLimiter, async (req, res) => {
       email_verification_expires: verifyExp,
     });
 
+    let link: Awaited<ReturnType<typeof linkOrCreateCustomerForNewUser>> = {
+      action: 'unlinked',
+      customerId: null,
+    };
+    try {
+      link = await linkOrCreateCustomerForNewUser({
+        userId: user._id,
+        name,
+        email,
+        phone,
+      });
+    } catch (linkErr) {
+      console.error('Register customer link error:', linkErr);
+      await User.findByIdAndDelete(user._id);
+      return res.status(500).json({ error: 'Registration failed' });
+    }
+
     if (needsEmailVerify && plainVerifyToken && email) {
       try {
         await sendVerificationEmail(email, plainVerifyToken);
       } catch (e) {
         console.error('Verification email failed:', e);
+        if (link.action === 'created') {
+          await Customer.deleteOne({ user_id: user._id });
+        } else if (link.action === 'linked') {
+          await Customer.updateOne({ user_id: user._id }, { $unset: { user_id: 1 } });
+        }
         await User.findByIdAndDelete(user._id);
         return res.status(500).json({ error: 'Could not send verification email' });
       }

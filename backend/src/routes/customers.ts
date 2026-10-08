@@ -6,7 +6,20 @@ import Customer from '../models/Customer';
 import Invoice from '../models/Invoice';
 import { authenticateAdmin, AuthRequest } from '../middleware/auth';
 import { derivedUnpaidReceivableMatch } from '../utils/invoiceFinancialState';
+import {
+  ACCOUNT_STATUS_APPROVED,
+  ACCOUNT_STATUS_PENDING,
+  accountStatusFromDocument,
+} from '../utils/customerAccount';
 import { z } from 'zod';
+
+function customerAccountFields(c: { account_status?: unknown; user_id?: unknown; is_active?: unknown }) {
+  return {
+    account_status: accountStatusFromDocument(c.account_status),
+    user_id: c.user_id ? String(c.user_id) : null,
+    is_active: c.is_active !== false,
+  };
+}
 
 const router = express.Router();
 
@@ -82,7 +95,7 @@ router.get('/', authenticateAdmin, async (req: AuthRequest, res) => {
         credit_limit: c.credit_limit,
         notes: c.notes,
         documents: c.documents || [],
-        is_active: c.is_active,
+        ...customerAccountFields(c),
         created_at: c.created_at,
       })),
       pagination: { page: Number(page), limit: Number(limit), total, totalPages: Math.ceil(total / Number(limit)) },
@@ -137,7 +150,7 @@ router.get('/:id', authenticateAdmin, async (req: AuthRequest, res) => {
       credit_limit: c.credit_limit,
       notes: c.notes,
       documents: c.documents || [],
-      is_active: c.is_active,
+      ...customerAccountFields(c),
       created_at: c.created_at,
     });
   } catch (error) {
@@ -169,6 +182,7 @@ router.post('/', authenticateAdmin, async (req: AuthRequest, res) => {
     const createData: any = { ...data };
     if (data.email === '') createData.email = undefined;
     if (!createData.customer_code) createData.customer_code = await generateCustomerCode();
+    createData.account_status = ACCOUNT_STATUS_PENDING;
     const customer = await Customer.create(createData);
     res.status(201).json({
       id: customer._id.toString(),
@@ -219,14 +233,37 @@ router.put('/:id', authenticateAdmin, async (req: AuthRequest, res) => {
       notes: z.string().optional(),
       is_active: z.boolean().optional(),
     });
+    // account_status is omitted from this schema so PUT cannot approve/revoke.
     const data = schema.parse(req.body);
     const customer = await Customer.findByIdAndUpdate(req.params.id, data, { new: true });
     if (!customer) return res.status(404).json({ error: 'Customer not found' });
-    res.json({ id: customer._id.toString(), ...customer.toObject() });
+    res.json({ id: customer._id.toString(), ...customer.toObject(), ...customerAccountFields(customer) });
   } catch (error: any) {
     if (error instanceof z.ZodError) return res.status(400).json({ error: error.errors[0].message });
     console.error('Update customer error:', error);
     res.status(500).json({ error: 'Failed to update customer' });
+  }
+});
+
+// Online-account approval. Not writable via PUT /:id or client body flags.
+router.put('/:id/account-status', authenticateAdmin, async (req: AuthRequest, res) => {
+  try {
+    const schema = z.object({
+      account_status: z.enum([ACCOUNT_STATUS_PENDING, ACCOUNT_STATUS_APPROVED]),
+    });
+    const { account_status } = schema.parse(req.body);
+    const customer = await Customer.findById(req.params.id);
+    if (!customer) return res.status(404).json({ error: 'Customer not found' });
+    customer.account_status = account_status;
+    await customer.save();
+    res.json({
+      id: customer._id.toString(),
+      ...customerAccountFields(customer),
+    });
+  } catch (error: any) {
+    if (error instanceof z.ZodError) return res.status(400).json({ error: error.errors[0].message });
+    console.error('Update customer account status error:', error);
+    res.status(500).json({ error: 'Failed to update account status' });
   }
 });
 
