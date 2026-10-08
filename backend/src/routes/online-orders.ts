@@ -96,6 +96,17 @@ async function getNextOrderNumber(): Promise<string> {
   return `WEB-${String(next).padStart(4, '0')}`;
 }
 
+/** Phase 2M-A — adjacency-only OnlineOrder status machine (backend-enforced). */
+const ONLINE_ORDER_ALLOWED_TRANSITIONS: Record<string, readonly string[]> = {
+  confirmed: ['packed', 'cancelled'],
+  packed: ['dispatched', 'cancelled'],
+  dispatched: ['delivered', 'cancelled'],
+};
+
+function isAllowedOnlineOrderTransition(from: string, to: string): boolean {
+  return (ONLINE_ORDER_ALLOWED_TRANSITIONS[from] || []).includes(to);
+}
+
 // Approved storefront User only. Guest / unapproved / admin JWT cannot create OnlineOrders.
 router.post('/', onlineCheckoutLimiter, authenticateUser, async (req: AuthRequest, res) => {
   try {
@@ -357,15 +368,25 @@ router.put('/:id/status', authenticateAdmin, async (req: AuthRequest, res) => {
     const order = await OnlineOrder.findById(req.params.id);
     if (!order) return res.status(404).json({ error: 'Order not found' });
 
-    if (order.status === 'delivered') {
+    const fromStatus = String(order.status || '');
+
+    if (fromStatus === 'delivered') {
       return res.status(400).json({ error: 'Delivered orders cannot be modified' });
     }
-    if (order.status === 'cancelled') {
+    if (fromStatus === 'cancelled') {
       return res.status(400).json({ error: 'Cancelled orders cannot be modified' });
+    }
+
+    if (!isAllowedOnlineOrderTransition(fromStatus, status)) {
+      return res.status(400).json({
+        error: `Invalid status transition from ${fromStatus} to ${status}`,
+      });
     }
 
     // Delivered: invoice + payment stay outside Mongo txn (paymentApplication has no session).
     // Stock decrement + SALE movement + delivered claim commit together or roll back together.
+    // Claim requires status === 'dispatched' so a concurrent cancel cannot be overwritten later,
+    // and a cancel-first race causes claim failure → existing compensation.
     if (status === 'delivered') {
       const invoiceNumber = `INV-WEB-${order.order_number.replace('WEB-', '')}`;
       const LOCATION_OF_SALE = '511 W Germantown Pike, Plymouth Meeting, PA 19462-1303';
@@ -434,7 +455,7 @@ router.put('/:id/status', authenticateAdmin, async (req: AuthRequest, res) => {
           const claimed = await OnlineOrder.findOneAndUpdate(
             {
               _id: order._id,
-              status: { $nin: ['delivered', 'cancelled'] },
+              status: 'dispatched',
             },
             {
               $set: setFields,
@@ -443,7 +464,10 @@ router.put('/:id/status', authenticateAdmin, async (req: AuthRequest, res) => {
             { session, new: true }
           );
           if (!claimed) {
-            throw Object.assign(new Error('Delivered orders cannot be modified'), { status: 400 });
+            throw Object.assign(
+              new Error('Order is no longer dispatched; delivery claim failed'),
+              { status: 400 }
+            );
           }
 
           const qtyByProduct = aggregateDeliveryInventoryQuantities(order.items as DeliveryLine[]);
@@ -538,7 +562,9 @@ router.put('/:id/status', authenticateAdmin, async (req: AuthRequest, res) => {
           return res.status(deliveryErr.status).json({ error: deliveryErr.message });
         }
         if (deliveryErr?.status === 400) {
-          return res.status(400).json({ error: deliveryErr.message || 'Delivered orders cannot be modified' });
+          return res.status(400).json({
+            error: deliveryErr.message || 'Order is no longer dispatched; delivery claim failed',
+          });
         }
         console.error('Delivery inventory transaction error:', deliveryErr);
         return res.status(500).json({ error: 'Failed to update status' });
@@ -547,11 +573,22 @@ router.put('/:id/status', authenticateAdmin, async (req: AuthRequest, res) => {
       return res.json({ message: 'Order marked as delivered', status: 'delivered' });
     }
 
-    order.status = status;
-    order.status_history.push({ status, timestamp: new Date() } as any);
+    // Non-delivery transitions: conditional claim only — never stale document.save().
+    const updated = await OnlineOrder.findOneAndUpdate(
+      { _id: order._id, status: fromStatus },
+      {
+        $set: { status },
+        $push: { status_history: { status, timestamp: new Date() } },
+      },
+      { new: true }
+    );
+    if (!updated) {
+      return res.status(400).json({
+        error: `Order status changed; cannot transition from ${fromStatus} to ${status}`,
+      });
+    }
 
-    await order.save();
-    res.json({ message: `Order marked as ${status}`, status: order.status });
+    res.json({ message: `Order marked as ${status}`, status: updated.status });
   } catch (error) {
     console.error('Update order status error:', error);
     res.status(500).json({ error: 'Failed to update status' });

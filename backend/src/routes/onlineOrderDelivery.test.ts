@@ -171,6 +171,16 @@ function stubDeliveryTxn(opts: {
     if (opts.claimFails) return null;
     if (opts.claimFailsAfterFirst && claimCount.n > 1) return null;
     if (opts.order.status === 'delivered' || opts.order.status === 'cancelled') return null;
+    // Honor conditional status claim (2M-A: status must be 'dispatched' for delivery).
+    if (typeof filter.status === 'string' && opts.order.status !== filter.status) return null;
+    if (
+      filter.status &&
+      typeof filter.status === 'object' &&
+      Array.isArray((filter.status as { $nin?: string[] }).$nin) &&
+      (filter.status as { $nin: string[] }).$nin.includes(opts.order.status)
+    ) {
+      return null;
+    }
     Object.assign(opts.order, update.$set || {});
     if (update.$push && (update.$push as { status_history?: unknown }).status_history) {
       opts.order.status_history.push((update.$push as { status_history: { status: string; timestamp: Date } }).status_history);
@@ -389,11 +399,24 @@ test('PUT delivered rolls back new invoice when payment application fails', asyn
 test('PUT packed does not create an invoice or apply payment', async () => {
   assertNoMongoConnection();
 
-  const { order, state } = makeOrder({ status: 'confirmed', payment_status: 'pending' });
+  const { order } = makeOrder({ status: 'confirmed', payment_status: 'pending' });
   let created = false;
   let applied = false;
+  let claimed = false;
 
   mock.method(OnlineOrder, 'findById', async () => order);
+  mock.method(OnlineOrder, 'findOneAndUpdate', async (filter: Record<string, unknown>, update: Record<string, unknown>) => {
+    claimed = true;
+    assert.equal(filter.status, 'confirmed');
+    assert.equal((update.$set as { status?: string }).status, 'packed');
+    order.status = 'packed';
+    if (update.$push && (update.$push as { status_history?: unknown }).status_history) {
+      order.status_history.push(
+        (update.$push as { status_history: { status: string; timestamp: Date } }).status_history
+      );
+    }
+    return order;
+  });
   mock.method(Invoice, 'create', async () => {
     created = true;
     throw new Error('Invoice.create must not run for non-delivered status');
@@ -413,9 +436,9 @@ test('PUT packed does not create an invoice or apply payment', async () => {
   assert.equal(res.body.status, 'packed');
   assert.equal(created, false);
   assert.equal(applied, false);
+  assert.equal(claimed, true);
   assert.equal(order.status, 'packed');
   assert.equal(order.invoice_id, undefined);
-  assert.equal(state.saved, true);
 });
 
 // --- Phase 2H inventory cases ---
@@ -594,7 +617,10 @@ test('G — claim failure after payment compensates accounting and returns 400',
 
   const res = await putStatus(ORDER_ID, 'delivered');
   assert.equal(res.status, 400);
-  assert.match(String(res.body.error), /Delivered orders cannot be modified/i);
+  assert.match(
+    String(res.body.error),
+    /no longer dispatched|delivery claim failed|Delivered orders cannot be modified/i
+  );
   assert.equal(h.stock[PRODUCT_A], 10);
   assert.equal(h.movements.length, 0);
   assert.equal(h.productUpdates.length, 0);

@@ -247,11 +247,18 @@ test('16 — admin OnlineOrder status endpoint remains functional', async () => 
     order_number: 'WEB-0001',
     status: 'confirmed',
     status_history: [] as Array<{ status: string; timestamp: Date }>,
-    save: async function save() {
-      return this;
-    },
   };
   mock.method(OnlineOrder, 'findById', async () => order);
+  mock.method(OnlineOrder, 'findOneAndUpdate', async (filter: Record<string, unknown>, update: Record<string, unknown>) => {
+    assert.equal(filter.status, 'confirmed');
+    Object.assign(order, update.$set || {});
+    if (update.$push && (update.$push as { status_history?: unknown }).status_history) {
+      order.status_history.push(
+        (update.$push as { status_history: { status: string; timestamp: Date } }).status_history
+      );
+    }
+    return order;
+  });
 
   const res = await request(createApp())
     .put(`/api/online-orders/${ORDER_ID}/status`)
