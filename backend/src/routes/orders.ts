@@ -2,9 +2,6 @@ import express from 'express';
 import Order from '../models/Order';
 import OrderItem from '../models/OrderItem';
 import OrderStatusHistory from '../models/OrderStatusHistory';
-import Product from '../models/Product';
-import StockMovement from '../models/StockMovement';
-import User from '../models/User';
 import { authenticateUser, authenticateAdmin, AuthRequest } from '../middleware/auth';
 import { z } from 'zod';
 import Stripe from 'stripe';
@@ -12,126 +9,16 @@ import Stripe from 'stripe';
 const router = express.Router();
 const stripe = process.env.STRIPE_SECRET_KEY ? new Stripe(process.env.STRIPE_SECRET_KEY, { apiVersion: '2023-10-16' }) : null;
 
-// Generate order number
-const generateOrderNumber = () => {
-  return `ORD-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
-};
-
-// Create order
-router.post('/', authenticateUser, async (req: AuthRequest, res) => {
-  try {
-    const schema = z.object({
-      items: z.array(
-        z.object({
-          product_id: z.string(),
-          quantity: z.number().int().positive(),
-        })
-      ),
-      payment_intent_id: z.string().optional(),
-    });
-
-    const { items, payment_intent_id } = schema.parse(req.body);
-    const userId = req.userId!;
-
-    // Calculate total and validate stock
-    let totalAmount = 0;
-    const orderItems: any[] = [];
-
-    for (const item of items) {
-      const product = await Product.findById(item.product_id);
-
-      if (!product || !product.is_active) {
-        return res.status(404).json({ error: `Product not found` });
-      }
-
-      const isInventory = (product as any).product_type !== 'non_inventory' && (product as any).product_type !== 'service';
-      if (isInventory) {
-        const onHand = product.stock_quantity ?? 0;
-        const committed = (product as any).committed_quantity ?? 0;
-        const available = onHand - committed;
-        if (available < item.quantity) {
-          return res.status(400).json({
-            error: `Insufficient stock for ${product.name}. Available: ${available}`,
-          });
-        }
-      }
-
-      const subtotal = product.price * item.quantity;
-      totalAmount += subtotal;
-
-      orderItems.push({
-        product,
-        quantity: item.quantity,
-        price: product.price,
-        subtotal,
-        isInventory,
-      });
-    }
-
-    // Create order
-    const orderNumber = generateOrderNumber();
-    const order = await Order.create({
-      order_number: orderNumber,
-      user_id: userId,
-      total_amount: totalAmount,
-      payment_intent_id: payment_intent_id || undefined,
-      payment_status: payment_intent_id ? 'paid' : 'pending',
-      status: 'placed',
-    });
-
-    // Award loyalty points (1 point per $1 spent)
-    const pointsEarned = Math.floor(totalAmount);
-    if (pointsEarned > 0) {
-      await User.findByIdAndUpdate(userId, {
-        $inc: { 
-          loyalty_points: pointsEarned,
-          total_spent: totalAmount,
-        },
-      });
-    }
-
-    // Create order items and update stock (inventory products only)
-    for (const item of orderItems) {
-      await OrderItem.create({
-        order_id: order._id,
-        product_id: item.product._id,
-        quantity: item.quantity,
-        price: item.price,
-        subtotal: item.subtotal,
-      });
-
-      if (item.isInventory) {
-        await Product.findByIdAndUpdate(item.product._id, {
-          $inc: { stock_quantity: -item.quantity },
-        });
-        await StockMovement.create({
-          product_id: item.product._id,
-          movement_type: 'sale',
-          quantity_change: -item.quantity,
-          reference_type: 'order',
-          reference_id: order._id,
-        });
-      }
-    }
-
-    // Create initial status history
-    await OrderStatusHistory.create({
-      order_id: order._id,
-      status: 'placed',
-      notes: 'Order placed successfully',
-    });
-
-    res.status(201).json({
-      id: order._id.toString(),
-      ...order.toObject(),
-    });
-  } catch (error: any) {
-    if (error instanceof z.ZodError) {
-      return res.status(400).json({ error: error.errors[0].message });
-    }
-    console.error('Create order error:', error);
-    res.status(500).json({ error: 'Failed to create order' });
-  }
+/**
+ * Phase 2N — legacy POST /api/orders create path is retired.
+ * Live checkout uses POST /api/online-orders (inventory at delivery).
+ * Do not recreate the unsafe stock writer here.
+ */
+router.post('/', authenticateUser, (_req: AuthRequest, res) => {
+  return res.status(410).json({
+    error:
+      'Legacy order creation is no longer supported. Use POST /api/online-orders for storefront checkout.',
+  });
 });
 
 // Get user's orders
