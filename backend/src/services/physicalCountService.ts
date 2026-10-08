@@ -2,6 +2,7 @@ import mongoose from 'mongoose';
 import Product from '../models/Product';
 import StockMovement from '../models/StockMovement';
 import { StockMovementType } from '../shared/enums';
+import { createStockMovement, StockMovementWriteError } from '../utils/createStockMovement';
 import {
   PHYSICAL_COUNT_REASON,
   PHYSICAL_COUNT_REFERENCE_TYPE,
@@ -149,23 +150,26 @@ export async function applyPhysicalCount(opts: {
       }
 
       const after = Number(updated.stock_quantity);
-      await StockMovement.create(
-        [
-          {
-            product_id: row.product_id,
-            movement_type: StockMovementType.PHYSICAL_COUNT,
-            quantity_change: row.delta,
-            quantity_before: row.current,
-            quantity_after: after,
-            reference_type: PHYSICAL_COUNT_REFERENCE_TYPE,
-            reference_number: reference_number || undefined,
-            reason,
-            notes,
-            admin_id: adminId,
-          },
-        ],
-        { session }
-      );
+      try {
+        await createStockMovement({
+          session,
+          productId: row.product_id,
+          movementType: StockMovementType.PHYSICAL_COUNT,
+          quantityBefore: row.current,
+          quantityChange: row.delta,
+          quantityAfter: after,
+          referenceType: PHYSICAL_COUNT_REFERENCE_TYPE,
+          referenceNumber: reference_number || undefined,
+          reason,
+          notes,
+          adminId,
+        });
+      } catch (error) {
+        if (error instanceof StockMovementWriteError) {
+          throw new PhysicalCountError(error.status, { error: error.message });
+        }
+        throw error;
+      }
 
       results.push({
         product_id: String(row.product_id),

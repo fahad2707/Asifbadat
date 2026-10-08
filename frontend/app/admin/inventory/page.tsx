@@ -503,6 +503,8 @@ function InventoryPageInner() {
             ? `"${data.product_name}" is now ${data.actual_current_quantity} on hand (was ${data.expected_current_quantity}). Recount that line.`
             : data.error || 'Stock changed since this count started.'
         );
+      } else if (data?.code === 'MONGO_REPLICA_SET_REQUIRED') {
+        toast.error(data.error || 'MongoDB must run as a replica set for physical count.');
       } else {
         toast.error(data?.error || 'Failed to save physical count');
       }

@@ -234,6 +234,14 @@ router.post('/physical-count', authenticateAdmin, async (req: AuthRequest, res) 
     }
     if (error instanceof z.ZodError) return res.status(400).json({ error: error.errors[0].message });
     console.error('Physical count error:', error);
+    const msg = String(error?.message || '');
+    if (/Transaction numbers are only allowed on a replica set/i.test(msg)) {
+      return res.status(503).json({
+        error:
+          'Physical count needs MongoDB transactions. Start mongod as a replica set (e.g. replSetName: rs0) and run rs.initiate().',
+        code: 'MONGO_REPLICA_SET_REQUIRED',
+      });
+    }
     res.status(500).json({ error: 'Failed to record physical count' });
   }
 });
