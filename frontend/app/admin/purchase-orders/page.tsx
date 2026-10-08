@@ -12,6 +12,7 @@ import NumberInput from '@/components/admin/NumberInput';
 import { adminUi } from '@/lib/admin-ui';
 import { exportPurchaseOrdersToExcel } from '@/lib/export-purchase-orders-excel';
 import PurchaseOrderDrawer from '@/components/admin/PurchaseOrderDrawer';
+import { toastBarcodeNotFound, toastProductAdded } from '@/lib/barcode-feedback';
 
 interface POItem {
   product_id: string;
@@ -90,6 +91,7 @@ export default function PurchaseOrdersPage() {
   const [detailId, setDetailId] = useState<string | null>(null);
   const [uploadingVendorInvoice, setUploadingVendorInvoice] = useState(false);
   const [savingPo, setSavingPo] = useState(false);
+  const receiveInFlightRef = useRef(false);
   const vendorInvoiceInputRef = useRef<HTMLInputElement>(null);
 
   const fetchPOs = async () => {
@@ -327,6 +329,8 @@ export default function PurchaseOrdersPage() {
   };
 
   const receivePoStock = async (po: PurchaseOrder) => {
+    if (receiveInFlightRef.current) return;
+    receiveInFlightRef.current = true;
     try {
       const res = await adminApi.get(`/purchase-orders/${po.id}`);
       const items = (res.data.items || [])
@@ -340,12 +344,28 @@ export default function PurchaseOrdersPage() {
         toast.error('Nothing left to receive');
         return;
       }
-      if (!confirm(`Mark remaining stock as received for ${po.po_number}? Inventory will increase.`)) return;
+      const totalRemaining = items.reduce(
+        (sum: number, i: { quantity_received: number }) => sum + i.quantity_received,
+        0
+      );
+      if (
+        !confirm(
+          `Receive All Remaining on PO ${po.po_number}?\n\n` +
+            `This will receive all remaining quantities on PO #${po.po_number}.\n` +
+            `Line items with remaining qty: ${items.length}\n` +
+            `Total remaining quantity: ${totalRemaining}\n\n` +
+            `This action will increase inventory.`
+        )
+      ) {
+        return;
+      }
       await adminApi.post(`/purchase-orders/${po.id}/receive`, { items });
-      toast.success('Stock received and inventory updated');
+      toast.success('All remaining quantities received · inventory updated');
       fetchPOs();
     } catch (err: any) {
       toast.error(err.response?.data?.error || 'Failed to receive stock');
+    } finally {
+      receiveInFlightRef.current = false;
     }
   };
 
@@ -518,7 +538,7 @@ export default function PurchaseOrdersPage() {
                             </button>
                             {(po.status === 'draft' || po.status === 'sent' || po.status === 'partial') && (
                               <button type="button" onClick={() => receivePoStock(po)} className="text-[#0077C5] hover:underline font-medium">
-                                Receive
+                                Receive All Remaining
                               </button>
                             )}
                             {(po.status === 'draft' || po.status === 'cancelled' || po.status === 'sent') && (
@@ -646,6 +666,60 @@ export default function PurchaseOrdersPage() {
                                   value={r.product_id}
                                   displayName={r.product_name || undefined}
                                   onSelect={(p) => updateRow(idx, 'product_id', p.id)}
+                                  onBarcodeScan={(code) => {
+                                    adminApi
+                                      .get(`/products/barcode/${encodeURIComponent(code)}`)
+                                      .then((res) => {
+                                        const p = res.data;
+                                        const id = p?.id || p?._id?.toString?.();
+                                        if (!id) throw new Error('missing id');
+                                        const name = p.name || 'Product';
+                                        const cost = p.cost_price ?? 0;
+                                        const category = p.category_name || '';
+                                        setProducts((prev) =>
+                                          prev.some((x) => x.id === id)
+                                            ? prev
+                                            : [
+                                                ...prev,
+                                                {
+                                                  id,
+                                                  name,
+                                                  cost_price: cost,
+                                                  category_name: category,
+                                                  sku: p.sku,
+                                                },
+                                              ]
+                                        );
+                                        let addedNew = false;
+                                        setRows((prev) => {
+                                          const next = [...prev];
+                                          const current = next[idx];
+                                          if (!current) return prev;
+                                          const existingIdx = next.findIndex(
+                                            (row, i) => i !== idx && row.product_id === id
+                                          );
+                                          if (existingIdx !== -1) {
+                                            next[existingIdx] = {
+                                              ...next[existingIdx],
+                                              qty: next[existingIdx].qty + (current.qty || 1),
+                                            };
+                                            next.splice(idx, 1);
+                                            return next;
+                                          }
+                                          addedNew = true;
+                                          next[idx] = {
+                                            ...current,
+                                            product_id: id,
+                                            product_name: name,
+                                            category_name: category,
+                                            unit_cost: cost,
+                                          };
+                                          return next;
+                                        });
+                                        if (addedNew) toastProductAdded(name);
+                                      })
+                                      .catch(() => toastBarcodeNotFound());
+                                  }}
                                   placeholder="Search product or scan barcode…"
                                   showPrice={false}
                                 />

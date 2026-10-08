@@ -8,6 +8,7 @@ import { adminUi } from '@/lib/admin-ui';
 import NumberInput from '@/components/admin/NumberInput';
 import SearchableProductDropdown, { type ProductOption } from '@/components/admin/SearchableProductDropdown';
 import ShipmentDrawer from '@/components/admin/ShipmentDrawer';
+import { toastBarcodeNotFound, toastProductAdded } from '@/lib/barcode-feedback';
 
 interface ShipmentRow {
   id: string;
@@ -525,8 +526,9 @@ export default function ShipmentsPage() {
                                     product_id: id,
                                     product_name: p.name || '',
                                   });
+                                  toastProductAdded(p.name || 'item');
                                 })
-                                .catch(() => toast.error('Product not found for this barcode'));
+                                .catch(() => toastBarcodeNotFound());
                             }}
                           />
                         </td>

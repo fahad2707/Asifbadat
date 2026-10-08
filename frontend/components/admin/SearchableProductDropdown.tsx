@@ -81,12 +81,14 @@ export default function SearchableProductDropdown({
           p.name.toLowerCase() === code.toLowerCase(),
       );
       if (exact) {
+        // Ordinary Enter selection — no "Product added" toast (cannot distinguish scan vs typed).
         onSelect(exact);
         setSearch('');
         setOpen(false);
         return;
       }
       if (onBarcodeScan) {
+        // Unknown-to-list Enter: parent barcode path owns success/error feedback.
         onBarcodeScan(code);
         setSearch('');
         setOpen(false);

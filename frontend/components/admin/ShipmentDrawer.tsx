@@ -299,14 +299,14 @@ export default function ShipmentDrawer({
                   onClick={() => {
                     if (
                       !confirm(
-                        `Mark return ${shipment.shipment_number} as received at warehouse?\n\nInventory will update per backend rules.`
+                        `Mark Return Received for GROUND_RG shipment ${shipment.shipment_number}?\n\nThis records warehouse receipt of the return. Inventory will update via the shipment return endpoint (not a separate stock adjustment).`
                       )
                     ) {
                       return;
                     }
                     runAction(async () => {
                       await adminApi.post(`/shipments/${shipment.id}/mark-return-received`, {});
-                    }, 'Return received');
+                    }, `Return received · ${shipment.shipment_number}`);
                   }}
                 >
                   {acting ? 'Marking received…' : 'Mark Return Received'}

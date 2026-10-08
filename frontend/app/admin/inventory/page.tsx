@@ -11,6 +11,7 @@ import SearchableProductDropdown, { type ProductOption } from '@/components/admi
 import NumberInput from '@/components/admin/NumberInput';
 import { sellingBelowMin, minSellingPrice } from '@/lib/min-selling-price';
 import { formatStockDifference, physicalCountPreview } from '@/lib/physical-count';
+import { toastBarcodeNotFound, toastProductAdded } from '@/lib/barcode-feedback';
 
 interface InventoryItem {
   id: string;
@@ -59,14 +60,47 @@ interface MovementRow {
   id: string;
   movement_type_label?: string;
   movement_type?: string;
+  movement_type_canonical?: string;
   quantity_before?: number | null;
   quantity_change: number;
   quantity_after?: number | null;
+  reference_type?: string | null;
   reference_number?: string | null;
   reason?: string | null;
   notes?: string | null;
   performed_by?: string | null;
   created_at?: string;
+}
+
+const MOVEMENT_TYPE_FALLBACK: Record<string, string> = {
+  PURCHASE: 'Purchase',
+  SALE: 'Sale',
+  RETURN_IN: 'Return in',
+  RETURN_OUT: 'Return out',
+  CREDIT_MEMO: 'Credit memo',
+  SHIPMENT_IN: 'Shipment in',
+  SHIPMENT_OUT: 'Shipment out',
+  PHYSICAL_COUNT: 'Physical count',
+  ADJUSTMENT: 'Adjustment',
+};
+
+function movementTypeLabel(row: MovementRow): string {
+  // Opening stock is recorded as ADJUSTMENT + reference_type "opening" (see openingStockMovement.ts).
+  if (String(row.reference_type || '').toLowerCase() === 'opening') return 'Opening';
+  if (row.movement_type_label) return row.movement_type_label;
+  const key = String(row.movement_type_canonical || row.movement_type || '');
+  if (MOVEMENT_TYPE_FALLBACK[key]) return MOVEMENT_TYPE_FALLBACK[key];
+  if (!key) return '—';
+  return key.replace(/_/g, ' ');
+}
+
+function movementReferenceLabel(row: MovementRow): string {
+  const num = row.reference_number?.trim();
+  const type = row.reference_type?.trim();
+  if (num && type) return `${type.replace(/_/g, ' ')} · ${num}`;
+  if (num) return num;
+  if (type) return type.replace(/_/g, ' ');
+  return '—';
 }
 
 const ADJUST_LINES = 12;
@@ -130,16 +164,19 @@ function InventoryPageInner() {
   const [adjustScan, setAdjustScan] = useState('');
   const [adjustNotes, setAdjustNotes] = useState('');
   const [adjustSaving, setAdjustSaving] = useState(false);
+  const adjustSavingRef = useRef(false);
   const adjustScanRef = useRef<HTMLInputElement>(null);
   const [showCountModal, setShowCountModal] = useState(false);
   const [countLines, setCountLines] = useState<CountLine[]>(() => Array.from({ length: COUNT_LINES }, emptyCountLine));
   const [countScan, setCountScan] = useState('');
   const [countNotes, setCountNotes] = useState('');
   const [countSaving, setCountSaving] = useState(false);
+  const countSavingRef = useRef(false);
   const countScanRef = useRef<HTMLInputElement>(null);
   const [historyProduct, setHistoryProduct] = useState<InventoryItem | null>(null);
   const [historyRows, setHistoryRows] = useState<MovementRow[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyTypeFilter, setHistoryTypeFilter] = useState('');
   const [movementSummary, setMovementSummary] = useState<Record<string, { in: number; out: number }>>({});
   const [editing, setEditing] = useState<InventoryItem | null>(null);
   const [form, setForm] = useState({
@@ -349,6 +386,7 @@ function InventoryPageInner() {
     cost_price?: number;
     price?: number;
   }) => {
+    let addedNew = false;
     setAdjustLines((prev) => {
       const existingIdx = prev.findIndex((l) => l.product_id === product.id);
       if (existingIdx !== -1) {
@@ -360,6 +398,7 @@ function InventoryPageInner() {
         };
         return next;
       }
+      addedNew = true;
       const emptyIdx = prev.findIndex((l) => !l.product_id);
       const line: AdjustLine = {
         product_id: product.id,
@@ -374,6 +413,7 @@ function InventoryPageInner() {
       next[emptyIdx] = line;
       return next;
     });
+    if (addedNew) toastProductAdded(product.name);
     setAdjustScan('');
     window.setTimeout(() => adjustScanRef.current?.focus(), 0);
   };
@@ -403,8 +443,12 @@ function InventoryPageInner() {
   };
 
   const addCountProduct = (product: { id: string; name: string; sku?: string; stock_quantity?: number }) => {
+    const outcome = { kind: 'added' as 'duplicate' | 'added' };
     setCountLines((prev) => {
-      if (prev.some((l) => l.product_id === product.id)) return prev;
+      if (prev.some((l) => l.product_id === product.id)) {
+        outcome.kind = 'duplicate';
+        return prev;
+      }
       const emptyIdx = prev.findIndex((l) => !l.product_id);
       const line: CountLine = {
         product_id: product.id,
@@ -418,6 +462,8 @@ function InventoryPageInner() {
       next[emptyIdx] = line;
       return next;
     });
+    if (outcome.kind === 'duplicate') toast.error('That product is already on this count');
+    else toastProductAdded(product.name);
     setCountScan('');
     window.setTimeout(() => countScanRef.current?.focus(), 0);
   };
@@ -456,11 +502,12 @@ function InventoryPageInner() {
         const p = r.data;
         if (p?.id) addCountProduct({ id: p.id, name: p.name, sku: p.sku, stock_quantity: p.stock_quantity });
       })
-      .catch(() => toast.error('Product not found for this barcode/ID'));
+      .catch(() => toastBarcodeNotFound());
   };
 
   const savePhysicalCount = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (countSavingRef.current) return;
     const valid = countLines.filter((l) => l.product_id && l.counted_quantity !== '');
     if (valid.length === 0) {
       toast.error('Enter a physical count for at least one product');
@@ -473,6 +520,30 @@ function InventoryPageInner() {
         return;
       }
     }
+    const previewLines = valid.map((line) => {
+      const counted = Number(line.counted_quantity);
+      const current = Number(line.current_stock) || 0;
+      const preview = physicalCountPreview(current, counted);
+      const adjustment = preview.difference ?? 0;
+      return { name: line.product_name, current, counted, adjustment, newStock: preview.newQty ?? counted };
+    });
+    const changing = previewLines.filter((l) => l.adjustment !== 0);
+    const summary = previewLines
+      .slice(0, 8)
+      .map(
+        (l) =>
+          `${l.name}: Current: ${l.current} · Counted: ${l.counted} · Adjustment: ${formatStockDifference(l.adjustment)} · New stock: ${l.newStock}`
+      )
+      .join('\n');
+    const more = previewLines.length > 8 ? `\n…and ${previewLines.length - 8} more line(s)` : '';
+    const outcomeNote =
+      changing.length === 0
+        ? 'All counted quantities match current stock. No stock quantity will change.'
+        : 'This will change stock for lines where counted differs from current.';
+    if (!confirm(`Confirm physical count?\n\n${summary}${more}\n\n${outcomeNote}`)) {
+      return;
+    }
+    countSavingRef.current = true;
     setCountSaving(true);
     try {
       const res = await adminApi.post('/inventory/physical-count', {
@@ -509,6 +580,7 @@ function InventoryPageInner() {
         toast.error(data?.error || 'Failed to save physical count');
       }
     } finally {
+      countSavingRef.current = false;
       setCountSaving(false);
     }
   };
@@ -517,6 +589,7 @@ function InventoryPageInner() {
     setHistoryProduct(item);
     setHistoryLoading(true);
     setHistoryRows([]);
+    setHistoryTypeFilter('');
     try {
       const res = await adminApi.get(`/inventory/movements/${item.id}`, { params: { limit: 50 } });
       setHistoryRows(res.data.movements || []);
@@ -552,11 +625,12 @@ function InventoryPageInner() {
           });
         }
       })
-      .catch(() => toast.error('Product not found for this barcode/ID'));
+      .catch(() => toastBarcodeNotFound());
   };
 
   const saveAdjustments = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (adjustSavingRef.current) return;
     const valid = adjustLines.filter(
       (l) => l.product_id && (l.quantity_change !== 0 || l.cost_price !== '' || l.selling_price !== '')
     );
@@ -574,31 +648,57 @@ function InventoryPageInner() {
         return;
       }
     }
+    const stockLines = valid.filter((l) => Math.trunc(Number(l.quantity_change) || 0) !== 0);
+    if (stockLines.length > 0) {
+      const summary = stockLines
+        .slice(0, 8)
+        .map((l) => {
+          const delta = Math.trunc(Number(l.quantity_change) || 0);
+          const current = Number(l.current_stock) || 0;
+          const next = current + delta;
+          return `${l.product_name}: Current: ${current} · Adjustment: ${formatStockDifference(delta)} · New stock: ${next}`;
+        })
+        .join('\n');
+      const more = stockLines.length > 8 ? `\n…and ${stockLines.length - 8} more line(s)` : '';
+      const reason = adjustNotes.trim() ? `\nReason: ${adjustNotes.trim()}` : '';
+      if (
+        !confirm(
+          `Confirm stock adjustment?\n\n${summary}${more}${reason}\n\nThis will change inventory.`
+        )
+      ) {
+        return;
+      }
+    }
+    adjustSavingRef.current = true;
     setAdjustSaving(true);
     let ok = 0;
     const failures: string[] = [];
-    for (const line of valid) {
-      try {
-        const payload: {
-          product_id: string;
-          quantity_change: number;
-          notes?: string;
-          cost_price?: number;
-          price?: number;
-        } = {
-          product_id: line.product_id,
-          quantity_change: Math.trunc(Number(line.quantity_change) || 0),
-          notes: adjustNotes || undefined,
-        };
-        if (line.cost_price !== '') payload.cost_price = Number(line.cost_price);
-        if (line.selling_price !== '') payload.price = Number(line.selling_price);
-        await adminApi.post('/inventory/adjust', payload);
-        ok += 1;
-      } catch (err: any) {
-        failures.push(err.response?.data?.error || `Could not adjust ${line.product_name}`);
+    try {
+      for (const line of valid) {
+        try {
+          const payload: {
+            product_id: string;
+            quantity_change: number;
+            notes?: string;
+            cost_price?: number;
+            price?: number;
+          } = {
+            product_id: line.product_id,
+            quantity_change: Math.trunc(Number(line.quantity_change) || 0),
+            notes: adjustNotes || undefined,
+          };
+          if (line.cost_price !== '') payload.cost_price = Number(line.cost_price);
+          if (line.selling_price !== '') payload.price = Number(line.selling_price);
+          await adminApi.post('/inventory/adjust', payload);
+          ok += 1;
+        } catch (err: any) {
+          failures.push(err.response?.data?.error || `Could not adjust ${line.product_name}`);
+        }
       }
+    } finally {
+      adjustSavingRef.current = false;
+      setAdjustSaving(false);
     }
-    setAdjustSaving(false);
     if (ok) {
       toast.success(`Adjusted ${ok} ${ok === 1 ? 'product' : 'products'}`);
       fetchProducts();
@@ -628,7 +728,9 @@ function InventoryPageInner() {
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
           <h1 className="text-2xl font-semibold text-[#0F172A] tracking-tight">Inventory management</h1>
-          <p className="text-xs text-slate-400 mt-1">Track units purchased versus units sold, control buffer stock margins, and log adjustments.</p>
+          <p className="text-xs text-slate-400 mt-1">
+            Inbound/outbound columns are stock movement aggregates (not PO or invoice accounting totals). Control buffer levels and log adjustments here.
+          </p>
         </div>
       </div>
 
@@ -694,8 +796,8 @@ function InventoryPageInner() {
                   <th className="text-left py-3.5 px-4 text-[10px] font-bold uppercase tracking-wider">Category</th>
                   <th className="text-left py-3.5 px-4 text-[10px] font-bold uppercase tracking-wider">Subcategory</th>
                   <th className="text-left py-3.5 px-4 text-[10px] font-bold uppercase tracking-wider">Item Name</th>
-                  <th className="text-right py-3.5 px-4 text-[10px] font-bold uppercase tracking-wider">QTY Purchased</th>
-                  <th className="text-right py-3.5 px-4 text-[10px] font-bold uppercase tracking-wider">QTY Sold</th>
+                  <th className="text-right py-3.5 px-4 text-[10px] font-bold uppercase tracking-wider" title="Sum of positive stock movements">Inbound movements</th>
+                  <th className="text-right py-3.5 px-4 text-[10px] font-bold uppercase tracking-wider" title="Sum of negative stock movements (absolute)">Outbound movements</th>
                   <th className="text-right py-3.5 px-4 text-[10px] font-bold uppercase tracking-wider">Remaining Stock</th>
                   <th className="text-right py-3.5 px-4 text-[10px] font-bold uppercase tracking-wider">Buffer Level</th>
                   <th className="text-center py-3.5 px-4 text-[10px] font-bold uppercase tracking-wider">Reorder status</th>
@@ -1109,19 +1211,62 @@ function InventoryPageInner() {
               <div>
                 <h2 className="text-xl font-bold text-gray-900">Stock history</h2>
                 <p className="text-sm text-gray-500 mt-0.5">{historyProduct.name}{historyProduct.sku ? ` · ${historyProduct.sku}` : ''}</p>
+                <p className="text-xs text-gray-400 mt-1">
+                  Positive change increases stock; negative decreases it. Labels come from recorded movement types.
+                </p>
               </div>
               <button type="button" onClick={() => setHistoryProduct(null)} className="p-2 rounded-lg hover:bg-gray-100 text-gray-600" aria-label="Close">
                 <X className="w-5 h-5" />
               </button>
             </div>
-            <div className="flex-1 overflow-y-auto p-4">
+            <div className="flex-1 overflow-y-auto p-4 space-y-3">
+              {!historyLoading && historyRows.length > 0 && (
+                <div className="flex flex-wrap items-center gap-2">
+                  <label className="text-xs font-medium text-gray-600">Filter type</label>
+                  <select
+                    value={historyTypeFilter}
+                    onChange={(e) => setHistoryTypeFilter(e.target.value)}
+                    className="border border-gray-300 rounded-lg px-2 py-1.5 text-sm"
+                  >
+                    <option value="">All types</option>
+                    {Array.from(
+                      new Set(
+                        historyRows.map((r) => movementTypeLabel(r)).filter((l) => l && l !== '—')
+                      )
+                    )
+                      .sort()
+                      .map((label) => (
+                        <option key={label} value={label}>
+                          {label}
+                        </option>
+                      ))}
+                  </select>
+                </div>
+              )}
               {historyLoading ? (
                 <div className="flex justify-center py-12">
                   <div className="animate-spin rounded-full h-8 w-8 border-2 border-teal-500 border-t-transparent" />
                 </div>
               ) : historyRows.length === 0 ? (
-                <p className="text-sm text-gray-500 py-8 text-center">No stock movements recorded for this product yet. Older invoice stock changes may not appear here.</p>
+                <div className="py-10 text-center space-y-1">
+                  <p className="text-sm font-medium text-gray-700">No stock movements yet</p>
+                  <p className="text-sm text-gray-500">
+                    Purchases, sales, returns, counts, and adjustments for this product will appear here once recorded.
+                  </p>
+                </div>
               ) : (
+                (() => {
+                  const filteredHistory = historyTypeFilter
+                    ? historyRows.filter((row) => movementTypeLabel(row) === historyTypeFilter)
+                    : historyRows;
+                  if (filteredHistory.length === 0) {
+                    return (
+                      <p className="text-sm text-gray-500 py-8 text-center">
+                        No movements match this type filter.
+                      </p>
+                    );
+                  }
+                  return (
                 <table className="w-full text-sm">
                   <thead className="bg-gray-50">
                     <tr>
@@ -1136,22 +1281,41 @@ function InventoryPageInner() {
                     </tr>
                   </thead>
                   <tbody>
-                    {historyRows.map((row) => (
+                    {filteredHistory.map((row) => {
+                      const delta = Number(row.quantity_change) || 0;
+                      return (
                       <tr key={row.id} className="border-t border-gray-100">
                         <td className="py-2 px-3 whitespace-nowrap text-gray-600">
-                          {row.created_at ? new Date(row.created_at).toLocaleString() : '—'}
+                          {row.created_at
+                            ? new Date(row.created_at).toLocaleString(undefined, {
+                                year: 'numeric',
+                                month: 'short',
+                                day: 'numeric',
+                                hour: '2-digit',
+                                minute: '2-digit',
+                              })
+                            : '—'}
                         </td>
-                        <td className="py-2 px-3">{row.movement_type_label || row.movement_type || '—'}</td>
+                        <td className="py-2 px-3">{movementTypeLabel(row)}</td>
                         <td className="py-2 px-3 text-right font-mono">{row.quantity_before ?? '—'}</td>
-                        <td className="py-2 px-3 text-right font-mono">{formatStockDifference(Number(row.quantity_change) || 0)}</td>
+                        <td
+                          className={`py-2 px-3 text-right font-mono font-semibold ${
+                            delta > 0 ? 'text-emerald-700' : delta < 0 ? 'text-rose-700' : 'text-gray-700'
+                          }`}
+                        >
+                          {formatStockDifference(delta)}
+                        </td>
                         <td className="py-2 px-3 text-right font-mono">{row.quantity_after ?? '—'}</td>
-                        <td className="py-2 px-3 font-mono text-xs">{row.reference_number || '—'}</td>
+                        <td className="py-2 px-3 text-xs">{movementReferenceLabel(row)}</td>
                         <td className="py-2 px-3 text-gray-600">{[row.reason, row.notes].filter(Boolean).join(' · ') || '—'}</td>
                         <td className="py-2 px-3">{row.performed_by || '—'}</td>
                       </tr>
-                    ))}
+                      );
+                    })}
                   </tbody>
                 </table>
+                  );
+                })()
               )}
             </div>
           </div>

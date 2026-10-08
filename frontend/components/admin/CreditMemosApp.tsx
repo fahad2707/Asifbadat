@@ -10,6 +10,7 @@ import SearchableProductDropdown from '@/components/admin/SearchableProductDropd
 import NumberInput from '@/components/admin/NumberInput';
 import { adminUi } from '@/lib/admin-ui';
 import { exportCreditMemosToExcel } from '@/lib/export-credit-memos-excel';
+import { toastBarcodeNotFound, toastProductAdded } from '@/lib/barcode-feedback';
 
 import CreditMemoDrawer from '@/components/admin/CreditMemoDrawer';
 
@@ -642,6 +643,49 @@ export default function CreditMemosApp({ lockedType }: { lockedType: 'VENDOR' | 
                                   value={line.product_id}
                                   displayName={line.product_name || undefined}
                                   onSelect={(p) => updateLine(idx, 'product_id', p.id)}
+                                  onBarcodeScan={(code) => {
+                                    adminApi
+                                      .get(`/products/barcode/${encodeURIComponent(code)}`)
+                                      .then((res) => {
+                                        const p = res.data;
+                                        const id = p?.id || p?._id?.toString?.();
+                                        if (!id) throw new Error('missing id');
+                                        const name = p.name || 'Product';
+                                        const price = p.price ?? 0;
+                                        setProducts((prev) =>
+                                          prev.some((x) => x.id === id)
+                                            ? prev
+                                            : [...prev, { id, name, price, sku: p.sku }]
+                                        );
+                                        let addedNew = false;
+                                        setForm((f) => {
+                                          const items = [...f.items];
+                                          if (!items[idx]) return f;
+                                          const existingIdx = items.findIndex(
+                                            (l, i) => i !== idx && l.product_id === id
+                                          );
+                                          if (existingIdx !== -1) {
+                                            items[existingIdx] = {
+                                              ...items[existingIdx],
+                                              quantity:
+                                                items[existingIdx].quantity + (items[idx].quantity || 1),
+                                            };
+                                            items[idx] = emptyLine();
+                                          } else {
+                                            addedNew = true;
+                                            items[idx] = {
+                                              ...items[idx],
+                                              product_id: id,
+                                              product_name: name,
+                                              unit_price: price,
+                                            };
+                                          }
+                                          return { ...f, items };
+                                        });
+                                        if (addedNew) toastProductAdded(name);
+                                      })
+                                      .catch(() => toastBarcodeNotFound());
+                                  }}
                                   placeholder="Search product or scan barcode…"
                                 />
                               </td>

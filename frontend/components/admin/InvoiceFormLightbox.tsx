@@ -18,6 +18,7 @@ import {
   type InvoiceLineTaxState,
 } from '@/lib/tax-type';
 import { minSellingPrice, sellingBelowMin } from '@/lib/min-selling-price';
+import { toastBarcodeNotFound, toastProductAdded } from '@/lib/barcode-feedback';
 
 const LOCATION_OF_SALE = '511 W Germantown Pike, Plymouth Meeting, PA 19462-1303';
 const INITIAL_LINES = 15;
@@ -470,6 +471,7 @@ export default function InvoiceFormLightbox({ isOpen, onClose, onSaved, editId, 
       .then((r) => {
         const p = r.data;
         if (p && p.id) {
+          const alreadyOnForm = lines.some((l) => l.product_id === p.id);
           addProductToLine({
             id: p.id,
             name: p.name,
@@ -482,9 +484,10 @@ export default function InvoiceFormLightbox({ isOpen, onClose, onSaved, editId, 
             tax_type_label: p.tax_type_label,
             tax_type: p.tax_type,
           });
+          if (!alreadyOnForm) toastProductAdded(p.name);
         }
       })
-      .catch(() => toast.error('Product not found for this barcode/ID'));
+      .catch(() => toastBarcodeNotFound());
   };
 
   const updateLine = (index: number, field: keyof LineItem, value: number | string) => {
@@ -837,6 +840,7 @@ export default function InvoiceFormLightbox({ isOpen, onClose, onSaved, editId, 
                                     .then((r) => {
                                       const prod = r.data;
                                       if (prod?.id) {
+                                        const alreadyOnForm = lines.some((l) => l.product_id === prod.id);
                                         addProductToLine({
                                           id: prod.id,
                                           name: prod.name,
@@ -849,9 +853,10 @@ export default function InvoiceFormLightbox({ isOpen, onClose, onSaved, editId, 
                                           tax_type_label: prod.tax_type_label,
                                           tax_type: prod.tax_type,
                                         });
+                                        if (!alreadyOnForm) toastProductAdded(prod.name);
                                       }
                                     })
-                                    .catch(() => toast.error('Product not found for this barcode'));
+                                    .catch(() => toastBarcodeNotFound());
                                 }}
                                 placeholder="Search product or scan barcode…"
                               />

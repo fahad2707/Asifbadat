@@ -428,6 +428,7 @@ export default function AdminLayoutClient({ children }: { children: React.ReactN
                 <Link href="/admin/inventory?count=1" className={adminNavItemClass(countingStock)}>Physical count</Link>
                 <Link href="/admin/invoices?create=invoice" className={adminNavItemClass(creatingInvoice)}>Offline sales</Link>
                 <Link href="/admin/inventory?adjust=1" className={adminNavItemClass(adjustingStock)}>Stock adjustments</Link>
+                <Link href="/admin/returns" className={adminNavItemClass(pathMatches(pathname, '/admin/returns'))}>POS returns</Link>
               </div>
             )}
           </div>
