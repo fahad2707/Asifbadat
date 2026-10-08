@@ -10,6 +10,7 @@ import Product from '../models/Product';
 import { generateProductId } from '../utils/productCodes';
 import Category from '../models/Category';
 import SubCategory from '../models/SubCategory';
+import { shouldWriteOpeningStockMovement, writeOpeningStockMovement } from '../utils/openingStockMovement';
 
 // ----- Canonical row (after normalization) -----
 export interface CanonicalProductRow {
@@ -405,7 +406,7 @@ export async function executeImport(
         }
         const product_id = await generateProductId();
 
-        await Product.create(
+        const created = await Product.create(
           [
             {
               name: data.name,
@@ -426,6 +427,15 @@ export async function executeImport(
           ],
           { session }
         );
+        const product = Array.isArray(created) ? created[0] : created;
+        const productType = (product as { product_type?: unknown }).product_type || 'inventory';
+        if (shouldWriteOpeningStockMovement(productType, data.stock_quantity)) {
+          await writeOpeningStockMovement({
+            productId: (product as { _id: mongoose.Types.ObjectId })._id,
+            openingQty: data.stock_quantity,
+            session,
+          });
+        }
         existingByKey.add(key);
         imported++;
       } catch (err: any) {

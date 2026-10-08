@@ -14,6 +14,11 @@ import {
 } from '../utils/productCodes';
 import { toPublicProduct, toStaffProduct } from '../utils/productProjection';
 import { parseTaxTypeIdInput, staffTaxTypeFields } from '../utils/productTaxType';
+import {
+  optionalOpeningAdminId,
+  shouldWriteOpeningStockMovement,
+  writeOpeningStockMovement,
+} from '../utils/openingStockMovement';
 
 /**
  * Any response that contains internal product fields (cost_price, vendor_id,
@@ -375,14 +380,15 @@ router.post('/', authenticateAdmin, async (req: AuthRequest, res) => {
     const subCategoryId = toObjectIdOrUndefined(data.sub_category_id);
     const vendorId = toObjectIdOrUndefined(data.vendor_id);
     const taxAssignment = await resolveTaxTypeAssignment(data.tax_type_id);
-
-    const product = await Product.create({
+    const productType = data.product_type || 'inventory';
+    const openingQty = data.stock_quantity ?? 0;
+    const fields = {
       name: data.name,
       slug,
       product_id: await generateProductId(),
       sku: data.sku?.trim() || undefined,
       description: data.description,
-      product_type: data.product_type || 'inventory',
+      product_type: productType,
       price,
       cost_price: data.cost_price ?? undefined,
       category_id: categoryId,
@@ -396,16 +402,38 @@ router.post('/', authenticateAdmin, async (req: AuthRequest, res) => {
           : {}),
       image_url: data.image_url || undefined,
       barcode: data.barcode || undefined,
-      stock_quantity: data.stock_quantity ?? 0,
+      stock_quantity: openingQty,
       low_stock_threshold: data.low_stock_threshold ?? 10,
       is_active: data.is_active !== false,
-    });
+    };
 
-    const obj = product.toObject();
-    res.status(201).json({
-      id: product._id.toString(),
-      ...obj,
-    });
+    const session = await mongoose.startSession();
+    session.startTransaction();
+    try {
+      const created = await Product.create([fields], { session });
+      const product = Array.isArray(created) ? created[0] : created;
+      if (shouldWriteOpeningStockMovement(productType, openingQty)) {
+        await writeOpeningStockMovement({
+          productId: product._id,
+          openingQty,
+          session,
+          adminId: optionalOpeningAdminId(req.userId),
+        });
+      }
+      await session.commitTransaction();
+      const obj = typeof (product as { toObject?: () => object }).toObject === 'function'
+        ? (product as { toObject: () => object }).toObject()
+        : product;
+      res.status(201).json({
+        id: product._id.toString(),
+        ...obj,
+      });
+    } catch (error) {
+      await session.abortTransaction();
+      throw error;
+    } finally {
+      session.endSession();
+    }
   } catch (error: any) {
     if (error instanceof z.ZodError) {
       return res.status(400).json({ error: error.errors[0].message });
@@ -476,6 +504,7 @@ router.put('/:id', authenticateAdmin, async (req: AuthRequest, res) => {
     delete rest.category_id;
     delete rest.sub_category_id;
     delete (rest as any).tax_type_id;
+    delete (rest as any).stock_quantity;
     // Client cannot set or change product_id; assign on first save if missing.
     const existingPid = String((existing as any).product_id || '').trim();
     delete (rest as any).product_id;

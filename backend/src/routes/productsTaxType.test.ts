@@ -71,12 +71,27 @@ function stubGenerateId() {
   }));
 }
 
+function stubCreateSession() {
+  mock.method(mongoose, 'startSession', async () => ({
+    startTransaction: mock.fn(),
+    commitTransaction: mock.fn(async () => {}),
+    abortTransaction: mock.fn(async () => {}),
+    endSession: mock.fn(),
+  }));
+}
+
+function firstCreateDoc(docs: unknown): Record<string, unknown> {
+  return (Array.isArray(docs) ? docs[0] : docs) as Record<string, unknown>;
+}
+
 test('POST /api/products assigns a valid TaxType and leaves price/tax_rate as sent', async () => {
   assertNoMongoConnection();
   stubTaxTypeLookup();
   stubGenerateId();
+  stubCreateSession();
   let created: Record<string, unknown> | undefined;
-  mock.method(Product, 'create', async (doc: Record<string, unknown>) => {
+  mock.method(Product, 'create', async (docs: unknown) => {
+    const doc = firstCreateDoc(docs);
     created = doc;
     return createdDoc({
       name: doc.name,
@@ -103,10 +118,11 @@ test('POST /api/products stores explicit No Tax as null tax_type_id', async () =
   assertNoMongoConnection();
   stubTaxTypeLookup();
   stubGenerateId();
+  stubCreateSession();
   let created: Record<string, unknown> | undefined;
-  mock.method(Product, 'create', async (doc: Record<string, unknown>) => {
-    created = doc;
-    return createdDoc(doc);
+  mock.method(Product, 'create', async (docs: unknown) => {
+    created = firstCreateDoc(docs);
+    return createdDoc(created);
   });
 
   const res = await request(createApp())
@@ -216,10 +232,11 @@ test('POST /api/products without tax_type_id leaves assignment unconfigured', as
   assertNoMongoConnection();
   stubTaxTypeLookup();
   stubGenerateId();
+  stubCreateSession();
   let created: Record<string, unknown> | undefined;
-  mock.method(Product, 'create', async (doc: Record<string, unknown>) => {
-    created = doc;
-    return createdDoc(doc);
+  mock.method(Product, 'create', async (docs: unknown) => {
+    created = firstCreateDoc(docs);
+    return createdDoc(created);
   });
 
   const res = await request(createApp())
