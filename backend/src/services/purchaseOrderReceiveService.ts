@@ -138,10 +138,12 @@ function prepareClaims(
   return claims;
 }
 
+const RECEIVABLE_STATUSES = ['draft', 'sent', 'partial'] as const;
+
 function claimFilter(poId: mongoose.Types.ObjectId, claims: ClaimedLine[]) {
   return {
     _id: poId,
-    status: { $ne: 'cancelled' },
+    status: { $in: [...RECEIVABLE_STATUSES] },
     $and: claims.map((claim) => ({
       items: {
         $elemMatch: {
@@ -191,6 +193,15 @@ async function receivePurchaseOrderAttempt(opts: {
     }
     if (po.status === 'cancelled') {
       throw new PurchaseOrderReceiveError(400, { error: 'PO is cancelled' });
+    }
+    if (po.status === 'received') {
+      throw new PurchaseOrderReceiveError(400, { error: 'PO is already received' });
+    }
+    if (!RECEIVABLE_STATUSES.includes(po.status as (typeof RECEIVABLE_STATUSES)[number])) {
+      throw new PurchaseOrderReceiveError(400, {
+        error: 'Purchase order cannot be received in its current status',
+        status: po.status,
+      });
     }
 
     const claims = prepareClaims(po, requested);

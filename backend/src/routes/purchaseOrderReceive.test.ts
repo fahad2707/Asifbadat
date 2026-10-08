@@ -175,7 +175,7 @@ test('single-line success: 48 → +20 → 68 with PURCHASE movement and session'
 
   const claim = poUpdates.find((call) => call.update.$inc);
   assert.ok(claim);
-  assert.equal((claim.filter.status as { $ne?: string }).$ne, 'cancelled');
+  assert.deepEqual((claim.filter.status as { $in?: string[] }).$in, ['draft', 'sent', 'partial']);
   assert.equal((claim.update.$inc as Record<string, number>)['items.$[l0].quantity_received'], 20);
   assert.equal(claim.options.session, session);
   const remainingCap = (claim.options.arrayFilters as Array<Record<string, unknown>>)[0]['l0.quantity_received'] as { $lte: number };
@@ -397,9 +397,9 @@ test('partial receive does not post vendor ledger', async () => {
   assert.equal(ledgerCalls.length, 0);
 });
 
-test('already-received PO does not post vendor ledger again', async () => {
+test('anomalous received status with remaining qty cannot receive again', async () => {
   assertNoMongoConnection();
-  const { ledgerCalls, poUpdates } = stubReceive({
+  const { session, poUpdates, productUpdates, movements, ledgerCalls } = stubReceive({
     po: makePo({
       status: 'received',
       received_at: new Date('2026-09-01T00:00:00Z'),
@@ -413,12 +413,14 @@ test('already-received PO does not post vendor ledger again', async () => {
     items: [{ product_id: PRODUCT_A, quantity_received: 20 }],
   });
 
-  assert.equal(res.status, 200);
-  assert.equal(res.body.status, 'received');
+  assert.equal(res.status, 400);
+  assert.match(String(res.body.error), /already received/i);
+  assert.equal(poUpdates.length, 0);
+  assert.equal(productUpdates.length, 0);
+  assert.equal(movements.length, 0);
   assert.equal(ledgerCalls.length, 0);
-  const statusUpdate = poUpdates.find((call) => call.update.$set);
-  assert.ok(statusUpdate);
-  assert.equal((statusUpdate.update.$set as { received_at?: Date }).received_at, undefined);
+  assert.equal(session.abortTransaction.mock.callCount(), 1);
+  assert.equal(session.commitTransaction.mock.callCount(), 0);
 });
 
 test('fully received sets status received and received_at; partial does not set received_at', async () => {

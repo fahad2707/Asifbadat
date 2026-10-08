@@ -437,11 +437,22 @@ router.put('/:id', authenticateAdmin, async (req: AuthRequest, res) => {
   }
 });
 
-// Mark PO as sent
+// Mark PO as sent (draft → sent only)
 router.post('/:id/send', authenticateAdmin, async (req: AuthRequest, res) => {
   try {
-    const po = await PurchaseOrder.findByIdAndUpdate(req.params.id, { status: 'sent' }, { new: true });
-    if (!po) return res.status(404).json({ error: 'Purchase order not found' });
+    if (!mongoose.Types.ObjectId.isValid(String(req.params.id))) {
+      return res.status(404).json({ error: 'Purchase order not found' });
+    }
+    const po = await PurchaseOrder.findOneAndUpdate(
+      { _id: req.params.id, status: 'draft' },
+      { $set: { status: 'sent' } },
+      { new: true }
+    );
+    if (!po) {
+      const existing = await PurchaseOrder.findById(req.params.id);
+      if (!existing) return res.status(404).json({ error: 'Purchase order not found' });
+      return res.status(400).json({ error: 'Only draft purchase orders can be marked as sent' });
+    }
     res.json({ id: po._id.toString(), status: po.status });
   } catch (error) {
     console.error('Send PO error:', error);
@@ -482,11 +493,25 @@ router.post('/:id/receive', authenticateAdmin, async (req: AuthRequest, res) => 
   }
 });
 
-// Cancel PO
+// Cancel PO (draft | sent | partial → cancelled; received/cancelled rejected)
 router.post('/:id/cancel', authenticateAdmin, async (req: AuthRequest, res) => {
   try {
-    const po = await PurchaseOrder.findByIdAndUpdate(req.params.id, { status: 'cancelled' }, { new: true });
-    if (!po) return res.status(404).json({ error: 'Purchase order not found' });
+    if (!mongoose.Types.ObjectId.isValid(String(req.params.id))) {
+      return res.status(404).json({ error: 'Purchase order not found' });
+    }
+    const po = await PurchaseOrder.findOneAndUpdate(
+      { _id: req.params.id, status: { $in: ['draft', 'sent', 'partial'] } },
+      { $set: { status: 'cancelled' } },
+      { new: true }
+    );
+    if (!po) {
+      const existing = await PurchaseOrder.findById(req.params.id);
+      if (!existing) return res.status(404).json({ error: 'Purchase order not found' });
+      if (existing.status === 'received') {
+        return res.status(400).json({ error: 'Received purchase orders cannot be cancelled' });
+      }
+      return res.status(400).json({ error: 'Purchase order cannot be cancelled' });
+    }
     res.json({ id: po._id.toString(), status: po.status });
   } catch (error) {
     console.error('Cancel PO error:', error);
