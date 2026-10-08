@@ -704,25 +704,23 @@ test('27 POS PUT remains blocked', async () => {
   assert.equal(h.productUpdates.length, 0);
 });
 
-test('28 legacy source-less PUT retains restore-all / deduct-all and skips missing products', async () => {
+test('28 legacy source-less PUT uses atomic net delta + SALE movement (Phase 2N-C1)', async () => {
   assertNoMongoConnection();
-  const h = stubWholesaleHarness({
-    stock: { [PRODUCT_A]: 40 },
-    missingAtFindById: [PRODUCT_MISSING],
-  });
+  const h = stubWholesaleHarness({ stock: { [PRODUCT_A]: 40 } });
   const doc = wholesaleInvoiceDoc({
     source: undefined,
-    items: [line(PRODUCT_A, 5), line(PRODUCT_MISSING, 2)],
+    items: [line(PRODUCT_A, 5)],
   });
   delete doc.source;
   mock.method(Invoice, 'findById', async () => doc);
   const res = await putInvoice(INVOICE_ID, { items: [line(PRODUCT_A, 8)] });
   assert.equal(res.status, 200);
-  assert.equal((doc as { saved?: boolean }).saved, true);
-  assert.equal(h.session.startTransaction.mock.callCount(), 0);
-  assert.equal(h.movements.length, 0);
-  assert.ok(h.findByIdAndUpdateCalls.length >= 2);
   assert.equal(h.stock[PRODUCT_A], 37);
+  assert.equal(h.movements.length, 1);
+  assertSaleMovement(h.movements[0].doc, { change: -3, before: 40, after: 37, number: 'INV#W2D2' });
+  assert.equal(h.session.commitTransaction.mock.callCount(), 1);
+  assert.equal(h.findByIdAndUpdateCalls.length, 0);
+  assert.equal((doc as { saved?: boolean }).saved, undefined);
 });
 
 test('29 paid invoice edit financial rules unchanged', async () => {
@@ -869,23 +867,22 @@ test('39 ONLINE delete does not wholesale-restore', async () => {
   assert.equal(h.session.startTransaction.mock.callCount(), 0);
 });
 
-test('40 legacy delete retains restore, skip-missing, no movement, no transaction', async () => {
+test('40 legacy delete restores stock with SALE movement in a transaction (Phase 2N-C1)', async () => {
   assertNoMongoConnection();
-  const h = stubWholesaleHarness({
-    stock: { [PRODUCT_A]: 42 },
-    missingAtFindById: [PRODUCT_MISSING],
-  });
+  const h = stubWholesaleHarness({ stock: { [PRODUCT_A]: 42 } });
   const doc = wholesaleInvoiceDoc({
-    items: [line(PRODUCT_A, 8), line(PRODUCT_MISSING, 2)],
+    items: [line(PRODUCT_A, 8)],
   });
   delete doc.source;
   mock.method(Invoice, 'findById', async () => doc);
   const res = await deleteInvoice(INVOICE_ID);
   assert.equal(res.status, 200);
   assert.equal(h.stock[PRODUCT_A], 50);
-  assert.equal(h.movements.length, 0);
-  assert.equal(h.session.startTransaction.mock.callCount(), 0);
-  assert.ok(h.findByIdAndUpdateCalls.some((call) => String(call.id) === PRODUCT_A));
+  assert.equal(h.movements.length, 1);
+  assertSaleMovement(h.movements[0].doc, { change: 8, before: 42, after: 50, number: 'INV#W2D2' });
+  assert.equal(h.invoiceDeletes.length, 1);
+  assert.equal(h.session.commitTransaction.mock.callCount(), 1);
+  assert.equal(h.findByIdAndUpdateCalls.length, 0);
 });
 
 test('41-44 CONVERT creates WHOLESALE invoice, deducts stock, SALE movement, marks quote', async () => {

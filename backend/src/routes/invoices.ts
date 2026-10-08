@@ -131,6 +131,35 @@ function invoiceVersion(invoice: { get?: (key: string) => unknown; __v?: unknown
   return Number(invoice.__v ?? 0);
 }
 
+/** True when lines include a product_id with positive quantity (inventory may be affected). */
+function invoiceLinesMayAffectInventory(items: InvoiceInventoryLine[] | undefined): boolean {
+  for (const item of items || []) {
+    if (!item.product_id) continue;
+    const qty = typeof item.quantity === 'number' ? item.quantity : Number(item.quantity);
+    if (Number.isFinite(qty) && qty > 0) return true;
+  }
+  return false;
+}
+
+/**
+ * WHOLESALE invoices always use the atomic inventory service.
+ * Legacy/source-less receivable invoices use it only when product lines can affect stock.
+ * ONLINE never adjusts inventory through these routes.
+ */
+function usesAtomicInvoiceInventoryPath(
+  invoice: { source?: unknown; invoice_type?: unknown },
+  oldItems?: InvoiceInventoryLine[],
+  newItems?: InvoiceInventoryLine[]
+): boolean {
+  if (usesMigratedWholesaleInventory(invoice)) return true;
+  if (!shouldAdjustInventoryForDocumentType(invoice.invoice_type)) return false;
+  // ONLINE never adjusts inventory through these routes (same gate as prior legacy loops).
+  if (invoice.source !== 'ONLINE') {
+    return invoiceLinesMayAffectInventory(oldItems) || invoiceLinesMayAffectInventory(newItems);
+  }
+  return false;
+}
+
 // Email transporter
 const transporter = nodemailer.createTransport({
   host: process.env.SMTP_HOST,
@@ -513,8 +542,10 @@ router.put('/:id', authenticateAdmin, async (req: AuthRequest, res) => {
         throw error;
       }
 
-      if (usesMigratedWholesaleInventory(invoice)) {
-        const oldItems = ((invoice as any).items || []) as InvoiceInventoryLine[];
+      // Migrated WHOLESALE and legacy source-less inventory invoices share the same
+      // claim + $inc + createStockMovement(SALE) path. ONLINE never adjusts here.
+      const oldItems = ((invoice as any).items || []) as InvoiceInventoryLine[];
+      if (usesAtomicInvoiceInventoryPath(invoice, oldItems, items as InvoiceInventoryLine[])) {
         invoice.items = items;
         invoice.subtotal_amount = subtotal_amount;
         invoice.tax_amount = tax_amount;
@@ -556,27 +587,6 @@ router.put('/:id', authenticateAdmin, async (req: AuthRequest, res) => {
           invoice_number: (updatedDoc as any).invoice_number,
           payment_status: (updatedDoc as any).payment_status,
         });
-      }
-
-      // Legacy source-less invoices keep restore-all / deduct-all. ONLINE never uses these loops.
-      if (shouldAdjustInventoryForDocumentType(invoice.invoice_type) && invoice.source !== 'ONLINE') {
-        const oldItems = (invoice as any).items || [];
-        for (const item of oldItems) {
-          if (!item.product_id || (item.quantity || 0) <= 0) continue;
-          const product = await Product.findById(item.product_id).lean();
-          if (!product) continue;
-          const p = product as any;
-          if (p.product_type === 'service' || p.product_type === 'non_inventory') continue;
-          await Product.findByIdAndUpdate(item.product_id, { $inc: { stock_quantity: Number(item.quantity) || 0 } });
-        }
-
-        for (const item of items) {
-          if (!item.product_id || (item.quantity || 0) <= 0) continue;
-          const product = await Product.findById(item.product_id);
-          if (!product) continue;
-          if ((product as any).product_type === 'service' || (product as any).product_type === 'non_inventory') continue;
-          await Product.findByIdAndUpdate(item.product_id, { $inc: { stock_quantity: -(Number(item.quantity) || 0) } });
-        }
       }
 
       invoice.items = items;
@@ -627,28 +637,17 @@ router.delete('/:id', authenticateAdmin, async (req: AuthRequest, res) => {
       });
     }
 
-    if (usesMigratedWholesaleInventory(invoice)) {
+    // Migrated WHOLESALE and legacy source-less inventory invoices share claim + restore + SALE movement.
+    // ONLINE never restores stock here. Quotations never adjust inventory.
+    const deleteItems = ((invoice as any).items || []) as InvoiceInventoryLine[];
+    if (usesAtomicInvoiceInventoryPath(invoice, deleteItems)) {
       await deleteWholesaleInvoiceWithInventory({
         invoiceId: invoice._id as mongoose.Types.ObjectId,
         expectedVersion: invoiceVersion(invoice),
-        items: ((invoice as any).items || []) as InvoiceInventoryLine[],
+        items: deleteItems,
         adminId: req.userId,
       });
       return res.json({ success: true, id: invoice._id.toString() });
-    }
-
-    // Reverse the same stock move create/edit applied (invoices only; quotations never touch stock).
-    // ONLINE invoices never restore through this wholesale path. Source-less rows keep legacy loops.
-    if (shouldAdjustInventoryForDocumentType(invoice.invoice_type) && invoice.source !== 'ONLINE') {
-      const oldItems = (invoice as any).items || [];
-      for (const item of oldItems) {
-        if (!item.product_id || (item.quantity || 0) <= 0) continue;
-        const product = await Product.findById(item.product_id).lean();
-        if (!product) continue;
-        const p = product as any;
-        if (p.product_type === 'service' || p.product_type === 'non_inventory') continue;
-        await Product.findByIdAndUpdate(item.product_id, { $inc: { stock_quantity: Number(item.quantity) || 0 } });
-      }
     }
 
     await Invoice.deleteOne({ _id: invoice._id });

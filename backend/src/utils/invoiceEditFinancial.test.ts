@@ -71,7 +71,8 @@ test('PUT invoice route validates proposed totals before save', () => {
   const putAt = invoices.indexOf("router.put('/:id'");
   assert.ok(putAt >= 0);
   const validateAt = invoices.indexOf('assertReceivableInvoiceEdit', putAt);
-  const inventoryAt = invoices.indexOf('shouldAdjustInventoryForDocumentType(invoice.invoice_type)', putAt);
+  const inventoryAt = invoices.indexOf('usesAtomicInvoiceInventoryPath', putAt);
   const saveAt = invoices.indexOf('await invoice.save()', putAt);
   assert.ok(validateAt > putAt && inventoryAt > validateAt && saveAt > inventoryAt);
+  assert.match(invoices, /shouldAdjustInventoryForDocumentType\(invoice\.invoice_type\)/);
 });
