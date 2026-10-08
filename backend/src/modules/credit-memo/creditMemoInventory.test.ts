@@ -164,9 +164,22 @@ function stubApprove(opts: {
     return docs;
   });
 
-  mock.method(Customer, 'findByIdAndUpdate', async () => ({ _id: CUSTOMER_ID }));
+  const customerBalanceUpdates: Array<{ id: unknown; update: Record<string, unknown> }> = [];
+  mock.method(Customer, 'findByIdAndUpdate', async (id: unknown, update: Record<string, unknown>) => {
+    customerBalanceUpdates.push({ id, update });
+    return { _id: CUSTOMER_ID };
+  });
 
-  return { session, productUpdates, movements, ledgerCalls, statusUpdates, stock, claims };
+  return {
+    session,
+    productUpdates,
+    movements,
+    ledgerCalls,
+    statusUpdates,
+    stock,
+    claims,
+    customerBalanceUpdates,
+  };
 }
 
 test('customer physical CM approval increases stock and writes CREDIT_MEMO +qty with before/after', async () => {
@@ -321,7 +334,7 @@ test('multi-line physical CM writes a movement per line with correct before/delt
 
 test('shipment-generated CM with affects_inventory=false stays inventory-neutral on approve', async () => {
   assertNoMongoConnection();
-  const { productUpdates, movements } = stubApprove({
+  const { session, productUpdates, movements, ledgerCalls, claims, customerBalanceUpdates } = stubApprove({
     cm: makeCm({
       type: 'CUSTOMER',
       affects_inventory: false,
@@ -332,8 +345,39 @@ test('shipment-generated CM with affects_inventory=false stays inventory-neutral
   const res = await postApprove();
 
   assert.equal(res.status, 200);
+  assert.equal(claims.length, 1);
   assert.equal(productUpdates.length, 0);
   assert.equal(movements.length, 0);
+  assert.equal(ledgerCalls.length, 1);
+  assert.equal(customerBalanceUpdates.length, 1);
+  assert.equal(session.commitTransaction.mock.callCount(), 1);
+  assert.equal(session.abortTransaction.mock.callCount(), 0);
+});
+
+test('RG-linked CM with affects_inventory=true is rejected and leaves DRAFT with no side effects', async () => {
+  assertNoMongoConnection();
+  const { session, productUpdates, movements, ledgerCalls, claims, customerBalanceUpdates, stock } =
+    stubApprove({
+      cm: makeCm({
+        type: 'CUSTOMER',
+        affects_inventory: true,
+        reference_shipment_id: SHIPMENT_ID,
+      }),
+      stock: { [PRODUCT_A]: 58 },
+    });
+
+  const res = await postApprove();
+
+  assert.equal(res.status, 400);
+  assert.match(String(res.body.error), /return shipment.*affect inventory/i);
+  assert.equal(claims.length, 0, 'DRAFT→APPROVED claim must not run');
+  assert.equal(productUpdates.length, 0);
+  assert.equal(stock[PRODUCT_A], 58);
+  assert.equal(movements.length, 0);
+  assert.equal(ledgerCalls.length, 0);
+  assert.equal(customerBalanceUpdates.length, 0);
+  assert.equal(session.commitTransaction.mock.callCount(), 0);
+  assert.ok(session.abortTransaction.mock.callCount() >= 1);
 });
 
 function stubCancelSideEffects() {

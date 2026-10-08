@@ -160,10 +160,24 @@ async function applyCreditMemoInventory(
   }
 }
 
+function isRgLinkedInventoryConflict(cm: {
+  reference_shipment_id?: mongoose.Types.ObjectId | null;
+  affects_inventory?: boolean;
+}): boolean {
+  return Boolean(cm.reference_shipment_id) && cm.affects_inventory === true;
+}
+
+const RG_LINKED_INVENTORY_ERROR =
+  'Credit memos linked to a return shipment cannot affect inventory; set affects_inventory to false before approving';
+
 /**
  * Approve credit memo: claim DRAFT → APPROVED, post ledger, update AP/AR,
  * optionally apply signed inventory. Conditional claim prevents concurrent
  * double inventory application.
+ *
+ * RG-linked memos (reference_shipment_id set) must never apply inventory —
+ * shipment receipt already wrote SHIPMENT_IN. Invalid combo is rejected
+ * before claim so status stays DRAFT; post-claim check aborts on race.
  */
 export async function approveCreditMemo(
   creditMemoId: string,
@@ -185,6 +199,21 @@ export async function approveCreditMemo(
     const adminId = new mongoose.Types.ObjectId(userId);
     const approvedAt = new Date();
 
+    // Pre-claim guard: RG-linked + inventory-on must not leave DRAFT.
+    const draft = await CreditMemo.findById(objId).session(session);
+    if (!draft) {
+      await session.abortTransaction();
+      return { success: false, error: 'Credit memo not found' };
+    }
+    if (draft.status !== 'DRAFT') {
+      await session.abortTransaction();
+      return { success: false, error: 'Only draft credit memos can be approved' };
+    }
+    if (isRgLinkedInventoryConflict(draft)) {
+      await session.abortTransaction();
+      return { success: false, error: RG_LINKED_INVENTORY_ERROR };
+    }
+
     // Claim BEFORE inventory/ledger so concurrent approvals cannot both apply.
     const claimed = await CreditMemo.findOneAndUpdate(
       { _id: objId, status: 'DRAFT' },
@@ -201,7 +230,16 @@ export async function approveCreditMemo(
       await session.abortTransaction();
       const existing = await CreditMemo.findById(objId);
       if (!existing) return { success: false, error: 'Credit memo not found' };
+      if (isRgLinkedInventoryConflict(existing)) {
+        return { success: false, error: RG_LINKED_INVENTORY_ERROR };
+      }
       return { success: false, error: 'Only draft credit memos can be approved' };
+    }
+
+    // Race: draft edited to RG-linked + inventory-on between pre-check and claim.
+    if (isRgLinkedInventoryConflict(claimed)) {
+      await session.abortTransaction();
+      return { success: false, error: RG_LINKED_INVENTORY_ERROR };
     }
 
     if (claimed.type === 'VENDOR') {
