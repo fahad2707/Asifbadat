@@ -161,8 +161,9 @@ async function applyCreditMemoInventory(
 }
 
 /**
- * Approve credit memo: post ledger, update AP/AR, optionally apply signed inventory.
- * No hard delete after approval; only cancel (status = CANCELLED) allowed.
+ * Approve credit memo: claim DRAFT → APPROVED, post ledger, update AP/AR,
+ * optionally apply signed inventory. Conditional claim prevents concurrent
+ * double inventory application.
  */
 export async function approveCreditMemo(
   creditMemoId: string,
@@ -171,77 +172,83 @@ export async function approveCreditMemo(
   const session = await mongoose.startSession();
   session.startTransaction();
   try {
-    const cm = await CreditMemo.findById(creditMemoId).session(session);
-    if (!cm) {
+    if (!mongoose.Types.ObjectId.isValid(creditMemoId)) {
       await session.abortTransaction();
       return { success: false, error: 'Credit memo not found' };
     }
-    if (cm.status !== 'DRAFT') {
+    if (!mongoose.Types.ObjectId.isValid(userId)) {
       await session.abortTransaction();
-      return { success: false, error: 'Only draft credit memos can be approved' };
+      return { success: false, error: 'Invalid admin' };
     }
 
     const objId = new mongoose.Types.ObjectId(creditMemoId);
     const adminId = new mongoose.Types.ObjectId(userId);
+    const approvedAt = new Date();
 
-    if (cm.type === 'VENDOR') {
-      if (!cm.vendor_id) {
+    // Claim BEFORE inventory/ledger so concurrent approvals cannot both apply.
+    const claimed = await CreditMemo.findOneAndUpdate(
+      { _id: objId, status: 'DRAFT' },
+      {
+        $set: {
+          status: 'APPROVED',
+          approved_at: approvedAt,
+          approved_by: adminId,
+        },
+      },
+      { session, new: true }
+    );
+    if (!claimed) {
+      await session.abortTransaction();
+      const existing = await CreditMemo.findById(objId);
+      if (!existing) return { success: false, error: 'Credit memo not found' };
+      return { success: false, error: 'Only draft credit memos can be approved' };
+    }
+
+    if (claimed.type === 'VENDOR') {
+      if (!claimed.vendor_id) {
         await session.abortTransaction();
         return { success: false, error: 'Vendor credit memo must have vendor_id' };
       }
       await postVendorCreditMemoLedger(
         objId,
-        cm.vendor_id,
-        cm.total_amount,
-        `Credit memo ${cm.credit_memo_number}`,
+        claimed.vendor_id,
+        claimed.total_amount,
+        `Credit memo ${claimed.credit_memo_number}`,
         adminId,
         session
       );
-      // Reduce vendor payable (we don't have a Vendor.balance field yet - ledger is source of truth; optional: aggregate from ledger)
-      // For now we rely on ledger. If Vendor has balance field we'd decrement it.
     } else {
-      if (!cm.customer_id) {
+      if (!claimed.customer_id) {
         await session.abortTransaction();
         return { success: false, error: 'Customer credit memo must have customer_id' };
       }
       await postCustomerCreditMemoLedger(
         objId,
-        cm.customer_id,
-        cm.total_amount,
-        `Credit memo ${cm.credit_memo_number}`,
+        claimed.customer_id,
+        claimed.total_amount,
+        `Credit memo ${claimed.credit_memo_number}`,
         adminId,
         session
       );
-      // Reduce customer outstanding_balance
       await Customer.findByIdAndUpdate(
-        cm.customer_id,
-        { $inc: { outstanding_balance: -cm.total_amount } },
+        claimed.customer_id,
+        { $inc: { outstanding_balance: -claimed.total_amount } },
         { session }
       );
     }
 
-    if (cm.affects_inventory && cm.items && cm.items.length > 0) {
+    if (claimed.affects_inventory && claimed.items && claimed.items.length > 0) {
       await applyCreditMemoInventory(
         {
-          type: cm.type,
-          credit_memo_number: cm.credit_memo_number,
-          items: cm.items.map((i) => ({ product_id: i.product_id, quantity: i.quantity })),
+          type: claimed.type,
+          credit_memo_number: claimed.credit_memo_number,
+          items: claimed.items.map((i) => ({ product_id: i.product_id, quantity: i.quantity })),
         },
         objId,
         adminId,
         session
       );
     }
-
-    await CreditMemo.findByIdAndUpdate(
-      creditMemoId,
-      {
-        status: 'APPROVED',
-        approved_at: new Date(),
-        approved_by: adminId,
-      },
-      { session }
-    );
 
     await session.commitTransaction();
     return { success: true };

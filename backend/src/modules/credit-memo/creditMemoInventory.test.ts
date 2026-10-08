@@ -114,10 +114,23 @@ function stubApprove(opts: {
   stock?: Record<string, number>;
   productUpdate?: (productId: string, delta: number) => { stock_quantity: number } | null;
   movementThrows?: boolean;
+  claim?: (filter: Record<string, unknown>) => Record<string, unknown> | null;
 }) {
   const session = createFakeSession();
   mock.method(mongoose, 'startSession', async () => session);
   mock.method(CreditMemo, 'findById', () => thenableFindById(opts.cm));
+
+  const claims: Array<{ filter: Record<string, unknown>; update: Record<string, unknown> }> = [];
+  mock.method(CreditMemo, 'findOneAndUpdate', async (filter: Record<string, unknown>, update: Record<string, unknown>) => {
+    claims.push({ filter, update });
+    if (opts.claim) return opts.claim(filter);
+    if (filter.status !== 'DRAFT') return null;
+    return {
+      ...opts.cm,
+      status: 'APPROVED',
+      ...((update.$set as Record<string, unknown>) || {}),
+    };
+  });
 
   const statusUpdates: Array<{ id: unknown; update: Record<string, unknown> }> = [];
   mock.method(CreditMemo, 'findByIdAndUpdate', async (id: unknown, update: Record<string, unknown>) => {
@@ -153,7 +166,7 @@ function stubApprove(opts: {
 
   mock.method(Customer, 'findByIdAndUpdate', async () => ({ _id: CUSTOMER_ID }));
 
-  return { session, productUpdates, movements, ledgerCalls, statusUpdates, stock };
+  return { session, productUpdates, movements, ledgerCalls, statusUpdates, stock, claims };
 }
 
 test('customer physical CM approval increases stock and writes CREDIT_MEMO +qty with before/after', async () => {
@@ -393,6 +406,36 @@ test('draft cancelled CM remains hard-deletable', async () => {
   assert.equal(deleted, true);
 });
 
+test('concurrent approve claims once: second request does not apply inventory', async () => {
+  assertNoMongoConnection();
+  let claimed = false;
+  const h = stubApprove({
+    cm: makeCm({ type: 'CUSTOMER', affects_inventory: true }),
+    stock: { [PRODUCT_A]: 58 },
+    claim: (filter) => {
+      assert.equal(filter.status, 'DRAFT');
+      if (claimed) return null;
+      claimed = true;
+      return {
+        ...makeCm({ type: 'CUSTOMER', affects_inventory: true }),
+        status: 'APPROVED',
+      };
+    },
+  });
+
+  const first = await postApprove();
+  const second = await postApprove();
+
+  assert.equal(first.status, 200);
+  assert.equal(second.status, 400);
+  assert.match(String(second.body.error), /Only draft/i);
+  assert.equal(h.movements.length, 1);
+  assert.equal(h.productUpdates.length, 1);
+  assert.equal(h.stock[PRODUCT_A], 60);
+  assert.equal(h.claims.length, 2);
+  assert.equal(h.session.commitTransaction.mock.callCount(), 1);
+});
+
 test('credit memo inventory path uses createStockMovement and never StockMovement.create directly', () => {
   const serviceSrc = fs.readFileSync(
     path.join(process.cwd(), 'src/modules/credit-memo/services/creditMemoService.ts'),
@@ -404,6 +447,7 @@ test('credit memo inventory path uses createStockMovement and never StockMovemen
   );
   assert.match(serviceSrc, /createStockMovement\(/);
   assert.match(serviceSrc, /StockMovementType\.CREDIT_MEMO/);
+  assert.match(serviceSrc, /status: 'DRAFT'/);
   assert.equal(serviceSrc.includes('StockMovement.create'), false);
   assert.match(shipmentSrc, /affects_inventory:\s*false/);
   assert.match(shipmentSrc, /SHIPMENT_IN/);
