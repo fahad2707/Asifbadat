@@ -1,15 +1,39 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { ArrowLeft, Plus, Minus, Trash2, ShoppingCart, FileSignature, MessageSquare, Truck } from 'lucide-react';
-import { useCartStore } from '@/lib/store';
+import api from '@/lib/api';
+import { useAuthStore, useCartStore } from '@/lib/store';
 import toast from 'react-hot-toast';
 import RFQLightbox, { type RFQLightboxItem } from '@/components/RFQLightbox';
 
 export default function CartPage() {
+  const router = useRouter();
   const { items, updateQuantity, removeItem, clearCart } = useCartStore();
+  const token = useAuthStore((s) => s.token);
   const [rfqOpen, setRfqOpen] = useState(false);
+  const [accountApproved, setAccountApproved] = useState(false);
+
+  useEffect(() => {
+    if (!token) {
+      setAccountApproved(false);
+      return;
+    }
+    let cancelled = false;
+    api
+      .get('/user/profile')
+      .then((res) => {
+        if (!cancelled) setAccountApproved(res.data?.account_approved === true);
+      })
+      .catch(() => {
+        if (!cancelled) setAccountApproved(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [token]);
 
   const handleSubmitRFQ = () => {
     if (items.length === 0) {
@@ -17,6 +41,22 @@ export default function CartPage() {
       return;
     }
     setRfqOpen(true);
+  };
+
+  const handlePlaceOrder = () => {
+    if (items.length === 0) {
+      toast.error('Your cart is empty');
+      return;
+    }
+    const payload = items.map((item) => ({
+      id: item.product_id,
+      name: item.name,
+      price: Number(item.price) || 0,
+      quantity: item.quantity,
+      tax_rate: item.tax_rate,
+    }));
+    localStorage.setItem('checkout_cart', JSON.stringify(payload));
+    router.push('/checkout');
   };
 
   const rfqItems: RFQLightboxItem[] = items.map((item) => ({
@@ -81,9 +121,15 @@ export default function CartPage() {
                     <h3 className="font-semibold text-lg text-slate-50 mb-1 truncate">
                       {item.name.replace(/&/g, 'and')}
                     </h3>
-                    <p className="text-xs tracking-widest uppercase text-[#c7d2ff] mb-3">
-                      Pricing on request
-                    </p>
+                    {accountApproved && typeof item.price === 'number' ? (
+                      <p className="text-sm text-[#c7d2ff] mb-3">
+                        ${Number(item.price).toFixed(2)}
+                      </p>
+                    ) : (
+                      <p className="text-xs tracking-widest uppercase text-[#c7d2ff] mb-3">
+                        Pricing on request
+                      </p>
+                    )}
                     <div className="flex items-center gap-4">
                       <div className="flex items-center gap-2 border-2 border-white/15 rounded-lg">
                         <button
@@ -117,24 +163,38 @@ export default function CartPage() {
 
             <div className="lg:col-span-1">
               <div className="glass-panel p-6 sticky top-4">
-                <h2 className="text-2xl font-bold mb-2 text-slate-50">Request a Quote</h2>
-                <p className="text-sm text-slate-300 mb-4 leading-relaxed">
-                  Submit your details and our team will share competitive pricing on WhatsApp /
-                  email — usually within a few hours.
-                </p>
+                {accountApproved ? (
+                  <>
+                    <h2 className="text-2xl font-bold mb-2 text-slate-50">Checkout</h2>
+                    <p className="text-sm text-slate-300 mb-4 leading-relaxed">
+                      Place an online order. Final prices and tax are confirmed by the server.
+                    </p>
+                    <p className="text-lg font-semibold text-slate-50 mb-4">
+                      ${items.reduce((s, it) => s + (Number(it.price) || 0) * it.quantity, 0).toFixed(2)}
+                    </p>
+                  </>
+                ) : (
+                  <>
+                    <h2 className="text-2xl font-bold mb-2 text-slate-50">Request a Quote</h2>
+                    <p className="text-sm text-slate-300 mb-4 leading-relaxed">
+                      Submit your details and our team will share competitive pricing on WhatsApp /
+                      email — usually within a few hours.
+                    </p>
 
-                <div className="flex items-start gap-3 p-3 bg-[#c7d2ff]/5 border border-[#c7d2ff]/20 rounded-lg mb-4">
-                  <MessageSquare className="w-5 h-5 text-[#c7d2ff] mt-0.5 flex-shrink-0" />
-                  <div className="text-xs text-slate-200 leading-relaxed">
-                    <p className="font-semibold mb-1 uppercase tracking-widest text-[10px] text-[#c7d2ff]">
-                      Quote by WhatsApp
-                    </p>
-                    <p className="text-slate-300">
-                      We do not display prices online so competitors cannot compare. Submit a
-                      request and we will respond with pricing for your selected items.
-                    </p>
-                  </div>
-                </div>
+                    <div className="flex items-start gap-3 p-3 bg-[#c7d2ff]/5 border border-[#c7d2ff]/20 rounded-lg mb-4">
+                      <MessageSquare className="w-5 h-5 text-[#c7d2ff] mt-0.5 flex-shrink-0" />
+                      <div className="text-xs text-slate-200 leading-relaxed">
+                        <p className="font-semibold mb-1 uppercase tracking-widest text-[10px] text-[#c7d2ff]">
+                          Quote by WhatsApp
+                        </p>
+                        <p className="text-slate-300">
+                          We do not display prices online so competitors cannot compare. Submit a
+                          request and we will respond with pricing for your selected items.
+                        </p>
+                      </div>
+                    </div>
+                  </>
+                )}
 
                 <p className="text-xs text-slate-400 mb-4">
                   {items.reduce((s, it) => s + it.quantity, 0)} unit
@@ -142,14 +202,25 @@ export default function CartPage() {
                   {items.length} product{items.length === 1 ? '' : 's'}.
                 </p>
 
-                <button
-                  type="button"
-                  onClick={handleSubmitRFQ}
-                  className="w-full glass-button glass-button-gradient text-white py-4 rounded-lg font-semibold transition-all transform hover:scale-[1.02] flex items-center justify-center gap-2 mb-3 shadow-lg"
-                >
-                  <FileSignature className="w-5 h-5" />
-                  Submit Quote Request
-                </button>
+                {accountApproved ? (
+                  <button
+                    type="button"
+                    onClick={handlePlaceOrder}
+                    className="w-full glass-button glass-button-gradient text-white py-4 rounded-lg font-semibold transition-all transform hover:scale-[1.02] flex items-center justify-center gap-2 mb-3 shadow-lg"
+                  >
+                    <ShoppingCart className="w-5 h-5" />
+                    Place Order
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={handleSubmitRFQ}
+                    className="w-full glass-button glass-button-gradient text-white py-4 rounded-lg font-semibold transition-all transform hover:scale-[1.02] flex items-center justify-center gap-2 mb-3 shadow-lg"
+                  >
+                    <FileSignature className="w-5 h-5" />
+                    Submit Quote Request
+                  </button>
+                )}
 
                 <button
                   type="button"

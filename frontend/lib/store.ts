@@ -4,7 +4,8 @@ import { persist } from 'zustand/middleware';
 interface CartItem {
   product_id: string;
   name: string;
-  price: number;
+  price?: number;
+  tax_rate?: number;
   image_url?: string;
   quantity: number;
 }
@@ -91,7 +92,7 @@ export const useCartStore = create<CartStore>()(
       },
       clearCart: () => set({ items: [] }),
       getTotal: () => {
-        return get().items.reduce((sum, item) => sum + item.price * item.quantity, 0);
+        return get().items.reduce((sum, item) => sum + (Number(item.price) || 0) * item.quantity, 0);
       },
       getItemCount: () => {
         return get().items.reduce((sum, item) => sum + item.quantity, 0);

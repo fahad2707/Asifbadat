@@ -527,7 +527,7 @@ body.category-mode #homeContent{display:none}
 </div>
 <div id="loader"><div class="ld-brand">EXPRESS DISTRIBUTORS</div><div class="ld-track"><div class="ld-fill" id="lf"></div></div><div class="ld-pct" id="lp">0%</div></div>
 <div class="cart-ov" id="cartOv" onclick="closeCart()"></div>
-<div id="cart"><div class="cart-hd"><button type="button" class="cart-back-mob" onclick="closeCart()">← Back</button><h3>Your Cart</h3><button type="button" class="cart-cls" onclick="closeCart()" aria-label="Close cart">×</button></div><div class="cart-list" id="cartList"><div class="cart-mt"><div class="cart-mt-ico">🛒</div><p style="font-size:13px">Your cart is empty</p></div></div><div class="cart-ft"><div class="rfq-banner"><div><b>Request a Quote</b>Our team replies with pricing on WhatsApp / email after you submit your details.</div></div><button class="btn-fill" style="width:100%" onclick="goToCheckout()"><span>Submit Quote Request →</span></button></div></div>
+<div id="cart"><div class="cart-hd"><button type="button" class="cart-back-mob" onclick="closeCart()">← Back</button><h3>Your Cart</h3><button type="button" class="cart-cls" onclick="closeCart()" aria-label="Close cart">×</button></div><div class="cart-list" id="cartList"><div class="cart-mt"><div class="cart-mt-ico">🛒</div><p style="font-size:13px">Your cart is empty</p></div></div><div class="cart-ft"><div class="rfq-banner"><div><b id="cartCtaTitle">Request a Quote</b><span id="cartCtaCopy">Our team replies with pricing on WhatsApp / email after you submit your details.</span></div></div><button class="btn-fill" style="width:100%" onclick="goToCheckout()"><span id="cartCtaLabel">Submit Quote Request →</span></button></div></div>
 <div class="wl-ov" id="wlOv" onclick="closeWl()"></div>
 <div id="wishlist"><div class="wl-hd"><button type="button" class="cart-back-mob" onclick="closeWl()">← Back</button><h3>♡ Wishlist</h3><button type="button" class="cart-cls" onclick="closeWl()" aria-label="Close wishlist">×</button></div><div class="wl-list" id="wlList"><div class="cart-mt"><div class="cart-mt-ico">♡</div><p style="font-size:13px">Your wishlist is empty</p></div></div></div>
 <div id="toast"><span class="ti">✓</span><span id="toastTxt"></span></div>
@@ -699,6 +699,42 @@ document.querySelectorAll('.rv,.rvl,.rvr').forEach(el=>ro.observe(el));
 const mosaic=document.getElementById('mosaic');if(mosaic){const mcN=window.matchMedia('(max-width:768px)').matches?36:64;for(let i=0;i<mcN;i++){const c=document.createElement('div');c.className='mc';if(Math.random()>.85){c.classList.add('lit');c.style.animationDelay=(Math.random()*4)+'s';c.style.animationDuration=(3+Math.random()*3)+'s';}mosaic.appendChild(c);}}
 document.querySelectorAll('.stat-v').forEach(el=>{const obs=new IntersectionObserver(([e])=>{if(!e.isIntersecting)return;const raw=el.textContent.trim(),match=raw.match(/^([\d.]+)(K?[+%]?)$/);if(!match){obs.disconnect();return;}const num=parseFloat(match[1]),sfx=match[2];let cur=0;const step=num/52;const iv=setInterval(()=>{cur+=step;if(cur>=num){cur=num;clearInterval(iv);}el.textContent=(Number.isInteger(num)?Math.round(cur):cur.toFixed(1))+sfx;},20);obs.disconnect();},{threshold:.5});obs.observe(el);});
 const API_BASE="/api";
+let accountApproved=false;
+function storefrontUserToken(){
+  try{return String(localStorage.getItem('token')||'').trim();}catch(e){return '';}
+}
+function catalogHeaders(){
+  const headers={'Accept':'application/json'};
+  const token=storefrontUserToken();
+  if(token) headers.Authorization='Bearer '+token;
+  return headers;
+}
+async function resolveAccountApproved(){
+  accountApproved=false;
+  const token=storefrontUserToken();
+  if(!token){updateCheckoutCta();return;}
+  try{
+    const res=await fetch(API_BASE+'/user/profile',{headers:{Authorization:'Bearer '+token}});
+    if(!res.ok){updateCheckoutCta();return;}
+    const data=await res.json();
+    accountApproved=!!(data&&data.account_approved===true);
+  }catch(e){accountApproved=false;}
+  updateCheckoutCta();
+}
+function updateCheckoutCta(){
+  const title=document.getElementById('cartCtaTitle');
+  const copy=document.getElementById('cartCtaCopy');
+  const label=document.getElementById('cartCtaLabel');
+  if(accountApproved){
+    if(title) title.textContent='Place order';
+    if(copy) copy.textContent='Approved accounts can check out with catalog prices. Final totals are confirmed by the server.';
+    if(label) label.textContent='Place Order →';
+  }else{
+    if(title) title.textContent='Request a Quote';
+    if(copy) copy.textContent='Our team replies with pricing on WhatsApp / email after you submit your details.';
+    if(label) label.textContent='Submit Quote Request →';
+  }
+}
 const AGE_STORAGE_KEY='edi_age_verified';
 const CAT_PATH_RE=/\/site\/category\/([^/?#]+)/i;
 function getActiveCategorySlug(){
@@ -1188,8 +1224,9 @@ async function loadData(){
   }
     const replaceAmp = (v) => String(v ?? '').replace(/&/g,'and');
   try{
+    await resolveAccountApproved();
     const [prodRes,catRes]=await Promise.all([
-      fetch(API_BASE+'/products?limit=5000').then(r=>{ if(!r.ok) throw new Error('Products'); return r.json(); }),
+      fetch(API_BASE+'/products?limit=5000',{headers:catalogHeaders()}).then(r=>{ if(!r.ok) throw new Error('Products'); return r.json(); }),
       fetch(API_BASE+'/categories').then(r=>{ if(!r.ok) throw new Error('Categories'); return r.json(); })
     ]);
     ALL_CATEGORIES=Array.isArray(catRes)?catRes.map((cat)=>({ ...cat, name: replaceAmp(cat.name||'') })):[];
@@ -1198,7 +1235,7 @@ async function loadData(){
       id:p.id,n:replaceAmp(p.name||''),d:p.description||'',c:replaceAmp(p.category_name||'Uncategorized'),
       cid:p.category_id||'',cslug:p.category_slug||'',
       pid:resolveCatalogProductId(p),
-      p:Number(p.price)||0,image_url:p.image_url||'',g:pickGlow(i),
+      p:(typeof p.price==='number'&&Number.isFinite(Number(p.price)))?Number(p.price):0,image_url:p.image_url||'',g:pickGlow(i),
       stock_quantity:p.stock_quantity,sku:p.sku,tax_rate:Number(p.tax_rate)||0
     }));
     MIXED_ALL=shuffleProducts(PRODS);
@@ -1358,6 +1395,17 @@ function openCart(){closeCartPop();document.getElementById('cart').classList.add
 function closeCart(){closeCartPop();document.getElementById('cart').classList.remove('open');document.getElementById('cartOv').classList.remove('show');}
 function goToCheckout(){
   if(!cartItems.length){showToast('Your cart is empty');return;}
+  if(accountApproved){
+    const payload=cartItems.map(function(c){
+      const p=typeof PRODS!=='undefined'?PRODS.find(function(x){return String(x.id)===String(c.id);}):null;
+      const price=p&&typeof p.p==='number'?p.p:(Number(c.price)||0);
+      return {id:String(c.id),name:c.name,price:price,quantity:c.qty,tax_rate:(p&&p.tax_rate)||0};
+    });
+    try{localStorage.setItem('checkout_cart',JSON.stringify(payload));}catch(e){}
+    closeCart();
+    window.location.href='/checkout';
+    return;
+  }
   closeCart();
   openRfqLightbox();
 }

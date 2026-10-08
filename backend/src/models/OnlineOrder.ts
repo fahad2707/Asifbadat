@@ -17,6 +17,10 @@ export interface IStatusEntry {
 
 export interface IOnlineOrder extends Document {
   order_number: string;
+  /** Storefront User who placed the order. Optional: historical rows have none. */
+  user_id?: mongoose.Types.ObjectId;
+  /** Linked CRM Customer. Optional: historical rows have none. */
+  customer_id?: mongoose.Types.ObjectId;
   customer_name: string;
   customer_email: string;
   customer_phone: string;
@@ -60,6 +64,8 @@ const StatusEntrySchema = new Schema<IStatusEntry>({
 const OnlineOrderSchema = new Schema<IOnlineOrder>(
   {
     order_number: { type: String, required: true, unique: true },
+    user_id: { type: Schema.Types.ObjectId, ref: 'User' },
+    customer_id: { type: Schema.Types.ObjectId, ref: 'Customer' },
     customer_name: { type: String, required: true },
     customer_email: { type: String, required: true },
     customer_phone: { type: String, required: true },

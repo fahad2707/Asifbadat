@@ -5,10 +5,12 @@ import OnlineOrder from '../models/OnlineOrder';
 import Product from '../models/Product';
 import Invoice from '../models/Invoice';
 import StockMovement from '../models/StockMovement';
-import { authenticateAdmin, AuthRequest } from '../middleware/auth';
+import { authenticateAdmin, authenticateUser, AuthRequest } from '../middleware/auth';
 import { onlineCheckoutLimiter, onlineTrackLimiter } from '../middleware/rateLimit';
 import { logSecurityEvent } from '../utils/securityLog';
 import { httpErrorFromPayment, paymentApplication } from '../services/paymentApplication';
+import { isUserLinkedToApprovedCustomer } from '../utils/customerAccount';
+import Customer from '../models/Customer';
 
 const router = express.Router();
 
@@ -45,9 +47,24 @@ async function getNextOrderNumber(): Promise<string> {
   return `WEB-${String(next).padStart(4, '0')}`;
 }
 
-// Public: place an order (no auth required - this is from the storefront)
-router.post('/', onlineCheckoutLimiter, async (req, res) => {
+// Approved storefront User only. Guest / unapproved / admin JWT cannot create OnlineOrders.
+router.post('/', onlineCheckoutLimiter, authenticateUser, async (req: AuthRequest, res) => {
   try {
+    const userId = typeof req.userId === 'string' ? req.userId.trim() : '';
+    if (!userId) {
+      return res.status(401).json({ error: 'Authentication required' });
+    }
+
+    const approved = await isUserLinkedToApprovedCustomer(userId);
+    if (!approved) {
+      return res.status(403).json({ error: 'Account is not approved for online ordering' });
+    }
+
+    const linkedCustomer = await Customer.findOne({ user_id: userId }).select('_id').lean();
+    if (!linkedCustomer) {
+      return res.status(403).json({ error: 'Account is not approved for online ordering' });
+    }
+
     const body = placeOrderSchema.parse(req.body);
 
     const orderItems: any[] = [];
@@ -87,6 +104,8 @@ router.post('/', onlineCheckoutLimiter, async (req, res) => {
 
     const order = await OnlineOrder.create({
       order_number: orderNumber,
+      user_id: userId,
+      customer_id: (linkedCustomer as { _id: mongoose.Types.ObjectId })._id,
       customer_name: body.customer_name,
       customer_email: body.customer_email,
       customer_phone: body.customer_phone,

@@ -4,6 +4,7 @@ import Order from '../models/Order';
 import OrderItem from '../models/OrderItem';
 import OrderStatusHistory from '../models/OrderStatusHistory';
 import { authenticateUser, AuthRequest } from '../middleware/auth';
+import { isUserLinkedToApprovedCustomer } from '../utils/customerAccount';
 import { z } from 'zod';
 
 const router = express.Router();
@@ -17,6 +18,8 @@ router.get('/profile', authenticateUser, async (req: AuthRequest, res) => {
       return res.status(404).json({ error: 'User not found' });
     }
 
+    const account_approved = await isUserLinkedToApprovedCustomer(req.userId);
+
     res.json({
       id: user._id.toString(),
       phone: user.phone,
@@ -25,6 +28,7 @@ router.get('/profile', authenticateUser, async (req: AuthRequest, res) => {
       loyalty_points: user.loyalty_points || 0,
       total_spent: user.total_spent || 0,
       created_at: user.created_at,
+      account_approved,
     });
   } catch (error) {
     console.error('Get profile error:', error);

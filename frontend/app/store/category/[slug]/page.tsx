@@ -9,9 +9,10 @@ import { useCartStore } from '@/lib/store';
 import toast from 'react-hot-toast';
 
 interface Product {
-  id: number;
+  id: number | string;
   name: string;
-  price: number;
+  price?: number;
+  tax_rate?: number;
   image_url?: string;
   description?: string;
   stock_quantity: number;
@@ -48,15 +49,19 @@ export default function CategoryPage() {
   };
 
   const handleAddToCart = (product: Product) => {
+    const hasPrice = typeof product.price === 'number' && Number.isFinite(product.price);
     addItem({
       product_id: product.id.toString(),
       name: product.name,
-      // Prices are not used on the storefront anymore — RFQ flow only.
-      price: 0,
+      ...(hasPrice ? { price: product.price } : {}),
+      tax_rate: product.tax_rate,
       image_url: product.image_url,
     });
     toast.success('Added to cart');
   };
+
+  const hasCatalogPrice = (product: Product) =>
+    typeof product.price === 'number' && Number.isFinite(product.price);
 
   if (loading) {
     return (
@@ -151,9 +156,15 @@ export default function CategoryPage() {
                     </p>
                   )}
                   <div className="flex items-center justify-between mb-4">
-                    <span className="inline-flex items-center gap-1 text-xs font-semibold tracking-widest uppercase text-primary-700 bg-primary-50 border border-primary-100 px-2.5 py-1 rounded-full">
-                      Quote on request
-                    </span>
+                    {hasCatalogPrice(product) ? (
+                      <span className="text-lg font-semibold text-gray-900">
+                        ${Number(product.price).toFixed(2)}
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center gap-1 text-xs font-semibold tracking-widest uppercase text-primary-700 bg-primary-50 border border-primary-100 px-2.5 py-1 rounded-full">
+                        Quote on request
+                      </span>
+                    )}
                     <div className="flex items-center gap-1 text-yellow-500">
                       <Star className="w-4 h-4 fill-yellow-500" />
                       <span className="text-sm font-semibold">4.5</span>

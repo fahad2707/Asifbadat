@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { ShoppingBag, CreditCard, Truck, ArrowLeft, Lock } from 'lucide-react';
+import { useCartStore } from '@/lib/store';
 
 const API = typeof window !== 'undefined' ? '/api' : (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5001/api');
 
@@ -30,8 +31,22 @@ interface CartItem {
   tax_rate?: number;
 }
 
+function toCheckoutItems(
+  items: Array<{ product_id?: string; id?: string; name?: string; price?: number; quantity?: number; tax_rate?: number }>,
+): CartItem[] {
+  return items.map((it) => ({
+    id: String(it.product_id || it.id || ''),
+    name: String(it.name ?? '').replace(/&/g, 'and'),
+    price: Number(it.price) || 0,
+    quantity: Number(it.quantity) || 1,
+    tax_rate: it.tax_rate,
+  })).filter((it) => it.id);
+}
+
 export default function CheckoutPage() {
   const router = useRouter();
+  const persistItems = useCartStore((s) => s.items);
+  const clearPersistCart = useCartStore((s) => s.clearCart);
   const [cart, setCart] = useState<CartItem[]>([]);
   const [submitting, setSubmitting] = useState(false);
 
@@ -51,24 +66,22 @@ export default function CheckoutPage() {
   const [cardName, setCardName] = useState('');
 
   useEffect(() => {
+    if (persistItems.length) {
+      setCart(toCheckoutItems(persistItems));
+      return;
+    }
     try {
       const raw = localStorage.getItem('checkout_cart');
       if (raw) {
         const items = JSON.parse(raw) as CartItem[];
         if (items.length) {
-          // Replace '&' with 'and' to avoid weird font rendering.
-          setCart(
-            items.map((it) => ({
-              ...it,
-              name: String(it.name ?? '').replace(/&/g, 'and'),
-            }))
-          );
+          setCart(toCheckoutItems(items));
           return;
         }
       }
     } catch {}
     router.push('/');
-  }, [router]);
+  }, [persistItems, router]);
 
   const subtotal = cart.reduce((s, c) => s + c.price * c.quantity, 0);
   const taxTotal = cart.reduce((s, c) => {
@@ -101,9 +114,17 @@ export default function CheckoutPage() {
     if (!canSubmit) return;
     setSubmitting(true);
     try {
+      const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
+      if (!token) {
+        router.push('/login?redirect=/checkout');
+        return;
+      }
       const res = await fetch(`${API}/online-orders`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
         body: JSON.stringify({
           items: cart.map((c) => ({ product_id: c.id, quantity: c.quantity, price: c.price })),
           customer_name: name,
@@ -123,6 +144,7 @@ export default function CheckoutPage() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed');
       localStorage.removeItem('checkout_cart');
+      clearPersistCart();
       router.push(
         `/order-confirmation?order=${encodeURIComponent(data.order_number)}&email=${encodeURIComponent(email.trim().toLowerCase())}`
       );
