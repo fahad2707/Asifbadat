@@ -70,7 +70,6 @@ test('public shape preserves storefront-required fields', () => {
   assert.strictEqual(pub.name, 'Test Widget');
   assert.strictEqual(pub.slug, 'test-widget');
   assert.strictEqual(pub.description, 'A widget for tests.');
-  assert.strictEqual(pub.price, 100);
   assert.strictEqual(pub.tax_rate, 8.5);
   assert.strictEqual(pub.image_url, 'https://example.invalid/w.png');
   assert.strictEqual(pub.sku, 'SKU-1');
@@ -81,6 +80,23 @@ test('public shape preserves storefront-required fields', () => {
   assert.strictEqual(pub.category_slug, 'cat');
   assert.strictEqual(pub.sub_category_name, 'Sub');
   assert.strictEqual(pub.is_active, true);
+});
+
+test('public shape omits price unless includePrice is true', () => {
+  const without = toPublicProduct(raw) as Record<string, unknown>;
+  assert.equal('price' in without, false);
+  assert.equal(without.price, undefined);
+
+  const explicitFalse = toPublicProduct(raw, { includePrice: false }) as Record<string, unknown>;
+  assert.equal('price' in explicitFalse, false);
+  assert.equal(explicitFalse.price, undefined);
+});
+
+test('public shape includes selling price when includePrice is true', () => {
+  const priced = toPublicProduct(raw, { includePrice: true }) as Record<string, unknown>;
+  assert.equal(priced.price, 100);
+  assert.equal('cost_price' in priced, false);
+  assert.equal('vendor_id' in priced, false);
 });
 
 test('public stock_quantity is available, not raw on-hand', () => {
@@ -124,6 +140,7 @@ test('staff tax type label comes from populated TaxType', () => {
 
 test('staff shape includes internal fields', () => {
   const staff = toStaffProduct(raw);
+  assert.strictEqual(staff.price, 100);
   assert.strictEqual(staff.cost_price, 42);
   assert.strictEqual(staff.vendor_id, 'bbbbbbbbbbbbbbbbbbbbbbbb');
   assert.strictEqual(staff.reorder_point, 3);

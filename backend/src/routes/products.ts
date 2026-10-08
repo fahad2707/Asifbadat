@@ -5,7 +5,12 @@ import Product from '../models/Product';
 import Category from '../models/Category';
 import SubCategory from '../models/SubCategory';
 import TaxType from '../models/TaxType';
-import { authenticateAdmin, optionalAuthenticateAdmin, AuthRequest } from '../middleware/auth';
+import {
+  authenticateAdmin,
+  optionalAuthenticateAdmin,
+  optionalAuthenticateUser,
+  AuthRequest,
+} from '../middleware/auth';
 import { z } from 'zod';
 import { buildPreview, executeImport } from '../services/productImportService';
 import {
@@ -13,6 +18,7 @@ import {
   migrateProductIdAndSku,
 } from '../utils/productCodes';
 import { toPublicProduct, toStaffProduct } from '../utils/productProjection';
+import { isUserLinkedToApprovedCustomer } from '../utils/customerAccount';
 import { parseTaxTypeIdInput, staffTaxTypeFields } from '../utils/productTaxType';
 import {
   optionalOpeningAdminId,
@@ -23,12 +29,28 @@ import {
 /**
  * Any response that contains internal product fields (cost_price, vendor_id,
  * reorder_point, committed_quantity, ...) must not be served through shared
- * caches. Storefront / guest responses are still cacheable by the default
- * upstream policy.
+ * caches. Public catalog GET responses may still be cacheable by the default
+ * upstream policy, but MUST vary by Authorization so a guest never receives
+ * a cached approved-customer body (price present vs absent).
  */
 function markStaffPrivate(res: express.Response) {
   res.set('Cache-Control', 'private, no-store');
   res.set('Vary', 'Authorization');
+}
+
+function markCatalogVary(res: express.Response) {
+  res.set('Vary', 'Authorization');
+}
+
+/**
+ * Selling price is allowed on the public projection only when the request
+ * carries a valid User JWT linked to Customer.account_status === 'approved'.
+ * Admin callers use toStaffProduct instead. Never reads query/body flags.
+ */
+async function shouldIncludePublicPrice(req: AuthRequest): Promise<boolean> {
+  if (req.userRole === 'admin') return false;
+  if (!req.userId) return false;
+  return isUserLinkedToApprovedCustomer(req.userId);
 }
 
 const router = express.Router();
@@ -120,8 +142,9 @@ const upload = multer({
 });
 
 // Get all products (public, or admin with visibility=active|inactive|all)
-router.get('/', optionalAuthenticateAdmin, async (req: AuthRequest, res) => {
+router.get('/', optionalAuthenticateAdmin, optionalAuthenticateUser, async (req: AuthRequest, res) => {
   try {
+    markCatalogVary(res);
     const { category, category_id: categoryIdParam, sub_category_id: subCategoryIdParam, search, page = 1, limit, visibility } = req.query;
     const limitNum = Math.min(Math.max(Number(limit) || 100, 1), 5000);
     const pageNum = Math.max(Number(page) || 1, 1);
@@ -204,12 +227,13 @@ router.get('/', optionalAuthenticateAdmin, async (req: AuthRequest, res) => {
 
     const total = await Product.countDocuments(query);
 
-    // Authorization decision is server-side ONLY. `isAdmin` came from
-    // `optionalAuthenticateAdmin` verifying the JWT above; we never trust
-    // a client-supplied flag such as `?includeCost=` or a body/isAdmin field.
+    // Authorization decision is server-side ONLY. Admin vs User vs guest
+    // comes from JWT middleware + Customer.account_status — never from
+    // `?includeCost=`, `?showPrice=`, or a body/isAdmin field.
+    const includePrice = isAdmin ? false : await shouldIncludePublicPrice(req);
     const formattedProducts = isAdmin
       ? products.map((p) => toStaffProduct(p as any))
-      : products.map((p) => toPublicProduct(p as any));
+      : products.map((p) => toPublicProduct(p as any, { includePrice }));
 
     if (isAdmin) markStaffPrivate(res);
 
@@ -287,8 +311,9 @@ router.get('/barcode/:barcode', authenticateAdmin, async (req, res) => {
 });
 
 // Get product by ID
-router.get('/:id', optionalAuthenticateAdmin, async (req: AuthRequest, res) => {
+router.get('/:id', optionalAuthenticateAdmin, optionalAuthenticateUser, async (req: AuthRequest, res) => {
   try {
+    markCatalogVary(res);
     const product = await Product.findById(req.params.id)
       .populate('category_id', 'name slug')
       .populate('sub_category_id', 'name slug')
@@ -305,7 +330,10 @@ router.get('/:id', optionalAuthenticateAdmin, async (req: AuthRequest, res) => {
     }
 
     // Explicit allowlist per role (no full-document spread).
-    const body = isAdmin ? toStaffProduct(product as any) : toPublicProduct(product as any);
+    const includePrice = isAdmin ? false : await shouldIncludePublicPrice(req);
+    const body = isAdmin
+      ? toStaffProduct(product as any)
+      : toPublicProduct(product as any, { includePrice });
     if (isAdmin) markStaffPrivate(res);
     res.json(body);
   } catch (error) {

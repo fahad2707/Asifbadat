@@ -11,11 +11,16 @@
  *
  * These helpers build explicit allowlisted response shapes. We do NOT spread
  * the whole Mongoose document into responses. Route handlers pick the shape
- * from a **server-side authorization decision** (`req.userRole === 'admin'`)
- * — never from a client-supplied flag such as `?includeCost=` or `?isAdmin=`.
+ * from a **server-side authorization decision** (`req.userRole === 'admin'`,
+ * approved-customer lookup) — never from a client-supplied flag such as
+ * `?includeCost=`, `?showPrice=`, or `?isAdmin=`.
  *
- * `toStaffProduct` is a strict superset of `toPublicProduct` on the fields
- * that overlap, so staff callers can rely on both being present.
+ * `toPublicProduct` does not inspect JWTs or Customer records. Callers pass
+ * `{ includePrice }` after they have decided whether selling price is allowed.
+ * Price is omitted (key absent) unless `includePrice` is true — never `0`/`null`.
+ *
+ * `toStaffProduct` is a strict superset of the public fields that overlap,
+ * and always includes `price`, so staff callers can rely on both being present.
  */
 
 import type mongoose from 'mongoose';
@@ -84,16 +89,24 @@ function nonNegative(n: unknown): number {
   return Number.isFinite(x) && x > 0 ? x : 0;
 }
 
+export type PublicProductOptions = {
+  /** When true, include selling `price`. Default: omit the key. */
+  includePrice?: boolean;
+};
+
 /**
- * Public / customer-facing shape. Guests and authenticated non-admin users
- * receive this. Note that `stock_quantity` is deliberately clamped to
- * `available_quantity` (on-hand minus committed) so the response never
- * reveals reservation load or exact on-hand counts.
+ * Public / customer-facing shape. Guests and unapproved users receive this
+ * without `price`. Approved storefront users receive the same shape plus `price`.
+ *
+ * `stock_quantity` is deliberately clamped to `available_quantity` (on-hand
+ * minus committed) so the response never reveals reservation load or exact
+ * on-hand counts.
  */
-export function toPublicProduct(product: RawProductDoc) {
+export function toPublicProduct(product: RawProductDoc, options?: PublicProductOptions) {
   const onHand = nonNegative(product.stock_quantity);
   const committed = nonNegative(product.committed_quantity);
   const available = Math.max(0, onHand - committed);
+  const includePrice = options?.includePrice === true;
   return {
     id: String(product._id),
     name: product.name,
@@ -106,7 +119,7 @@ export function toPublicProduct(product: RawProductDoc) {
         : undefined,
     sku: product.sku,
     barcode: product.barcode,
-    price: Number(product.price) || 0,
+    ...(includePrice ? { price: Number(product.price) || 0 } : {}),
     tax_rate: product.tax_rate != null ? Number(product.tax_rate) : 0,
     image_url: product.image_url,
     category_id: idString(product.category_id),
@@ -118,7 +131,7 @@ export function toPublicProduct(product: RawProductDoc) {
     stock_quantity: available,
     available_quantity: available,
     is_active: true, // Guests only ever see active products; expose a constant.
-  } as const;
+  };
 }
 
 /**
@@ -129,11 +142,12 @@ export function toPublicProduct(product: RawProductDoc) {
  * public shape. Staff callers need this for restocking decisions.
  */
 export function toStaffProduct(product: RawProductDoc) {
-  const pub = toPublicProduct(product);
+  const pub = toPublicProduct(product, { includePrice: true });
   const onHand = nonNegative(product.stock_quantity);
   const committed = nonNegative(product.committed_quantity);
   return {
     ...pub,
+    price: Number(product.price) || 0,
     stock_quantity: onHand,
     committed_quantity: committed,
     available_quantity: Math.max(0, onHand - committed),

@@ -81,4 +81,24 @@ export const optionalAuthenticateAdmin = (req: AuthRequest, res: Response, next:
   }
 };
 
+/**
+ * If a valid storefront User JWT is present, sets userId; otherwise continues
+ * (no 401). Invalid/expired tokens are treated as unauthenticated.
+ * Does not override an already-authenticated admin.
+ */
+export const optionalAuthenticateUser = (req: AuthRequest, res: Response, next: NextFunction) => {
+  if (req.userRole === 'admin') return next();
+  try {
+    const token = extractBearerToken(req.headers.authorization);
+    if (!token) return next();
+    const decoded = jwt.verify(token, process.env.JWT_SECRET!) as { userId?: unknown };
+    if (typeof decoded.userId === 'string' && decoded.userId.trim()) {
+      req.userId = decoded.userId.trim();
+    }
+    next();
+  } catch {
+    next();
+  }
+};
+
 
