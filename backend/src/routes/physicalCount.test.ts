@@ -337,6 +337,7 @@ test('POST /inventory/adjust is still a delta endpoint (source contract)', async
   const { join } = await import('node:path');
   const src = readFileSync(join(process.cwd(), 'src/routes/inventory.ts'), 'utf8');
   assert.match(src, /quantity_change: z\.coerce\.number\(\)\.int\(\)/);
-  assert.match(src, /const newQty = oldQty \+ quantity_change/);
+  assert.match(src, /\$inc:\s*\{\s*stock_quantity:\s*quantity_change\s*\}/);
+  assert.match(src, /StockMovementType\.ADJUSTMENT/);
   assert.match(src, /router\.post\('\/physical-count'/);
 });

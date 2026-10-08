@@ -7,6 +7,8 @@ import { authenticateAdmin, AuthRequest } from '../middleware/auth';
 import { z } from 'zod';
 import { applyPhysicalCount, PhysicalCountError } from '../services/physicalCountService';
 import { serializeStockMovement } from '../utils/stockMovementDisplay';
+import { createStockMovement, StockMovementWriteError } from '../utils/createStockMovement';
+import { StockMovementType } from '../shared/enums';
 
 const router = express.Router();
 
@@ -52,7 +54,8 @@ router.get('/summary', authenticateAdmin, async (req: AuthRequest, res) => {
   }
 });
 
-// Adjust stock (manual adjustment) and optionally update listed cost / selling price
+// Adjust stock (manual adjustment) and optionally update listed cost / selling price.
+// Quantity path: $inc + canonical ADJUSTMENT movement in one Mongo transaction (delta, not absolute).
 router.post('/adjust', authenticateAdmin, async (req: AuthRequest, res) => {
   try {
     const schema = z.object({
@@ -84,23 +87,63 @@ router.post('/adjust', authenticateAdmin, async (req: AuthRequest, res) => {
       }
     }
 
-    const oldQty = product.stock_quantity;
-    const newQty = oldQty + quantity_change;
-    const update: Record<string, unknown> = {};
-    if (hasQty) update.stock_quantity = newQty;
-    if (hasCost) update.cost_price = nextCost;
-    if (hasPrice) update.price = nextPrice;
+    const oldQty = Number(product.stock_quantity) || 0;
+    const priceUpdate: Record<string, unknown> = {};
+    if (hasCost) priceUpdate.cost_price = nextCost;
+    if (hasPrice) priceUpdate.price = nextPrice;
 
-    await Product.findByIdAndUpdate(product_id, update);
+    let finalStock = oldQty;
+    let finalCost = hasCost ? nextCost : (product as any).cost_price;
+    let finalPrice = hasPrice ? nextPrice : product.price;
+
     if (hasQty) {
-      await StockMovement.create({
-        product_id,
-        movement_type: 'adjustment',
-        quantity_change,
-        notes: notes || undefined,
-        admin_id: req.userId,
-      });
+      const session = await mongoose.startSession();
+      session.startTransaction();
+      try {
+        const updatedProduct = await Product.findByIdAndUpdate(
+          product_id,
+          {
+            $inc: { stock_quantity: quantity_change },
+            ...(Object.keys(priceUpdate).length ? { $set: priceUpdate } : {}),
+          },
+          { new: true, session }
+        );
+        if (!updatedProduct) {
+          throw new Error('Product not found');
+        }
+        const after = Number((updatedProduct as any).stock_quantity);
+        const before = after - quantity_change;
+        await createStockMovement({
+          session,
+          productId: product_id,
+          movementType: StockMovementType.ADJUSTMENT,
+          quantityBefore: before,
+          quantityChange: quantity_change,
+          quantityAfter: after,
+          notes: notes || undefined,
+          adminId:
+            typeof req.userId === 'string' && mongoose.Types.ObjectId.isValid(req.userId)
+              ? req.userId
+              : undefined,
+        });
+        await session.commitTransaction();
+        finalStock = after;
+        finalCost = (updatedProduct as any).cost_price;
+        finalPrice = (updatedProduct as any).price;
+      } catch (txnErr) {
+        await session.abortTransaction();
+        throw txnErr;
+      } finally {
+        session.endSession();
+      }
+    } else {
+      const updatedProduct = await Product.findByIdAndUpdate(product_id, { $set: priceUpdate }, { new: true });
+      if (!updatedProduct) return res.status(404).json({ error: 'Product not found' });
+      finalStock = Number((updatedProduct as any).stock_quantity) || 0;
+      finalCost = (updatedProduct as any).cost_price;
+      finalPrice = (updatedProduct as any).price;
     }
+
     await AuditLog.create({
       admin_id: req.userId,
       action: 'stock_adjust',
@@ -108,24 +151,30 @@ router.post('/adjust', authenticateAdmin, async (req: AuthRequest, res) => {
       entity_id: product_id,
       old_value: { stock_quantity: oldQty, cost_price: (product as any).cost_price, price: product.price },
       new_value: {
-        stock_quantity: hasQty ? newQty : oldQty,
-        cost_price: hasCost ? nextCost : (product as any).cost_price,
-        price: hasPrice ? nextPrice : product.price,
+        stock_quantity: finalStock,
+        cost_price: finalCost,
+        price: finalPrice,
       },
       details: notes || `Stock adjusted by ${quantity_change >= 0 ? '+' : ''}${quantity_change}`,
     });
-    const updated = await Product.findById(product_id).lean();
+
     res.json({
-      id: updated!._id.toString(),
-      stock_quantity: (updated as any).stock_quantity,
-      cost_price: (updated as any).cost_price ?? null,
-      price: (updated as any).price,
+      id: product_id.toString(),
+      stock_quantity: finalStock,
+      cost_price: finalCost ?? null,
+      price: finalPrice,
       message: hasQty
         ? `Stock adjusted by ${quantity_change >= 0 ? '+' : ''}${quantity_change}`
         : 'Prices updated',
     });
   } catch (error: any) {
     if (error instanceof z.ZodError) return res.status(400).json({ error: error.errors[0].message });
+    if (error instanceof StockMovementWriteError) {
+      return res.status(error.status).json({ error: error.message });
+    }
+    if (error?.message === 'Product not found') {
+      return res.status(404).json({ error: 'Product not found' });
+    }
     console.error('Adjust stock error:', error);
     res.status(500).json({ error: 'Failed to adjust stock' });
   }
