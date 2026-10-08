@@ -109,7 +109,8 @@ test('route source keeps quotation inventory and payment gates explicit', () => 
   const admin = readFileSync(join(root, 'routes/admin.ts'), 'utf8');
   const paymentApplication = readFileSync(join(root, 'services/paymentApplication.ts'), 'utf8');
 
-  assert.match(invoices, /shouldAdjustInventoryForDocumentType\(docType\)/);
+  assert.match(invoices, /createWholesaleInvoiceWithInventory/);
+  assert.match(invoices, /usesMigratedWholesaleInventory/);
   assert.match(invoices, /shouldAdjustInventoryForDocumentType\(invoice\.invoice_type\)/);
   assert.match(invoices, /paymentApplication/);
   assert.match(paymentApplication, /isQuotationType/);

@@ -16,6 +16,7 @@ import { createApp } from '../server';
 import Invoice from '../models/Invoice';
 import Product from '../models/Product';
 import TaxType from '../models/TaxType';
+import StockMovement from '../models/StockMovement';
 import { DOCUMENT_TYPE_INVOICE, DOCUMENT_TYPE_QUOTATION } from '../utils/documentType';
 
 const GST_ID = '64b1c2d3e4f5a6b7c8d9e0f1';
@@ -84,7 +85,17 @@ afterEach(() => {
   }
 });
 
+function firstCreateDoc(docs: unknown): Record<string, unknown> {
+  return (Array.isArray(docs) ? docs[0] : docs) as Record<string, unknown>;
+}
+
 function stubProducts() {
+  mock.method(mongoose, 'startSession', async () => ({
+    startTransaction() {},
+    async commitTransaction() {},
+    async abortTransaction() {},
+    endSession() {},
+  }));
   mock.method(Product, 'find', () => ({
     populate() {
       return this;
@@ -101,10 +112,19 @@ function stubProducts() {
     };
   });
   mock.method(Product, 'findByIdAndUpdate', async () => null);
+  mock.method(Product, 'findOneAndUpdate', async (filter: { _id?: unknown }, update: { $inc?: { stock_quantity?: number } }) => {
+    const id = String(filter._id);
+    const row = catalog[id];
+    if (!row) return null;
+    const inc = Number(update.$inc?.stock_quantity || 0);
+    row.stock_quantity = Number(row.stock_quantity || 0) + inc;
+    return { _id: id, stock_quantity: row.stock_quantity, product_type: row.product_type };
+  });
+  mock.method(StockMovement, 'create', async (docs: unknown) => [Array.isArray(docs) ? docs[0] : docs]);
 }
 
 function createdInvoice(fields: Record<string, unknown>) {
-  const _id = { toString: () => 'inv-tax-02' };
+  const _id = { toString: () => '64b0000000000000000a00a2' };
   return {
     _id,
     toObject: () => ({ _id, ...fields }),
@@ -123,14 +143,18 @@ test('POST invoice inherits GST / VAT / No Tax per line and sums tax', async () 
   assertNoMongoConnection();
   stubProducts();
   const stockUpdates: Array<{ id: unknown; update: unknown }> = [];
-  mock.method(Product, 'findByIdAndUpdate', async (id: unknown, update: unknown) => {
-    stockUpdates.push({ id, update });
-    return catalog[String(id)];
+  mock.method(Product, 'findOneAndUpdate', async (filter: { _id?: unknown }, update: unknown) => {
+    stockUpdates.push({ id: filter._id, update });
+    const id = String(filter._id);
+    const inc = Number((update as { $inc?: { stock_quantity?: number } }).$inc?.stock_quantity || 0);
+    catalog[id].stock_quantity = Number(catalog[id].stock_quantity || 0) + inc;
+    return { _id: id, stock_quantity: catalog[id].stock_quantity, product_type: catalog[id].product_type };
   });
   let created: Record<string, unknown> | undefined;
-  mock.method(Invoice, 'create', async (doc: Record<string, unknown>) => {
-    created = doc;
-    return createdInvoice(doc);
+  mock.method(Invoice, 'create', async (docs: unknown) => {
+    created = firstCreateDoc(docs);
+    const inv = createdInvoice(created);
+    return Array.isArray(docs) ? [inv] : inv;
   });
 
   const originalA = { ...catalog[PRODUCT_A] };
@@ -188,6 +212,9 @@ test('POST quotation inherits line tax and does not touch stock', async () => {
   assertNoMongoConnection();
   stubProducts();
   mock.method(Product, 'findByIdAndUpdate', async () => {
+    throw new Error('quotations must not adjust inventory');
+  });
+  mock.method(Product, 'findOneAndUpdate', async () => {
     throw new Error('quotations must not adjust inventory');
   });
   let created: Record<string, unknown> | undefined;
@@ -271,7 +298,7 @@ test('POST /receive-payment is still delegated to paymentApplication', async () 
   const { join } = await import('node:path');
   const invoices = readFileSync(join(process.cwd(), 'src/routes/invoices.ts'), 'utf8');
   assert.match(invoices, /paymentApplication\.applyCustomerPayment/);
-  assert.match(invoices, /shouldAdjustInventoryForDocumentType\(docType\)/);
+  assert.match(invoices, /createWholesaleInvoiceWithInventory/);
 });
 
 test('DELETE tax type is blocked when products are assigned', async () => {
@@ -400,15 +427,20 @@ test('8 — converting a Mongoose TAX-02 quotation copies GST snapshot exactly',
     total_amount: 118,
   });
   mock.method(Invoice, 'findById', async () => quote);
+  mock.method(Invoice, 'findOneAndUpdate', async (_filter: unknown, update: { $set?: Record<string, unknown> }) => {
+    Object.assign(quote, update.$set || {});
+    return quote;
+  });
   catalog[PRODUCT_A] = {
     ...catalog[PRODUCT_A],
     tax_type_id: { _id: VAT_ID, name: 'VAT', rate: 12, rate_type: 'percent' },
     tax_rate: 40,
   };
   let created: Record<string, unknown> | undefined;
-  mock.method(Invoice, 'create', async (doc: Record<string, unknown>) => {
-    created = doc;
-    return createdInvoice(doc);
+  mock.method(Invoice, 'create', async (docs: unknown) => {
+    created = firstCreateDoc(docs);
+    const inv = createdInvoice(created);
+    return Array.isArray(docs) ? [inv] : inv;
   });
   const res = await request(createApp())
     .post('/api/invoices/qtn-snap/convert')

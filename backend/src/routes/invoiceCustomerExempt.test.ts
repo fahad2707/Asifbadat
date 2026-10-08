@@ -17,6 +17,7 @@ import Invoice from '../models/Invoice';
 import Product from '../models/Product';
 import Customer from '../models/Customer';
 import CustomerProductPrice from '../models/CustomerProductPrice';
+import StockMovement from '../models/StockMovement';
 import { DOCUMENT_TYPE_INVOICE, DOCUMENT_TYPE_QUOTATION } from '../utils/documentType';
 
 const GST_ID = '64b1c2d3e4f5a6b7c8d9e0f1';
@@ -76,7 +77,17 @@ afterEach(() => {
   }
 });
 
+function firstCreateDoc(docs: unknown): Record<string, unknown> {
+  return (Array.isArray(docs) ? docs[0] : docs) as Record<string, unknown>;
+}
+
 function stubCatalog() {
+  mock.method(mongoose, 'startSession', async () => ({
+    startTransaction() {},
+    async commitTransaction() {},
+    async abortTransaction() {},
+    endSession() {},
+  }));
   mock.method(Product, 'find', () => ({
     populate() {
       return this;
@@ -93,6 +104,15 @@ function stubCatalog() {
     };
   });
   mock.method(Product, 'findByIdAndUpdate', async () => null);
+  mock.method(Product, 'findOneAndUpdate', async (filter: { _id?: unknown }, update: { $inc?: { stock_quantity?: number } }) => {
+    const id = String(filter._id);
+    const row = catalog[id];
+    if (!row) return null;
+    const inc = Number(update.$inc?.stock_quantity || 0);
+    row.stock_quantity = Number(row.stock_quantity || 0) + inc;
+    return { _id: id, stock_quantity: row.stock_quantity, product_type: row.product_type };
+  });
+  mock.method(StockMovement, 'create', async (docs: unknown) => [Array.isArray(docs) ? docs[0] : docs]);
   mock.method(CustomerProductPrice, 'bulkWrite', async () => ({ ok: 1 }));
 }
 
@@ -106,7 +126,7 @@ function stubCustomer(taxExempt: boolean) {
 }
 
 function createdInvoice(fields: Record<string, unknown>) {
-  const _id = { toString: () => 'inv-tax-03' };
+  const _id = { toString: () => '64b0000000000000000a00a3' };
   return {
     _id,
     toObject: () => ({ _id, ...fields }),
@@ -126,9 +146,10 @@ test('A — taxable customer + GST 18% on $100 is tax 18 total 118', async () =>
   stubCatalog();
   stubCustomer(false);
   let created: Record<string, unknown> | undefined;
-  mock.method(Invoice, 'create', async (doc: Record<string, unknown>) => {
-    created = doc;
-    return createdInvoice(doc);
+  mock.method(Invoice, 'create', async (docs: unknown) => {
+    created = firstCreateDoc(docs);
+    const inv = createdInvoice(created);
+    return Array.isArray(docs) ? [inv] : inv;
   });
   const res = await postInvoice({
     invoice_number: 'INV#A',
@@ -150,9 +171,10 @@ test('B — exempt customer + GST 18% on $100 is tax 0 total 100', async () => {
   stubCatalog();
   stubCustomer(true);
   let created: Record<string, unknown> | undefined;
-  mock.method(Invoice, 'create', async (doc: Record<string, unknown>) => {
-    created = doc;
-    return createdInvoice(doc);
+  mock.method(Invoice, 'create', async (docs: unknown) => {
+    created = firstCreateDoc(docs);
+    const inv = createdInvoice(created);
+    return Array.isArray(docs) ? [inv] : inv;
   });
   const originalTaxType = catalog[PRODUCT_A].tax_type_id;
   const res = await postInvoice({
@@ -177,9 +199,10 @@ test('C — exempt customer zeros mixed GST / VAT / No Tax lines', async () => {
   stubCatalog();
   stubCustomer(true);
   let created: Record<string, unknown> | undefined;
-  mock.method(Invoice, 'create', async (doc: Record<string, unknown>) => {
-    created = doc;
-    return createdInvoice(doc);
+  mock.method(Invoice, 'create', async (docs: unknown) => {
+    created = firstCreateDoc(docs);
+    const inv = createdInvoice(created);
+    return Array.isArray(docs) ? [inv] : inv;
   });
   const res = await postInvoice({
     invoice_number: 'INV#C',
@@ -322,7 +345,7 @@ test('F — converting an exempt quotation copies the stored zero-tax snapshot',
     },
   ];
   const quote = {
-    _id: { toString: () => 'qtn-f' },
+    _id: { toString: () => '64b0000000000000000a00bf' },
     invoice_number: 'QTN#F',
     invoice_type: DOCUMENT_TYPE_QUOTATION,
     customer_id: CUSTOMER_ID,
@@ -335,6 +358,10 @@ test('F — converting an exempt quotation copies the stored zero-tax snapshot',
     save: async () => {},
   };
   mock.method(Invoice, 'findById', async () => quote);
+  mock.method(Invoice, 'findOneAndUpdate', async (_filter: unknown, update: { $set?: Record<string, unknown> }) => {
+    Object.assign(quote, update.$set || {});
+    return quote;
+  });
   mock.method(Invoice, 'find', () => ({
     sort() {
       return this;
@@ -345,9 +372,10 @@ test('F — converting an exempt quotation copies the stored zero-tax snapshot',
     lean: async () => [],
   }));
   let created: Record<string, unknown> | undefined;
-  mock.method(Invoice, 'create', async (doc: Record<string, unknown>) => {
-    created = doc;
-    return createdInvoice(doc);
+  mock.method(Invoice, 'create', async (docs: unknown) => {
+    created = firstCreateDoc(docs);
+    const inv = createdInvoice(created);
+    return Array.isArray(docs) ? [inv] : inv;
   });
   const res = await request(createApp())
     .post('/api/invoices/qtn-f/convert')
@@ -368,7 +396,10 @@ test('G — customer exemption does not modify Product.tax_type_id', async () =>
   stubCatalog();
   stubCustomer(true);
   const before = JSON.stringify(catalog[PRODUCT_A].tax_type_id);
-  mock.method(Invoice, 'create', async (doc: Record<string, unknown>) => createdInvoice(doc));
+  mock.method(Invoice, 'create', async (docs: unknown) => {
+    const inv = createdInvoice(firstCreateDoc(docs));
+    return Array.isArray(docs) ? [inv] : inv;
+  });
   const res = await postInvoice({
     invoice_number: 'INV#G',
     customer_id: CUSTOMER_ID,
@@ -382,10 +413,18 @@ test('G — customer exemption does not modify Product.tax_type_id', async () =>
 
 test('H — legacy invoice without line snapshots keeps document-level tax', async () => {
   assertNoMongoConnection();
+  mock.method(mongoose, 'startSession', async () => ({
+    startTransaction() {},
+    async commitTransaction() {},
+    async abortTransaction() {},
+    endSession() {},
+  }));
+  mock.method(StockMovement, 'create', async (docs: unknown) => [Array.isArray(docs) ? docs[0] : docs]);
   let created: Record<string, unknown> | undefined;
-  mock.method(Invoice, 'create', async (doc: Record<string, unknown>) => {
-    created = doc;
-    return createdInvoice(doc);
+  mock.method(Invoice, 'create', async (docs: unknown) => {
+    created = firstCreateDoc(docs);
+    const inv = createdInvoice(created);
+    return Array.isArray(docs) ? [inv] : inv;
   });
   const res = await postInvoice({
     invoice_number: 'INV#H',
@@ -435,6 +474,10 @@ test('9 — converting a Mongoose Customer Exempt quotation preserves the snapsh
     return this;
   };
   mock.method(Invoice, 'findById', async () => quote);
+  mock.method(Invoice, 'findOneAndUpdate', async (_filter: unknown, update: { $set?: Record<string, unknown> }) => {
+    Object.assign(quote, update.$set || {});
+    return quote;
+  });
   mock.method(Invoice, 'find', () => ({
     sort() {
       return this;
@@ -445,9 +488,10 @@ test('9 — converting a Mongoose Customer Exempt quotation preserves the snapsh
     lean: async () => [],
   }));
   let created: Record<string, unknown> | undefined;
-  mock.method(Invoice, 'create', async (doc: Record<string, unknown>) => {
-    created = doc;
-    return createdInvoice(doc);
+  mock.method(Invoice, 'create', async (docs: unknown) => {
+    created = firstCreateDoc(docs);
+    const inv = createdInvoice(created);
+    return Array.isArray(docs) ? [inv] : inv;
   });
   const res = await request(createApp())
     .post('/api/invoices/qtn-exempt-mongo/convert')

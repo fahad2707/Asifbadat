@@ -19,6 +19,7 @@ import { createApp } from '../server';
 import Invoice from '../models/Invoice';
 import Product from '../models/Product';
 import OnlineOrder from '../models/OnlineOrder';
+import StockMovement from '../models/StockMovement';
 import { DOCUMENT_TYPE_INVOICE, DOCUMENT_TYPE_QUOTATION } from '../utils/documentType';
 import { paymentApplication } from '../services/paymentApplication';
 
@@ -41,7 +42,7 @@ afterEach(() => {
 });
 
 function createdInvoice(fields: Record<string, unknown>) {
-  const _id = { toString: () => 'inv-source' };
+  const _id = { toString: () => '64b0000000000000000a00aa' };
   return {
     _id,
     toObject: () => ({ _id, ...fields }),
@@ -59,6 +60,23 @@ function stubInvoiceNumber() {
     },
     lean: async () => [],
   }));
+}
+
+function firstCreateDoc(docs: unknown): Record<string, unknown> {
+  return (Array.isArray(docs) ? docs[0] : docs) as Record<string, unknown>;
+}
+
+function stubMigratedInvoiceWrite() {
+  mock.method(mongoose, 'startSession', async () => ({
+    startTransaction() {},
+    async commitTransaction() {},
+    async abortTransaction() {},
+    endSession() {},
+  }));
+  mock.method(Product, 'findOneAndUpdate', async () => {
+    throw new Error('unexpected Product.findOneAndUpdate in source-discriminator test');
+  });
+  mock.method(StockMovement, 'create', async (docs: unknown) => [Array.isArray(docs) ? docs[0] : docs]);
 }
 
 async function postInvoice(body: Record<string, unknown>) {
@@ -90,10 +108,12 @@ test('schema: source has no default and is not required', () => {
 test('A — POST wholesale invoice persists source WHOLESALE', async () => {
   assertNoMongoConnection();
   stubInvoiceNumber();
+  stubMigratedInvoiceWrite();
   let created: Record<string, unknown> | undefined;
-  mock.method(Invoice, 'create', async (doc: Record<string, unknown>) => {
-    created = doc;
-    return createdInvoice(doc);
+  mock.method(Invoice, 'create', async (docs: unknown) => {
+    created = firstCreateDoc(docs);
+    const inv = createdInvoice(created);
+    return Array.isArray(docs) ? [inv] : inv;
   });
 
   const res = await postInvoice({
@@ -112,10 +132,12 @@ test('A — POST wholesale invoice persists source WHOLESALE', async () => {
 test('B — client cannot spoof source ONLINE on POST /invoices', async () => {
   assertNoMongoConnection();
   stubInvoiceNumber();
+  stubMigratedInvoiceWrite();
   let created: Record<string, unknown> | undefined;
-  mock.method(Invoice, 'create', async (doc: Record<string, unknown>) => {
-    created = doc;
-    return createdInvoice(doc);
+  mock.method(Invoice, 'create', async (docs: unknown) => {
+    created = firstCreateDoc(docs);
+    const inv = createdInvoice(created);
+    return Array.isArray(docs) ? [inv] : inv;
   });
 
   const res = await postInvoice({
@@ -158,8 +180,9 @@ test('C — POST quotation is WHOLESALE and does not deduct stock', async () => 
 test('D — convert assigns WHOLESALE on the new invoice and does not backfill the quote', async () => {
   assertNoMongoConnection();
   stubInvoiceNumber();
+  stubMigratedInvoiceWrite();
   const quote = {
-    _id: { toString: () => 'qtn-src' },
+    _id: { toString: () => '64b0000000000000000a00cc' },
     invoice_number: 'QTN#SRC-D',
     invoice_type: DOCUMENT_TYPE_QUOTATION,
     items: [line()],
@@ -170,10 +193,15 @@ test('D — convert assigns WHOLESALE on the new invoice and does not backfill t
     save: async () => {},
   };
   mock.method(Invoice, 'findById', async () => quote);
+  mock.method(Invoice, 'findOneAndUpdate', async (_filter: unknown, update: { $set?: Record<string, unknown> }) => {
+    Object.assign(quote, update.$set || {});
+    return quote;
+  });
   let created: Record<string, unknown> | undefined;
-  mock.method(Invoice, 'create', async (doc: Record<string, unknown>) => {
-    created = doc;
-    return createdInvoice(doc);
+  mock.method(Invoice, 'create', async (docs: unknown) => {
+    created = firstCreateDoc(docs);
+    const inv = createdInvoice(created);
+    return Array.isArray(docs) ? [inv] : inv;
   });
 
   const res = await request(createApp())
@@ -292,18 +320,19 @@ test('PUT does not overwrite an existing WHOLESALE source', async () => {
   assert.equal(doc.source, 'WHOLESALE');
 });
 
-test('K — wholesale inventory gate is still invoice_type, not source', () => {
+test('K — wholesale inventory is source-routed; PUT still does not write source', () => {
   const invoices = readFileSync(join(process.cwd(), 'src/routes/invoices.ts'), 'utf8');
   assert.match(invoices, /source:\s*'WHOLESALE'/);
-  assert.match(invoices, /shouldAdjustInventoryForDocumentType\(docType\)/);
+  assert.match(invoices, /usesMigratedWholesaleInventory/);
+  assert.match(invoices, /createWholesaleInvoiceWithInventory/);
   assert.match(invoices, /shouldAdjustInventoryForDocumentType\(invoice\.invoice_type\)/);
-  assert.equal(invoices.includes("source === 'WHOLESALE'"), false);
+  assert.match(invoices, /invoice\.source !== 'ONLINE'/);
   assert.equal(invoices.includes('INV-WEB-'), false);
   assert.equal(invoices.includes('OnlineOrder'), false);
   const putAt = invoices.indexOf("router.put('/:id'");
   const putBlock = invoices.slice(putAt, invoices.indexOf("router.delete('/:id'"));
-  assert.equal(putBlock.includes('invoice.source'), false);
   assert.equal(putBlock.includes('body.source'), false);
+  assert.equal(putBlock.includes('source:'), false);
 });
 
 test('H — payment update does not assign source', () => {

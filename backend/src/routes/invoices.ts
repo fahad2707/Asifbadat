@@ -30,6 +30,15 @@ import {
   invoiceFinancialState,
 } from '../utils/invoiceFinancialState';
 import { httpErrorFromPayment, paymentApplication } from '../services/paymentApplication';
+import {
+  WholesaleInvoiceInventoryError,
+  applyWholesaleInvoiceEditInventory,
+  convertQuotationWithInventory,
+  createWholesaleInvoiceWithInventory,
+  deleteWholesaleInvoiceWithInventory,
+  usesMigratedWholesaleInventory,
+  type InvoiceInventoryLine,
+} from '../services/wholesaleInvoiceInventoryService';
 
 const router = express.Router();
 
@@ -107,6 +116,19 @@ async function saveCustomerProductPrices(customerId: string | mongoose.Types.Obj
   if (ops.length > 0) {
     await CustomerProductPrice.bulkWrite(ops).catch((err) => console.error('Save customer prices error:', err));
   }
+}
+
+function httpErrorFromWholesaleInventory(error: unknown): { status: number; body: { error: string } } | null {
+  if (error instanceof WholesaleInvoiceInventoryError) {
+    return { status: error.status, body: { error: error.message } };
+  }
+  return null;
+}
+
+function invoiceVersion(invoice: { get?: (key: string) => unknown; __v?: unknown }): number {
+  const fromGetter = invoice.get?.('__v');
+  if (fromGetter != null) return Number(fromGetter);
+  return Number(invoice.__v ?? 0);
 }
 
 // Email transporter
@@ -307,7 +329,7 @@ router.post('/', authenticateAdmin, async (req: AuthRequest, res) => {
 
     // Quotations never reserve or deduct stock. Invoices may go to zero or negative stock.
 
-    const inv = await Invoice.create({
+    const invoiceFields = {
       invoice_number,
       customer_id,
       customer_name: body.customer_name,
@@ -324,24 +346,18 @@ router.post('/', authenticateAdmin, async (req: AuthRequest, res) => {
       amount_paid: 0,
       terms: body.terms,
       payment_status: 'unpaid',
-      source: 'WHOLESALE',
+      source: 'WHOLESALE' as const,
       items,
-    });
-    // Task 05: only invoices deduct inventory. Quotations are proposals.
-    if (shouldAdjustInventoryForDocumentType(docType)) {
-      for (const item of items) {
-        if (!item.product_id || (item.quantity || 0) <= 0) continue;
-        const product = await Product.findById(item.product_id);
-        if (!product) continue;
-        if ((product as any).product_type === 'service' || (product as any).product_type === 'non_inventory') continue;
-        const qty = Number(item.quantity) || 0;
-        await Product.findByIdAndUpdate(item.product_id, { $inc: { stock_quantity: -qty } });
-      }
-    }
+    };
+
+    const inv =
+      docType === DOCUMENT_TYPE_INVOICE
+        ? await createWholesaleInvoiceWithInventory(invoiceFields, req.userId)
+        : await Invoice.create(invoiceFields);
 
     await saveCustomerProductPrices(customer_id as any, items, inv._id, invoice_date);
 
-    const doc = inv.toObject();
+    const doc = typeof (inv as any).toObject === 'function' ? (inv as any).toObject() : inv;
     res.status(201).json({
       id: (doc as any)._id.toString(),
       invoice_number: (doc as any).invoice_number,
@@ -358,6 +374,8 @@ router.post('/', authenticateAdmin, async (req: AuthRequest, res) => {
     if (error instanceof InvoiceLineTaxError) {
       return res.status(error.status).json({ error: error.message });
     }
+    const wholesale = httpErrorFromWholesaleInventory(error);
+    if (wholesale) return res.status(wholesale.status).json(wholesale.body);
     console.error('Create invoice error:', error);
     res.status(500).json({ error: 'Failed to create invoice' });
   }
@@ -495,8 +513,53 @@ router.put('/:id', authenticateAdmin, async (req: AuthRequest, res) => {
         throw error;
       }
 
-      // Task 05: quotations never restore or deduct stock on edit.
-      if (shouldAdjustInventoryForDocumentType(invoice.invoice_type)) {
+      if (usesMigratedWholesaleInventory(invoice)) {
+        const oldItems = ((invoice as any).items || []) as InvoiceInventoryLine[];
+        invoice.items = items;
+        invoice.subtotal_amount = subtotal_amount;
+        invoice.tax_amount = tax_amount;
+        invoice.total_amount = proposedTotal;
+        const migratedState = invoiceFinancialState(invoice);
+        invoice.payment_status = migratedState.payment_status;
+        const updated = await applyWholesaleInvoiceEditInventory({
+          invoiceId: invoice._id as mongoose.Types.ObjectId,
+          expectedVersion: invoiceVersion(invoice),
+          oldItems,
+          newItems: items,
+          setFields: {
+            invoice_date: invoice.invoice_date,
+            customer_id: invoice.customer_id,
+            customer_name: invoice.customer_name,
+            customer_phone: invoice.customer_phone,
+            customer_email: invoice.customer_email,
+            customer_address: invoice.customer_address,
+            terms: invoice.terms,
+            items,
+            subtotal_amount,
+            tax_amount,
+            total_amount: proposedTotal,
+            payment_status: migratedState.payment_status,
+          },
+          adminId: req.userId,
+        });
+        if (updated.customer_id && updated.items?.length) {
+          await saveCustomerProductPrices(
+            updated.customer_id,
+            updated.items,
+            updated._id,
+            updated.invoice_date || new Date()
+          );
+        }
+        const updatedDoc = typeof (updated as any).toObject === 'function' ? (updated as any).toObject() : updated;
+        return res.json({
+          id: (updatedDoc as any)._id.toString(),
+          invoice_number: (updatedDoc as any).invoice_number,
+          payment_status: (updatedDoc as any).payment_status,
+        });
+      }
+
+      // Legacy source-less invoices keep restore-all / deduct-all. ONLINE never uses these loops.
+      if (shouldAdjustInventoryForDocumentType(invoice.invoice_type) && invoice.source !== 'ONLINE') {
         const oldItems = (invoice as any).items || [];
         for (const item of oldItems) {
           if (!item.product_id || (item.quantity || 0) <= 0) continue;
@@ -540,6 +603,8 @@ router.put('/:id', authenticateAdmin, async (req: AuthRequest, res) => {
     if (error instanceof InvoiceLineTaxError) {
       return res.status(error.status).json({ error: error.message });
     }
+    const wholesale = httpErrorFromWholesaleInventory(error);
+    if (wholesale) return res.status(wholesale.status).json(wholesale.body);
     console.error('Update invoice error:', error);
     res.status(500).json({ error: 'Failed to update invoice' });
   }
@@ -562,8 +627,19 @@ router.delete('/:id', authenticateAdmin, async (req: AuthRequest, res) => {
       });
     }
 
+    if (usesMigratedWholesaleInventory(invoice)) {
+      await deleteWholesaleInvoiceWithInventory({
+        invoiceId: invoice._id as mongoose.Types.ObjectId,
+        expectedVersion: invoiceVersion(invoice),
+        items: ((invoice as any).items || []) as InvoiceInventoryLine[],
+        adminId: req.userId,
+      });
+      return res.json({ success: true, id: invoice._id.toString() });
+    }
+
     // Reverse the same stock move create/edit applied (invoices only; quotations never touch stock).
-    if (shouldAdjustInventoryForDocumentType(invoice.invoice_type)) {
+    // ONLINE invoices never restore through this wholesale path. Source-less rows keep legacy loops.
+    if (shouldAdjustInventoryForDocumentType(invoice.invoice_type) && invoice.source !== 'ONLINE') {
       const oldItems = (invoice as any).items || [];
       for (const item of oldItems) {
         if (!item.product_id || (item.quantity || 0) <= 0) continue;
@@ -578,6 +654,8 @@ router.delete('/:id', authenticateAdmin, async (req: AuthRequest, res) => {
     await Invoice.deleteOne({ _id: invoice._id });
     res.json({ success: true, id: invoice._id.toString() });
   } catch (error) {
+    const wholesale = httpErrorFromWholesaleInventory(error);
+    if (wholesale) return res.status(wholesale.status).json(wholesale.body);
     console.error('Delete invoice error:', error);
     res.status(500).json({ error: 'Failed to delete document' });
   }
@@ -618,43 +696,36 @@ router.post('/:id/convert', authenticateAdmin, async (req: AuthRequest, res) => 
     const floorErr = sellingPriceFloorError(items, productsById);
     if (floorErr) return res.status(400).json({ error: floorErr });
 
-    const inv = await Invoice.create({
-      invoice_number,
-      customer_id: (quote as any).customer_id,
-      customer_name: (quote as any).customer_name,
-      customer_phone: (quote as any).customer_phone,
-      customer_email: (quote as any).customer_email,
-      customer_address: (quote as any).customer_address,
-      location_of_sale: (quote as any).location_of_sale || LOCATION_OF_SALE,
-      invoice_type: DOCUMENT_TYPE_INVOICE,
-      invoice_date,
-      due_date,
-      subtotal_amount,
-      tax_amount,
-      total_amount,
-      amount_paid: 0,
-      terms: (quote as any).terms,
-      payment_status: 'unpaid',
-      source: 'WHOLESALE',
-      items,
+    const inv = await convertQuotationWithInventory({
+      quoteId: quote._id as mongoose.Types.ObjectId,
+      invoiceNumber: invoice_number,
+      convertedInvoiceNumber: mark.converted_invoice_number,
+      adminId: req.userId,
+      invoiceFields: {
+        invoice_number,
+        customer_id: (quote as any).customer_id,
+        customer_name: (quote as any).customer_name,
+        customer_phone: (quote as any).customer_phone,
+        customer_email: (quote as any).customer_email,
+        customer_address: (quote as any).customer_address,
+        location_of_sale: (quote as any).location_of_sale || LOCATION_OF_SALE,
+        invoice_type: DOCUMENT_TYPE_INVOICE,
+        invoice_date,
+        due_date,
+        subtotal_amount,
+        tax_amount,
+        total_amount,
+        amount_paid: 0,
+        terms: (quote as any).terms,
+        payment_status: 'unpaid',
+        source: 'WHOLESALE',
+        items,
+      },
     });
-
-    if (shouldAdjustInventoryForDocumentType(DOCUMENT_TYPE_INVOICE)) {
-      for (const item of items) {
-        if (!item.product_id || (item.quantity || 0) <= 0) continue;
-        const product = await Product.findById(item.product_id);
-        if (!product) continue;
-        if ((product as any).product_type === 'service' || (product as any).product_type === 'non_inventory') continue;
-        await Product.findByIdAndUpdate(item.product_id, { $inc: { stock_quantity: -(Number(item.quantity) || 0) } });
-      }
-    }
 
     await saveCustomerProductPrices((quote as any).customer_id, items, inv._id, invoice_date);
 
-    (quote as any).shipping_type = `converted:${invoice_number}`;
-    await quote.save();
-
-    const doc = inv.toObject() as any;
+    const doc = (typeof (inv as any).toObject === 'function' ? (inv as any).toObject() : inv) as any;
     res.status(201).json({
       id: doc._id.toString(),
       invoice_number: doc.invoice_number,
@@ -668,6 +739,8 @@ router.post('/:id/convert', authenticateAdmin, async (req: AuthRequest, res) => 
     if (error instanceof InvoiceLineTaxError) {
       return res.status(error.status).json({ error: error.message });
     }
+    const wholesale = httpErrorFromWholesaleInventory(error);
+    if (wholesale) return res.status(wholesale.status).json(wholesale.body);
     console.error('Convert quotation error:', error);
     res.status(500).json({ error: 'Failed to convert quotation' });
   }
