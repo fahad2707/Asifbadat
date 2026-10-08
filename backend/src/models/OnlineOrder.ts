@@ -42,6 +42,11 @@ export interface IOnlineOrder extends Document {
   status_history: IStatusEntry[];
   invoice_id?: mongoose.Types.ObjectId;
   notes?: string;
+  /**
+   * Client checkout attempt id. Optional for historical rows.
+   * Unique with user_id when present (sparse compound index).
+   */
+  checkout_submission_id?: string;
   created_at: Date;
   updated_at: Date;
 }
@@ -87,6 +92,9 @@ const OnlineOrderSchema = new Schema<IOnlineOrder>(
     status_history: [StatusEntrySchema],
     invoice_id: { type: Schema.Types.ObjectId, ref: 'Invoice' },
     notes: String,
+    // Client-provided checkout attempt key. Compound unique+sparse with user_id:
+    // historical docs without this field are excluded from the index.
+    checkout_submission_id: { type: String, trim: true },
   },
   { timestamps: { createdAt: 'created_at', updatedAt: 'updated_at' } }
 );
@@ -94,5 +102,9 @@ const OnlineOrderSchema = new Schema<IOnlineOrder>(
 OnlineOrderSchema.index({ status: 1 });
 OnlineOrderSchema.index({ created_at: -1 });
 OnlineOrderSchema.index({ user_id: 1, created_at: -1 });
+OnlineOrderSchema.index(
+  { user_id: 1, checkout_submission_id: 1 },
+  { unique: true, sparse: true }
+);
 
 export default mongoose.model<IOnlineOrder>('OnlineOrder', OnlineOrderSchema);

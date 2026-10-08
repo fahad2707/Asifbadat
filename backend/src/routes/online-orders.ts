@@ -12,6 +12,12 @@ import { isUserLinkedToApprovedCustomer } from '../utils/customerAccount';
 import Customer from '../models/Customer';
 import { createStockMovement, StockMovementWriteError } from '../utils/createStockMovement';
 import { StockMovementType } from '../shared/enums';
+import {
+  checkoutPayloadMatches,
+  formatOnlineOrderCreateResponse,
+  isCheckoutSubmissionDuplicateKey,
+  waitForCommittedCheckoutOrder,
+} from '../utils/onlineOrderIdempotency';
 
 const router = express.Router();
 
@@ -57,6 +63,7 @@ async function withDeliveryInventoryTransaction<T>(
 }
 
 const placeOrderSchema = z.object({
+  checkout_submission_id: z.string().trim().min(8).max(128),
   customer_name: z.string().trim().min(1).max(200),
   customer_email: z.string().trim().toLowerCase().email().max(320),
   customer_phone: z.string().trim().min(4).max(32).regex(/^[\d+\s().-]+$/),
@@ -108,6 +115,21 @@ router.post('/', onlineCheckoutLimiter, authenticateUser, async (req: AuthReques
     }
 
     const body = placeOrderSchema.parse(req.body);
+    const submissionId = body.checkout_submission_id;
+
+    // Fast-path replay: unique index remains the concurrency guarantee.
+    const existing = await OnlineOrder.findOne({
+      user_id: userId,
+      checkout_submission_id: submissionId,
+    }).lean();
+    if (existing) {
+      if (!checkoutPayloadMatches(existing as any, body)) {
+        return res.status(409).json({
+          error: 'Checkout submission ID was already used for a different checkout',
+        });
+      }
+      return res.status(200).json(formatOnlineOrderCreateResponse(existing as any));
+    }
 
     const orderItems: any[] = [];
     let subtotal = 0;
@@ -144,39 +166,57 @@ router.post('/', onlineCheckoutLimiter, authenticateUser, async (req: AuthReques
     const totalAmount = Math.round((subtotal + totalTax) * 100) / 100;
     const orderNumber = await getNextOrderNumber();
 
-    const order = await OnlineOrder.create({
-      order_number: orderNumber,
-      user_id: userId,
-      customer_id: (linkedCustomer as { _id: mongoose.Types.ObjectId })._id,
-      customer_name: body.customer_name,
-      customer_email: body.customer_email,
-      customer_phone: body.customer_phone,
-      address_line1: body.address_line1,
-      address_line2: body.address_line2 || '',
-      city: body.city,
-      state: body.state,
-      zip: body.zip,
-      country: body.country?.trim() || 'US',
-      items: orderItems,
-      subtotal: Math.round(subtotal * 100) / 100,
-      tax_amount: Math.round(totalTax * 100) / 100,
-      total_amount: totalAmount,
-      payment_method: body.payment_method,
-      payment_status: body.payment_method === 'card' ? 'paid' : 'pending',
-      card_last4: body.card_last4 || undefined,
-      card_brand: body.card_brand || undefined,
-      status: 'confirmed',
-      status_history: [{ status: 'confirmed', timestamp: new Date() }],
-      notes: body.notes || undefined,
-    });
+    try {
+      const order = await OnlineOrder.create({
+        order_number: orderNumber,
+        user_id: userId,
+        customer_id: (linkedCustomer as { _id: mongoose.Types.ObjectId })._id,
+        checkout_submission_id: submissionId,
+        customer_name: body.customer_name,
+        customer_email: body.customer_email,
+        customer_phone: body.customer_phone,
+        address_line1: body.address_line1,
+        address_line2: body.address_line2 || '',
+        city: body.city,
+        state: body.state,
+        zip: body.zip,
+        country: body.country?.trim() || 'US',
+        items: orderItems,
+        subtotal: Math.round(subtotal * 100) / 100,
+        tax_amount: Math.round(totalTax * 100) / 100,
+        total_amount: totalAmount,
+        payment_method: body.payment_method,
+        payment_status: body.payment_method === 'card' ? 'paid' : 'pending',
+        card_last4: body.card_last4 || undefined,
+        card_brand: body.card_brand || undefined,
+        status: 'confirmed',
+        status_history: [{ status: 'confirmed', timestamp: new Date() }],
+        notes: body.notes || undefined,
+      });
 
-    const doc = order.toObject() as any;
-    res.status(201).json({
-      id: doc._id.toString(),
-      order_number: doc.order_number,
-      total_amount: doc.total_amount,
-      status: doc.status,
-    });
+      return res.status(201).json(formatOnlineOrderCreateResponse(order as any));
+    } catch (createError: unknown) {
+      if (!isCheckoutSubmissionDuplicateKey(createError)) {
+        throw createError;
+      }
+      const committed = await waitForCommittedCheckoutOrder(() =>
+        OnlineOrder.findOne({
+          user_id: userId,
+          checkout_submission_id: submissionId,
+        }).lean()
+      );
+      if (!committed) {
+        return res.status(409).json({
+          error: 'Checkout with this submission ID is not yet committed. Retry the same request.',
+        });
+      }
+      if (!checkoutPayloadMatches(committed as any, body)) {
+        return res.status(409).json({
+          error: 'Checkout submission ID was already used for a different checkout',
+        });
+      }
+      return res.status(200).json(formatOnlineOrderCreateResponse(committed as any));
+    }
   } catch (error: any) {
     if (error instanceof z.ZodError) {
       return res.status(400).json({ error: error.errors[0].message });

@@ -68,6 +68,7 @@ const catalogProduct = {
 };
 
 const placeBody = {
+  checkout_submission_id: 'create-test-submission-0001',
   customer_name: 'Pat Buyer',
   customer_email: 'pat@example.com',
   customer_phone: '5550100',

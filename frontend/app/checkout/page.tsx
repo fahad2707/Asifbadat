@@ -1,9 +1,18 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { ShoppingBag, CreditCard, Truck, ArrowLeft, Lock } from 'lucide-react';
 import { useCartStore } from '@/lib/store';
+
+const CHECKOUT_SUBMISSION_KEY = 'checkout_submission_id';
+
+function newCheckoutSubmissionId(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+  return `chk_${Date.now()}_${Math.random().toString(36).slice(2, 12)}`;
+}
 
 const API = typeof window !== 'undefined' ? '/api' : (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5001/api');
 
@@ -49,6 +58,8 @@ export default function CheckoutPage() {
   const clearPersistCart = useCartStore((s) => s.clearCart);
   const [cart, setCart] = useState<CartItem[]>([]);
   const [submitting, setSubmitting] = useState(false);
+  /** Stable for one Place Order attempt; reused on network/timeout retry. */
+  const submissionIdRef = useRef<string | null>(null);
 
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
@@ -110,8 +121,38 @@ export default function CheckoutPage() {
     return digits;
   };
 
+  const getOrCreateSubmissionId = () => {
+    if (submissionIdRef.current) return submissionIdRef.current;
+    try {
+      const stored = sessionStorage.getItem(CHECKOUT_SUBMISSION_KEY);
+      if (stored && stored.trim().length >= 8) {
+        submissionIdRef.current = stored.trim();
+        return submissionIdRef.current;
+      }
+    } catch {
+      /* sessionStorage unavailable */
+    }
+    const id = newCheckoutSubmissionId();
+    submissionIdRef.current = id;
+    try {
+      sessionStorage.setItem(CHECKOUT_SUBMISSION_KEY, id);
+    } catch {
+      /* ignore */
+    }
+    return id;
+  };
+
+  const clearSubmissionId = () => {
+    submissionIdRef.current = null;
+    try {
+      sessionStorage.removeItem(CHECKOUT_SUBMISSION_KEY);
+    } catch {
+      /* ignore */
+    }
+  };
+
   const handleSubmit = async () => {
-    if (!canSubmit) return;
+    if (!canSubmit || submitting) return;
     setSubmitting(true);
     try {
       const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
@@ -119,6 +160,7 @@ export default function CheckoutPage() {
         router.push('/login?redirect=/checkout');
         return;
       }
+      const checkout_submission_id = getOrCreateSubmissionId();
       const res = await fetch(`${API}/online-orders`, {
         method: 'POST',
         headers: {
@@ -126,6 +168,7 @@ export default function CheckoutPage() {
           Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({
+          checkout_submission_id,
           items: cart.map((c) => ({ product_id: c.id, quantity: c.quantity, price: c.price })),
           customer_name: name,
           customer_email: email,
@@ -143,6 +186,7 @@ export default function CheckoutPage() {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed');
+      clearSubmissionId();
       localStorage.removeItem('checkout_cart');
       clearPersistCart();
       router.push(
