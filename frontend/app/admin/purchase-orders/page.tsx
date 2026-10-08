@@ -309,19 +309,21 @@ export default function PurchaseOrdersPage() {
     fetchPOs();
   };
 
-  const pmtStatus = (po: PurchaseOrder) => {
-    if (po.status === 'received') return 'Paid';
-    if (po.status === 'partial') return 'Partial PMT';
-    if (po.status === 'cancelled') return 'Cancelled';
-    return 'Pending';
+  /** Receiving lifecycle only — not vendor payment. */
+  const poStatusLabel = (status: string) => {
+    if (status === 'received') return 'Fully Received';
+    if (status === 'partial') return 'Partially Received';
+    if (status === 'sent') return 'Sent';
+    if (status === 'cancelled') return 'Cancelled';
+    return 'Draft';
   };
 
-  const poStatusLabel = (po: PurchaseOrder) => {
-    if (po.status === 'received') return 'Received';
-    if (po.status === 'partial') return 'Partial';
-    if (po.status === 'sent') return 'Sent';
-    if (po.status === 'cancelled') return 'Cancelled';
-    return 'Draft';
+  const poStatusBadgeClass = (status: string) => {
+    if (status === 'received') return 'bg-teal-500/10 text-teal-450 border-teal-500/20';
+    if (status === 'partial') return 'bg-amber-500/10 text-amber-400 border-amber-500/20';
+    if (status === 'sent') return 'bg-blue-500/10 text-blue-400 border-blue-500/20';
+    if (status === 'cancelled') return 'bg-rose-500/10 text-rose-400 border-rose-500/20';
+    return 'bg-slate-800 text-slate-400 border-white/10';
   };
 
   const receivePoStock = async (po: PurchaseOrder) => {
@@ -436,9 +438,6 @@ export default function PurchaseOrdersPage() {
                   <th className="text-left py-3.5 px-4 text-[10px] font-bold uppercase tracking-wider">State</th>
                   <th className="text-left py-3.5 px-4 text-[10px] font-bold uppercase tracking-wider">City</th>
                   <th className="text-right py-3.5 px-4 text-[10px] font-bold uppercase tracking-wider">Total Amount</th>
-                  <th className="text-right py-3.5 px-4 text-[10px] font-bold uppercase tracking-wider">Total Paid</th>
-                  <th className="text-right py-3.5 px-4 text-[10px] font-bold uppercase tracking-wider">PO Balance</th>
-                  <th className="text-left py-3.5 px-4 text-[10px] font-bold uppercase tracking-wider">PMT Status</th>
                   <th className="text-left py-3.5 px-4 text-[10px] font-bold uppercase tracking-wider">PO Status</th>
                   <th className="text-right py-3.5 px-4 text-[10px] font-bold uppercase tracking-wider">Actions</th>
                 </tr>
@@ -446,14 +445,13 @@ export default function PurchaseOrdersPage() {
               <tbody>
                 {pos.length === 0 ? (
                   <tr>
-                    <td colSpan={14} className="py-16 text-center text-slate-500 text-xs font-semibold">
+                    <td colSpan={11} className="py-16 text-center text-slate-500 text-xs font-semibold">
                       No purchase orders yet. Click Draft PO to register imports.
                     </td>
                   </tr>
                 ) : (
                   pos.map((po) => {
-                    const paySt = pmtStatus(po);
-                    const shipSt = poStatusLabel(po);
+                    const statusLabel = poStatusLabel(po.status);
                     return (
                       <tr
                         key={po.id}
@@ -482,13 +480,10 @@ export default function PurchaseOrdersPage() {
                         <td className="py-3 px-4 text-xs text-slate-400">{po.state || '—'}</td>
                         <td className="py-3 px-4 text-xs text-slate-400">{po.city || '—'}</td>
                         <td className="py-3 px-4 text-xs text-right font-extrabold text-slate-100 font-mono">${Number(po.total_amount || 0).toLocaleString(undefined, {minimumFractionDigits: 2})}</td>
-                        <td className="py-3 px-4 text-xs text-right font-mono text-slate-400">0.00</td>
-                        <td className="py-3 px-4 text-xs text-right font-extrabold text-slate-100 font-mono">${Number(po.total_amount || 0).toLocaleString(undefined, {minimumFractionDigits: 2})}</td>
                         <td className="py-3 px-4 text-xs">
-                          <span className={`inline-flex px-2 py-0.5 rounded text-[10px] font-bold border ${paySt === 'Paid' ? 'bg-teal-500/10 text-teal-400 border-teal-500/20' : paySt === 'Partial PMT' ? 'bg-amber-500/10 text-amber-400 border-amber-500/20' : 'bg-slate-800 text-slate-400 border-white/10'}`}>{paySt}</span>
-                        </td>
-                        <td className="py-3 px-4 text-xs">
-                          <span className={`inline-flex px-2 py-0.5 rounded text-[10px] font-bold border ${shipSt === 'Received' ? 'bg-teal-500/10 text-teal-450 border-teal-500/20' : shipSt === 'Partial' ? 'bg-amber-500/10 text-amber-400 border-amber-500/20' : 'bg-slate-800 text-slate-400 border-white/10'}`}>{shipSt}</span>
+                          <span className={`inline-flex px-2 py-0.5 rounded text-[10px] font-bold border ${poStatusBadgeClass(po.status)}`}>
+                            {statusLabel}
+                          </span>
                         </td>
                         <td className="py-3 px-4 text-right text-xs" onClick={(e) => e.stopPropagation()}>
                           <div className="flex items-center justify-end gap-2.5 flex-wrap">
@@ -496,6 +491,11 @@ export default function PurchaseOrdersPage() {
                               View
                             </button>
                             {po.status === 'draft' && (
+                              <Link href={`/admin/purchase-orders/${po.id}?edit=1`} className="text-[#0077C5] hover:underline font-medium">
+                                Edit Draft
+                              </Link>
+                            )}
+                            {(po.status === 'sent' || po.status === 'partial' || po.status === 'draft') && (
                               <Link href={`/admin/purchase-orders/${po.id}`} className="text-[#0077C5] hover:underline font-medium">
                                 Open
                               </Link>
@@ -556,7 +556,7 @@ export default function PurchaseOrdersPage() {
         onClose={() => setDetailId(null)}
         onEdit={(id) => {
           setDetailId(null);
-          router.push(`/admin/purchase-orders/${id}`);
+          router.push(`/admin/purchase-orders/${id}?edit=1`);
         }}
         onChanged={fetchPOs}
       />

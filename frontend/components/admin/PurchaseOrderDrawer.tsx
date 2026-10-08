@@ -187,7 +187,17 @@ export default function PurchaseOrderDrawer({
               </div>
               <div className="rounded-md border border-[#E3E5E8] px-3 py-2">
                 <p className={adminUi.helper}>Status</p>
-                <p className="text-sm font-medium capitalize">{po.status}</p>
+                <p className="text-sm font-medium">
+                  {po.status === 'received'
+                    ? 'Fully Received'
+                    : po.status === 'partial'
+                    ? 'Partially Received'
+                    : po.status === 'sent'
+                    ? 'Sent'
+                    : po.status === 'cancelled'
+                    ? 'Cancelled'
+                    : 'Draft'}
+                </p>
               </div>
               <div className="rounded-md border border-[#E3E5E8] px-3 py-2">
                 <p className={adminUi.helper}>Received</p>
@@ -291,7 +301,7 @@ export default function PurchaseOrderDrawer({
           <div className="border-t border-[#E3E5E8] px-5 py-3 flex flex-wrap gap-2">
             {canEdit && (
               <button type="button" onClick={() => onEdit(po.id)} className={adminUi.btnSecondary}>
-                Open
+                Edit Draft
               </button>
             )}
             <button
