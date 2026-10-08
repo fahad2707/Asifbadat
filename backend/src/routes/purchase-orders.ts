@@ -23,6 +23,37 @@ function poLineProductId(item: any): string {
   return String(p);
 }
 
+/** Canonical key for duplicate-line checks (ObjectId string forms compare equal). */
+function canonicalProductIdKey(raw: unknown): string {
+  const id = poLineProductId({ product_id: raw }).trim();
+  if (!id) return '';
+  if (mongoose.Types.ObjectId.isValid(id)) {
+    try {
+      return String(new mongoose.Types.ObjectId(id));
+    } catch {
+      return id;
+    }
+  }
+  return id;
+}
+
+/**
+ * One product may appear on at most one PO line (create/update).
+ * Returns an error message when duplicates are present; otherwise null.
+ */
+function duplicateProductLineError(items: Array<{ product_id?: unknown }>): string | null {
+  const seen = new Set<string>();
+  for (const item of items) {
+    const key = canonicalProductIdKey(item.product_id);
+    if (!key) continue;
+    if (seen.has(key)) {
+      return 'Duplicate product in this purchase order';
+    }
+    seen.add(key);
+  }
+  return null;
+}
+
 function serializePoItems(items: any[] = []) {
   return items.map((i) => ({
     product_id: poLineProductId(i),
@@ -295,6 +326,9 @@ router.post('/', authenticateAdmin, async (req: AuthRequest, res) => {
       notes: z.string().optional(),
     });
     const data = schema.parse(req.body);
+    const duplicateError = duplicateProductLineError(data.items);
+    if (duplicateError) return res.status(400).json({ error: duplicateError });
+
     const vendor = await Vendor.findById(data.vendor_id);
     if (!vendor) return res.status(404).json({ error: 'Vendor not found' });
 
@@ -371,6 +405,9 @@ router.put('/:id', authenticateAdmin, async (req: AuthRequest, res) => {
     });
     const data = schema.parse(req.body);
     if (data.items) {
+      const duplicateError = duplicateProductLineError(data.items);
+      if (duplicateError) return res.status(400).json({ error: duplicateError });
+
       const items = data.items.map((item) => ({
         product_id: new mongoose.Types.ObjectId(item.product_id),
         product_name: item.product_name,
