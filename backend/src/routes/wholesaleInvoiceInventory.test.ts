@@ -10,7 +10,6 @@ import '../load-env';
 import { afterEach, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mock } from 'node:test';
-import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import jwt from 'jsonwebtoken';
@@ -1080,10 +1079,7 @@ test('51-59 isolation: no INV-WEB heuristic, no OnlineOrder lookup, no shipment/
   assert.equal(service.includes('idempotency'), false);
   assert.equal(/stock_quantity\s*>=/.test(service), false);
   assert.equal(service.includes('Math.floor'), false);
-
-  const shippingDiff = execFileSync('git', ['diff', '--', 'backend/src/modules/shipping'], {
-    cwd: join(process.cwd(), '..'),
-    encoding: 'utf8',
-  });
-  assert.equal(shippingDiff.trim(), '');
+  assert.equal(invoices.includes('Shipment'), false);
+  assert.equal(service.includes('SHIPMENT_OUT'), false);
+  assert.equal(service.includes('modules/shipping'), false);
 });

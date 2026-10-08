@@ -11,12 +11,16 @@ function generateShipmentNumber(type: 'GROUND' | 'GROUND_RG'): string {
 }
 
 /**
- * GROUND: On delivered → decrease stock (shipment out)
+ * GROUND: logistics only. Wholesale invoices already own outbound SALE stock
+ * (Phase 2D.2 / 2E). Mark-delivered must not decrement Product.stock_quantity
+ * and must not write SHIPMENT_OUT.
+ *
+ * GROUND_RG inbound inventory is handled by markReturnShipmentReceived.
  */
 export async function markShipmentDelivered(
   shipmentId: string,
   proofOfDeliveryUrl?: string,
-  userId?: string
+  _userId?: string
 ): Promise<{ success: boolean; error?: string }> {
   const session = await mongoose.startSession();
   session.startTransaction();
@@ -29,29 +33,6 @@ export async function markShipmentDelivered(
     if (shipment.status === 'DELIVERED') {
       await session.abortTransaction();
       return { success: false, error: 'Already delivered' };
-    }
-    if (shipment.shipment_type === 'GROUND' && shipment.items?.length) {
-      for (const item of shipment.items) {
-        await Product.findByIdAndUpdate(
-          item.product_id,
-          { $inc: { stock_quantity: -item.quantity } },
-          { session }
-        );
-        await StockMovement.create(
-          [
-            {
-              product_id: item.product_id,
-              movement_type: StockMovementType.SHIPMENT_OUT,
-              quantity_change: -item.quantity,
-              reference_type: 'Shipment',
-              reference_id: shipment._id,
-              notes: 'Shipment delivered',
-              admin_id: userId ? new mongoose.Types.ObjectId(userId) : undefined,
-            },
-          ],
-          { session }
-        );
-      }
     }
     await Shipment.findByIdAndUpdate(
       shipmentId,
