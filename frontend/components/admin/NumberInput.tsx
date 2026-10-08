@@ -49,7 +49,10 @@ export default function NumberInput({
         setFocused(true);
         setDraft(idleDisplay);
         onFocus?.(e);
-        window.requestAnimationFrame(() => e.currentTarget.select());
+        const input = e.currentTarget;
+        window.requestAnimationFrame(() => {
+          if (input.isConnected) input.select();
+        });
       }}
       onChange={(e) => {
         const raw = e.target.value.trim();
