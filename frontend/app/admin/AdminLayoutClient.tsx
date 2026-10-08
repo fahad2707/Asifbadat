@@ -58,6 +58,7 @@ function headerContextLabel(pathname: string | null | undefined, creatingInvoice
   if ((pathname === '/admin/invoices' || pathname.startsWith('/admin/invoices/')) && creatingInvoice) return 'Offline sales';
   if (pathname === '/admin/invoices' || pathname.startsWith('/admin/invoices/')) return 'Invoices & quotations';
   if (pathname === '/admin/customers' || pathname.startsWith('/admin/customers/')) return 'Customers';
+  if (pathname === '/admin/orders' || pathname.startsWith('/admin/orders/')) return 'Online sales';
   if (pathname === '/admin/products/new') return 'Product';
   if (pathname === '/admin/products' || pathname.startsWith('/admin/products/')) return 'Products';
   if (pathname === '/admin/receipts' || pathname.startsWith('/admin/receipts/')) return 'Bank transactions';
@@ -392,6 +393,7 @@ export default function AdminLayoutClient({ children }: { children: React.ReactN
             {openGroups.sales && (
               <div className="pl-2 mt-0.5 space-y-0.5">
                 <Link href="/admin/customers" className={adminNavItemClass(pathMatches(pathname, '/admin/customers'))}>Customer</Link>
+                <Link href="/admin/orders" className={adminNavItemClass(pathMatches(pathname, '/admin/orders'))}>Online sales</Link>
                 <Link href="/admin/invoices" className={adminNavItemClass(pathMatches(pathname, '/admin/invoices') && !creatingInvoice && !receivingPayment)}>Invoices &amp; quotations</Link>
                 <Link href="/admin/rfq" className={adminNavItemClass(pathMatches(pathname, '/admin/rfq'))}>RFQ</Link>
                 <Link href="/admin/credit-memos/customers" className={adminNavItemClass(pathname?.includes('/admin/credit-memos/customers') || pathname === '/admin/credit-memos')}>Credit memo (customers)</Link>
