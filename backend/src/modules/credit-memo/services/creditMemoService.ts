@@ -111,9 +111,15 @@ async function postCustomerCreditMemoLedger(
   );
 }
 
+/** Same skip rule as POS return / GROUND_RG: service and non_inventory are not physical stock. */
+function isSkippedProductType(productType: unknown): boolean {
+  return productType === 'service' || productType === 'non_inventory';
+}
+
 /**
  * Apply signed inventory for a physical credit memo.
  * Customer: +qty (return in). Vendor: -qty (return to supplier).
+ * Skips service / non_inventory lines (no $inc, no StockMovement).
  */
 async function applyCreditMemoInventory(
   cm: {
@@ -126,6 +132,16 @@ async function applyCreditMemoInventory(
   session?: mongoose.mongo.ClientSession
 ): Promise<void> {
   for (const item of cm.items) {
+    const product = session
+      ? await Product.findById(item.product_id).session(session)
+      : await Product.findById(item.product_id);
+    if (!product) {
+      throw new CreditMemoInventoryError('Product not found', 404);
+    }
+    if (isSkippedProductType((product as { product_type?: unknown }).product_type)) {
+      continue;
+    }
+
     const qty = Number(item.quantity);
     const delta = cm.type === 'VENDOR' ? -qty : qty;
     const updated = await Product.findOneAndUpdate(

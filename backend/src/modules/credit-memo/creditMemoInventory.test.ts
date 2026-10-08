@@ -24,6 +24,7 @@ import { StockMovementType } from '../../shared/enums';
 const CM_ID = '64b0000000000000000d0001';
 const PRODUCT_A = '64b0000000000000000c0001';
 const PRODUCT_B = '64b0000000000000000c0002';
+const PRODUCT_C = '64b0000000000000000c0003';
 const CUSTOMER_ID = '64b0000000000000000e0001';
 const VENDOR_ID = '64b0000000000000000f0001';
 const ADMIN_ID = '64b0000000000000000a0001';
@@ -112,6 +113,7 @@ async function deleteCm(id = CM_ID) {
 function stubApprove(opts: {
   cm: CmDoc;
   stock?: Record<string, number>;
+  productTypes?: Record<string, string>;
   productUpdate?: (productId: string, delta: number) => { stock_quantity: number } | null;
   movementThrows?: boolean;
   claim?: (filter: Record<string, unknown>) => Record<string, unknown> | null;
@@ -139,6 +141,24 @@ function stubApprove(opts: {
   });
 
   const stock = opts.stock || { [PRODUCT_A]: 58, [PRODUCT_B]: 10 };
+  const productTypes = opts.productTypes || {};
+  mock.method(Product, 'findById', (id: unknown) => {
+    const productId = String(id);
+    const doc =
+      productId in stock || productId in productTypes || opts.productUpdate
+        ? {
+            _id: productId,
+            product_type: productTypes[productId] ?? 'inventory',
+            stock_quantity: stock[productId] ?? 0,
+          }
+        : null;
+    return {
+      session: async () => doc,
+      then: (resolve: (v: typeof doc) => void, reject?: (e: unknown) => void) =>
+        Promise.resolve(doc).then(resolve, reject),
+    };
+  });
+
   const productUpdates: Array<{ filter: Record<string, unknown>; update: Record<string, unknown>; options: Record<string, unknown> }> = [];
   mock.method(Product, 'findOneAndUpdate', async (filter: Record<string, unknown>, update: Record<string, unknown>, options: Record<string, unknown>) => {
     productUpdates.push({ filter, update, options });
@@ -329,6 +349,136 @@ test('multi-line physical CM writes a movement per line with correct before/delt
   assert.equal(movements[1].doc.quantity_before, 10);
   assert.equal(movements[1].doc.quantity_change, 1);
   assert.equal(movements[1].doc.quantity_after, 11);
+  assert.equal(session.commitTransaction.mock.callCount(), 1);
+});
+
+test('CUSTOMER physical CM with service product does not change stock or create a movement', async () => {
+  assertNoMongoConnection();
+  const { session, productUpdates, movements, ledgerCalls, customerBalanceUpdates, stock } = stubApprove({
+    cm: makeCm({
+      type: 'CUSTOMER',
+      affects_inventory: true,
+      items: [{ product_id: PRODUCT_A, quantity: 5, product_name: 'Delivery Fee' }],
+    }),
+    stock: { [PRODUCT_A]: 20 },
+    productTypes: { [PRODUCT_A]: 'service' },
+  });
+
+  const res = await postApprove();
+
+  assert.equal(res.status, 200);
+  assert.equal(stock[PRODUCT_A], 20);
+  assert.equal(productUpdates.length, 0);
+  assert.equal(movements.length, 0);
+  assert.equal(ledgerCalls.length, 1);
+  assert.equal(customerBalanceUpdates.length, 1);
+  assert.equal(session.commitTransaction.mock.callCount(), 1);
+});
+
+test('CUSTOMER physical CM with non_inventory product does not change stock or create a movement', async () => {
+  assertNoMongoConnection();
+  const { productUpdates, movements, ledgerCalls, stock } = stubApprove({
+    cm: makeCm({
+      type: 'CUSTOMER',
+      affects_inventory: true,
+      items: [{ product_id: PRODUCT_A, quantity: 5, product_name: 'Handling Fee' }],
+    }),
+    stock: { [PRODUCT_A]: 20 },
+    productTypes: { [PRODUCT_A]: 'non_inventory' },
+  });
+
+  const res = await postApprove();
+
+  assert.equal(res.status, 200);
+  assert.equal(stock[PRODUCT_A], 20);
+  assert.equal(productUpdates.length, 0);
+  assert.equal(movements.length, 0);
+  assert.equal(ledgerCalls.length, 1);
+});
+
+test('VENDOR physical CM with service product does not change stock or create a movement', async () => {
+  assertNoMongoConnection();
+  const { productUpdates, movements, ledgerCalls, stock } = stubApprove({
+    cm: makeCm({
+      type: 'VENDOR',
+      customer_id: undefined,
+      vendor_id: VENDOR_ID,
+      affects_inventory: true,
+      items: [{ product_id: PRODUCT_A, quantity: 5, product_name: 'Consulting' }],
+    }),
+    stock: { [PRODUCT_A]: 50 },
+    productTypes: { [PRODUCT_A]: 'service' },
+  });
+
+  const res = await postApprove();
+
+  assert.equal(res.status, 200);
+  assert.equal(stock[PRODUCT_A], 50);
+  assert.equal(productUpdates.length, 0);
+  assert.equal(movements.length, 0);
+  assert.equal(ledgerCalls.length, 1);
+});
+
+test('VENDOR physical CM with non_inventory product does not change stock or create a movement', async () => {
+  assertNoMongoConnection();
+  const { productUpdates, movements, ledgerCalls, stock } = stubApprove({
+    cm: makeCm({
+      type: 'VENDOR',
+      customer_id: undefined,
+      vendor_id: VENDOR_ID,
+      affects_inventory: true,
+      items: [{ product_id: PRODUCT_A, quantity: 5, product_name: 'Freight Fee' }],
+    }),
+    stock: { [PRODUCT_A]: 50 },
+    productTypes: { [PRODUCT_A]: 'non_inventory' },
+  });
+
+  const res = await postApprove();
+
+  assert.equal(res.status, 200);
+  assert.equal(stock[PRODUCT_A], 50);
+  assert.equal(productUpdates.length, 0);
+  assert.equal(movements.length, 0);
+  assert.equal(ledgerCalls.length, 1);
+});
+
+test('mixed physical CM applies inventory only to inventory product lines', async () => {
+  assertNoMongoConnection();
+  const { session, productUpdates, movements, ledgerCalls, customerBalanceUpdates, stock } = stubApprove({
+    cm: makeCm({
+      type: 'CUSTOMER',
+      affects_inventory: true,
+      items: [
+        { product_id: PRODUCT_A, quantity: 5, product_name: 'Lays Box' },
+        { product_id: PRODUCT_B, quantity: 3, product_name: 'Service Fee' },
+        { product_id: PRODUCT_C, quantity: 2, product_name: 'Admin Fee' },
+      ],
+    }),
+    stock: { [PRODUCT_A]: 100, [PRODUCT_B]: 40, [PRODUCT_C]: 30 },
+    productTypes: {
+      [PRODUCT_A]: 'inventory',
+      [PRODUCT_B]: 'service',
+      [PRODUCT_C]: 'non_inventory',
+    },
+  });
+
+  const res = await postApprove();
+
+  assert.equal(res.status, 200);
+  assert.equal(productUpdates.length, 1);
+  assert.deepEqual(productUpdates[0].update, { $inc: { stock_quantity: 5 } });
+  assert.equal(String(productUpdates[0].filter._id), PRODUCT_A);
+  assert.equal(stock[PRODUCT_A], 105);
+  assert.equal(stock[PRODUCT_B], 40);
+  assert.equal(stock[PRODUCT_C], 30);
+  assert.equal(movements.length, 1);
+  assert.equal(movements[0].doc.movement_type, StockMovementType.CREDIT_MEMO);
+  assert.equal(String(movements[0].doc.product_id), PRODUCT_A);
+  assert.equal(movements[0].doc.quantity_change, 5);
+  assert.equal(movements[0].doc.quantity_before, 100);
+  assert.equal(movements[0].doc.quantity_after, 105);
+  assert.equal(ledgerCalls.length, 1);
+  assert.equal(customerBalanceUpdates.length, 1);
   assert.equal(session.commitTransaction.mock.callCount(), 1);
 });
 
