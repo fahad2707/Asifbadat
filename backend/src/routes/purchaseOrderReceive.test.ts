@@ -1,5 +1,13 @@
 /**
- * Phase 2B PO receiving — isolated harness, no Mongo connection.
+ * Phase 2B / Phase 3 PO receiving — isolated harness, no Mongo connection.
+ *
+ * These tests mock sessions/models and do not open MongoDB. Live integration of
+ * this path requires a transaction-capable MongoDB (replica set / mongos); see
+ * scripts/enable-local-mongo-replica-set.sh and README.
+ *
+ * Retry contract: successful receive consumes remaining quantity. Replaying the
+ * same request after remaining is exhausted is conflict/validation rejection
+ * (not an idempotent success replay).
  *
  * Run with:
  *     npx tsx --test src/routes/purchaseOrderReceive.test.ts
@@ -569,4 +577,152 @@ test('new receive path uses createStockMovement and does not call StockMovement.
   assert.equal(routeSrc.includes('StockMovement.create'), false);
   assert.equal(serviceSrc.includes('Math.min'), false);
   assert.match(serviceSrc, /arrayFilters/);
+});
+
+/**
+ * Stateful sequential receive harness: findById always sees the latest
+ * quantity_received so prepareClaims uses remaining after prior receives.
+ */
+function stubSequentialReceive(opts: { quantityOrdered: number; initialStock: number }) {
+  const session = createFakeSession();
+  mock.method(mongoose, 'startSession', async () => session);
+
+  const latestItems: PoLine[] = [
+    {
+      _id: LINE_A,
+      product_id: PRODUCT_A,
+      product_name: 'Lays Box',
+      quantity_ordered: opts.quantityOrdered,
+      quantity_received: 0,
+    },
+  ];
+  let status = 'sent';
+  const stock = { [PRODUCT_A]: opts.initialStock };
+  const movements: Array<Record<string, unknown>> = [];
+
+  mock.method(PurchaseOrder, 'findById', async () => ({
+    _id: PO_ID,
+    po_number: 'P12345',
+    vendor_id: VENDOR_ID,
+    status,
+    total_amount: 100,
+    items: latestItems.map((line) => ({ ...line })),
+  }));
+
+  mock.method(PurchaseOrder, 'findOneAndUpdate', async (
+    _filter: Record<string, unknown>,
+    update: Record<string, unknown>,
+    options: Record<string, unknown>
+  ) => {
+    if (update.$inc) {
+      for (const [key, qty] of Object.entries(update.$inc as Record<string, number>)) {
+        const match = key.match(/^items\.\$\[l(\d+)\]\.quantity_received$/);
+        if (!match) continue;
+        const index = Number(match[1]);
+        const arrayFilters = (options.arrayFilters || []) as Array<Record<string, unknown>>;
+        const lineId = String(arrayFilters[index]?.[`l${index}._id`] || '');
+        const line = latestItems.find((row) => row._id === lineId);
+        if (line) line.quantity_received += Number(qty);
+      }
+    }
+    if (update.$set && typeof (update.$set as { status?: string }).status === 'string') {
+      status = String((update.$set as { status: string }).status);
+    }
+    return {
+      _id: PO_ID,
+      po_number: 'P12345',
+      vendor_id: VENDOR_ID,
+      status,
+      total_amount: 100,
+      items: latestItems.map((line) => ({ ...line })),
+      ...(update.$set || {}),
+    };
+  });
+
+  mock.method(Product, 'findOneAndUpdate', async (filter: Record<string, unknown>, update: Record<string, unknown>) => {
+    const productId = String(filter._id);
+    const qty = Number((update.$inc as { stock_quantity?: number } | undefined)?.stock_quantity || 0);
+    if (!(productId in stock)) return null;
+    stock[productId as keyof typeof stock] += qty;
+    return { _id: productId, stock_quantity: stock[productId as keyof typeof stock] };
+  });
+
+  mock.method(StockMovement, 'create', async (docs: unknown) => {
+    const doc = Array.isArray(docs) ? (docs[0] as Record<string, unknown>) : (docs as Record<string, unknown>);
+    movements.push(doc);
+    return [doc];
+  });
+  mock.method(LedgerEntry, 'insertMany', async () => []);
+
+  return {
+    stock,
+    movements,
+    latestItems,
+    getStatus: () => status,
+    getReceived: () => latestItems[0].quantity_received,
+  };
+}
+
+test('sequential partial receives 4 then 3 then 3 without double-applying inventory', async () => {
+  assertNoMongoConnection();
+  const initialStock = 50;
+  const harness = stubSequentialReceive({ quantityOrdered: 10, initialStock });
+
+  const first = await postReceive({ items: [{ product_id: PRODUCT_A, quantity_received: 4 }] });
+  assert.equal(first.status, 200);
+  assert.equal(harness.getReceived(), 4);
+  assert.equal(harness.stock[PRODUCT_A], initialStock + 4);
+  assert.equal(harness.movements.length, 1);
+  assert.equal(harness.movements[0].movement_type, StockMovementType.PURCHASE);
+  assert.equal(harness.movements[0].quantity_change, 4);
+  assert.equal(harness.movements[0].quantity_before, initialStock);
+  assert.equal(harness.movements[0].quantity_after, initialStock + 4);
+  assert.equal(first.body.status, 'partial');
+
+  const second = await postReceive({ items: [{ product_id: PRODUCT_A, quantity_received: 3 }] });
+  assert.equal(second.status, 200);
+  assert.equal(harness.getReceived(), 7);
+  assert.equal(harness.stock[PRODUCT_A], initialStock + 7);
+  assert.equal(harness.movements.length, 2);
+  assert.equal(harness.movements[1].movement_type, StockMovementType.PURCHASE);
+  assert.equal(harness.movements[1].quantity_change, 3);
+  assert.equal(harness.movements[1].quantity_before, initialStock + 4);
+  assert.equal(harness.movements[1].quantity_after, initialStock + 7);
+  assert.equal(second.body.status, 'partial');
+
+  const third = await postReceive({ items: [{ product_id: PRODUCT_A, quantity_received: 3 }] });
+  assert.equal(third.status, 200);
+  assert.equal(harness.getReceived(), 10);
+  assert.equal(harness.getStatus(), 'received');
+  assert.equal(third.body.status, 'received');
+  assert.equal(harness.stock[PRODUCT_A], initialStock + 10);
+  assert.equal(harness.movements.length, 3);
+  assert.deepEqual(
+    harness.movements.map((m) => m.quantity_change),
+    [4, 3, 3]
+  );
+  assert.equal(
+    harness.movements.every((m) => m.movement_type === StockMovementType.PURCHASE),
+    true
+  );
+});
+
+test('replaying a fully received request is conflict-on-retry rejection (not idempotent success)', async () => {
+  assertNoMongoConnection();
+  const initialStock = 50;
+  const harness = stubSequentialReceive({ quantityOrdered: 10, initialStock });
+
+  const first = await postReceive({ items: [{ product_id: PRODUCT_A, quantity_received: 10 }] });
+  assert.equal(first.status, 200);
+  assert.equal(harness.getReceived(), 10);
+  assert.equal(harness.getStatus(), 'received');
+  assert.equal(harness.stock[PRODUCT_A], initialStock + 10);
+  assert.equal(harness.movements.length, 1);
+
+  const replay = await postReceive({ items: [{ product_id: PRODUCT_A, quantity_received: 10 }] });
+  assert.equal(replay.status, 400);
+  assert.match(String(replay.body.error), /already received|remaining/i);
+  assert.equal(harness.getReceived(), 10);
+  assert.equal(harness.stock[PRODUCT_A], initialStock + 10);
+  assert.equal(harness.movements.length, 1);
 });

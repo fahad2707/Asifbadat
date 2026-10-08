@@ -19,6 +19,10 @@ npm run dev
 - Frontend: [http://localhost:3000](http://localhost:3000)
 - API: [http://localhost:5001](http://localhost:5001) (override with `PORT`)
 
+### MongoDB transactions (local)
+
+Purchase order receiving, physical count, POS inventory writes, and similar paths use MongoDB multi-document transactions. A standalone `mongod` will reject them. For local development, run MongoDB as a single-node replica set (for example `scripts/enable-local-mongo-replica-set.sh`). This is an environment requirement, not an application inventory-behavior change. Most backend unit tests mock sessions and do not need a live replica set.
+
 ## Security notes for production
 
 - Terminate TLS at your host (HTTPS only); set `NODE_ENV=production` and `FRONTEND_URL` to your public site URL.

@@ -1,7 +1,12 @@
 #!/usr/bin/env bash
-# Physical count / POS / inventory writers need MongoDB transactions.
+# Inventory writers that use multi-document transactions need MongoDB transactions:
+#   physical count, POS sale/return, purchase-order receive, and related paths.
 # Transactions require a replica set — a standalone mongod will fail with:
 #   Transaction numbers are only allowed on a replica set member or mongos
+#
+# This is an environment requirement for local/dev live runs (and any live
+# integration tests against real Mongo). Isolated unit tests that mock sessions
+# do not need a replica set.
 #
 # This script converts the Homebrew mongodb-community@8.0 instance into a
 # single-node replica set (rs0) and initiates it. Safe for local dev.

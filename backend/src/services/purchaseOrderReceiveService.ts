@@ -1,3 +1,20 @@
+/**
+ * Purchase Order receiving (inventory writer).
+ *
+ * Architecture (one Mongo transaction):
+ *   conditional line claim → Product.$inc → createStockMovement(PURCHASE)
+ *   → PO status (partial|received) → vendor ledger when newly fully received → commit
+ *
+ * Retry / conflict-on-retry (not true idempotency):
+ * A successful receive consumes remaining ordered quantity via the line claim.
+ * Replaying the same successful payload after remaining is exhausted is rejected
+ * (400 remaining / 409 RECEIVE_CONFLICT) — it does not return a successful
+ * idempotent replay of the prior receive. Concurrent overlapping claims are
+ * conflict-protected by the conditional claim filter.
+ *
+ * Environment: live MongoDB must support multi-document transactions (replica set
+ * or mongos). Isolated unit tests mock sessions and do not require a live replica set.
+ */
 import mongoose from 'mongoose';
 import PurchaseOrder from '../models/PurchaseOrder';
 import Product from '../models/Product';
