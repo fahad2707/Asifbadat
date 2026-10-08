@@ -261,9 +261,10 @@ export async function approveCreditMemo(
 }
 
 /**
- * Cancel credit memo. Only DRAFT or APPROVED can be cancelled.
- * If already APPROVED, we would need to reverse ledger/inventory - for simplicity we only allow cancel of DRAFT here.
- * For APPROVED we set status to CANCELLED and could add a reversal logic in a follow-up.
+ * Cancel credit memo.
+ * DRAFT → CANCELLED is allowed (no inventory/ledger applied yet).
+ * APPROVED → CANCELLED is rejected until a real stock/ledger reversal exists.
+ * Uses a conditional DRAFT claim so a concurrent approve cannot be cancelled afterward.
  */
 export async function cancelCreditMemo(creditMemoId: string): Promise<{ success: boolean; error?: string }> {
   const cm = await CreditMemo.findById(creditMemoId);
@@ -272,10 +273,34 @@ export async function cancelCreditMemo(creditMemoId: string): Promise<{ success:
     return { success: false, error: 'Credit memo cannot be cancelled' };
   }
   if (cm.status === 'APPROVED') {
-    // Business rule: cannot delete after approval; we only set CANCELLED. Reversal of ledger/stock would be a separate feature.
-    await CreditMemo.findByIdAndUpdate(creditMemoId, { status: 'CANCELLED' });
+    return {
+      success: false,
+      error:
+        'Approved credit memos cannot be cancelled because inventory and ledger effects are not reversed',
+    };
+  }
+
+  if (cm.status === 'DRAFT') {
+    const updated = await CreditMemo.findOneAndUpdate(
+      { _id: creditMemoId, status: 'DRAFT' },
+      { $set: { status: 'CANCELLED' } },
+      { new: true }
+    );
+    if (!updated) {
+      const current = await CreditMemo.findById(creditMemoId);
+      if (current && String(current.status) === 'APPROVED') {
+        return {
+          success: false,
+          error:
+            'Approved credit memos cannot be cancelled because inventory and ledger effects are not reversed',
+        };
+      }
+      return { success: false, error: 'Credit memo cannot be cancelled' };
+    }
     return { success: true };
   }
+
+  // Other non-terminal statuses (e.g. ADJUSTED): preserve prior cancel behavior.
   await CreditMemo.findByIdAndUpdate(creditMemoId, { status: 'CANCELLED' });
   return { success: true };
 }

@@ -336,7 +336,102 @@ test('shipment-generated CM with affects_inventory=false stays inventory-neutral
   assert.equal(movements.length, 0);
 });
 
-test('cancelling an approved physical CM does not reverse stock or write a reversal movement', async () => {
+function stubCancelSideEffects() {
+  let statusWritten: string | null = null;
+  let findOneAndUpdateFilter: Record<string, unknown> | null = null;
+  let productTouched = false;
+  let movementCreated = false;
+  let ledgerTouched = false;
+  let customerBalanceTouched = false;
+
+  mock.method(CreditMemo, 'findOneAndUpdate', async (filter: Record<string, unknown>, update: { $set?: { status?: string }; status?: string }) => {
+    findOneAndUpdateFilter = filter;
+    statusWritten = update.$set?.status ?? update.status ?? null;
+    return { status: 'CANCELLED' };
+  });
+  mock.method(CreditMemo, 'findByIdAndUpdate', async (_id: unknown, update: { status?: string }) => {
+    statusWritten = update.status ?? null;
+    return { status: update.status };
+  });
+  mock.method(Product, 'findOneAndUpdate', async () => {
+    productTouched = true;
+    return { stock_quantity: 1 };
+  });
+  mock.method(StockMovement, 'create', async () => {
+    movementCreated = true;
+    return [{}];
+  });
+  mock.method(LedgerEntry, 'insertMany', async () => {
+    ledgerTouched = true;
+    return [];
+  });
+  mock.method(Customer, 'findByIdAndUpdate', async () => {
+    customerBalanceTouched = true;
+    return {};
+  });
+
+  return {
+    get statusWritten() {
+      return statusWritten;
+    },
+    get findOneAndUpdateFilter() {
+      return findOneAndUpdateFilter;
+    },
+    get productTouched() {
+      return productTouched;
+    },
+    get movementCreated() {
+      return movementCreated;
+    },
+    get ledgerTouched() {
+      return ledgerTouched;
+    },
+    get customerBalanceTouched() {
+      return customerBalanceTouched;
+    },
+  };
+}
+
+test('DRAFT credit memo can still be cancelled', async () => {
+  assertNoMongoConnection();
+  mock.method(CreditMemo, 'findById', async () => makeCm({ status: 'DRAFT' }));
+  const side = stubCancelSideEffects();
+
+  const res = await postCancel();
+
+  assert.equal(res.status, 200);
+  assert.equal(side.statusWritten, 'CANCELLED');
+  assert.equal(side.findOneAndUpdateFilter?.status, 'DRAFT');
+  assert.equal(side.productTouched, false);
+  assert.equal(side.movementCreated, false);
+  assert.equal(side.ledgerTouched, false);
+  assert.equal(side.customerBalanceTouched, false);
+});
+
+test('APPROVED financial-only credit memo cannot be cancelled', async () => {
+  assertNoMongoConnection();
+  mock.method(CreditMemo, 'findById', async () =>
+    makeCm({
+      type: 'CUSTOMER',
+      status: 'APPROVED',
+      affects_inventory: false,
+      approved_at: new Date('2026-09-25T00:00:00Z'),
+    })
+  );
+  const side = stubCancelSideEffects();
+
+  const res = await postCancel();
+
+  assert.equal(res.status, 400);
+  assert.match(String(res.body.error), /cannot be cancelled/i);
+  assert.equal(side.statusWritten, null);
+  assert.equal(side.productTouched, false);
+  assert.equal(side.movementCreated, false);
+  assert.equal(side.ledgerTouched, false);
+  assert.equal(side.customerBalanceTouched, false);
+});
+
+test('APPROVED physical customer credit memo cannot be cancelled', async () => {
   assertNoMongoConnection();
   mock.method(CreditMemo, 'findById', async () =>
     makeCm({
@@ -346,10 +441,60 @@ test('cancelling an approved physical CM does not reverse stock or write a rever
       approved_at: new Date('2026-09-25T00:00:00Z'),
     })
   );
-  let cancelled = false;
+  const side = stubCancelSideEffects();
+
+  const res = await postCancel();
+
+  assert.equal(res.status, 400);
+  assert.match(String(res.body.error), /cannot be cancelled/i);
+  assert.equal(side.statusWritten, null);
+  assert.equal(side.productTouched, false);
+  assert.equal(side.movementCreated, false);
+  assert.equal(side.ledgerTouched, false);
+  assert.equal(side.customerBalanceTouched, false);
+});
+
+test('APPROVED physical vendor credit memo cannot be cancelled', async () => {
+  assertNoMongoConnection();
+  mock.method(CreditMemo, 'findById', async () =>
+    makeCm({
+      type: 'VENDOR',
+      status: 'APPROVED',
+      affects_inventory: true,
+      vendor_id: VENDOR_ID,
+      customer_id: undefined,
+      approved_at: new Date('2026-09-25T00:00:00Z'),
+    })
+  );
+  const side = stubCancelSideEffects();
+
+  const res = await postCancel();
+
+  assert.equal(res.status, 400);
+  assert.match(String(res.body.error), /cannot be cancelled/i);
+  assert.equal(side.statusWritten, null);
+  assert.equal(side.productTouched, false);
+  assert.equal(side.movementCreated, false);
+  assert.equal(side.ledgerTouched, false);
+});
+
+test('cancel race: DRAFT claim loses to concurrent approve and rejects without side effects', async () => {
+  assertNoMongoConnection();
+  let finds = 0;
+  mock.method(CreditMemo, 'findById', async () => {
+    finds += 1;
+    if (finds === 1) return makeCm({ status: 'DRAFT', affects_inventory: true });
+    return makeCm({
+      status: 'APPROVED',
+      affects_inventory: true,
+      approved_at: new Date('2026-09-25T00:00:00Z'),
+    });
+  });
+  mock.method(CreditMemo, 'findOneAndUpdate', async () => null);
+  let statusWritten: string | null = null;
   mock.method(CreditMemo, 'findByIdAndUpdate', async (_id: unknown, update: { status?: string }) => {
-    cancelled = update.status === 'CANCELLED';
-    return { status: 'CANCELLED' };
+    statusWritten = update.status ?? null;
+    return { status: update.status };
   });
   let productTouched = false;
   mock.method(Product, 'findOneAndUpdate', async () => {
@@ -364,8 +509,9 @@ test('cancelling an approved physical CM does not reverse stock or write a rever
 
   const res = await postCancel();
 
-  assert.equal(res.status, 200);
-  assert.equal(cancelled, true);
+  assert.equal(res.status, 400);
+  assert.match(String(res.body.error), /cannot be cancelled/i);
+  assert.equal(statusWritten, null);
   assert.equal(productTouched, false);
   assert.equal(movementCreated, false);
 });

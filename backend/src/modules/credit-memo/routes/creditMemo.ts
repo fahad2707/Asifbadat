@@ -352,7 +352,7 @@ router.delete('/:id', authenticateAdmin, async (req: AuthRequest, res) => {
     const status = String(cm.status || '').toUpperCase();
     if (status === 'APPROVED' || status === 'ADJUSTED') {
       return res.status(400).json({
-        error: `${cm.credit_memo_number || 'This credit memo'} is ${status.toLowerCase()} and cannot be deleted. Cancel it first, or export it instead.`,
+        error: `${cm.credit_memo_number || 'This credit memo'} is ${status.toLowerCase()} and cannot be deleted. Export it instead.`,
       });
     }
     if (status === 'CANCELLED' && cm.approved_at) {
