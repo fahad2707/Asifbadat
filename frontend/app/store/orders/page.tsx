@@ -3,15 +3,13 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { ArrowLeft, Package, CheckCircle, Truck, Store, Clock, X } from 'lucide-react';
+import { ArrowLeft, Package, CheckCircle, Truck, MapPin, Clock, X } from 'lucide-react';
 import api from '@/lib/api';
 import { useAuthStore } from '@/lib/store';
 import toast from 'react-hot-toast';
 
 interface OrderItem {
-  id: number;
   product_name: string;
-  product_image?: string;
   quantity: number;
   price: number;
   subtotal: number;
@@ -19,13 +17,14 @@ interface OrderItem {
 
 interface StatusHistory {
   status: string;
-  notes?: string;
-  created_at: string;
+  note?: string;
+  timestamp: string;
 }
 
-interface Order {
-  id: number;
+interface OnlineOrder {
+  id: string;
   order_number: string;
+  customer_email?: string;
   status: string;
   total_amount: number;
   created_at: string;
@@ -34,17 +33,17 @@ interface Order {
 }
 
 const statusConfig: Record<string, { label: string; icon: any; color: string; bgColor: string }> = {
-  placed: { label: 'Order Placed', icon: Package, color: 'text-blue-600', bgColor: 'bg-blue-100' },
+  confirmed: { label: 'Confirmed', icon: Package, color: 'text-blue-600', bgColor: 'bg-blue-100' },
   packed: { label: 'Packed', icon: CheckCircle, color: 'text-yellow-600', bgColor: 'bg-yellow-100' },
-  ready_for_pickup: { label: 'Ready for Pickup', icon: Store, color: 'text-green-600', bgColor: 'bg-green-100' },
-  completed: { label: 'Completed', icon: CheckCircle, color: 'text-green-600', bgColor: 'bg-green-100' },
+  dispatched: { label: 'Dispatched', icon: Truck, color: 'text-purple-600', bgColor: 'bg-purple-100' },
+  delivered: { label: 'Delivered', icon: MapPin, color: 'text-green-600', bgColor: 'bg-green-100' },
   cancelled: { label: 'Cancelled', icon: X, color: 'text-red-600', bgColor: 'bg-red-100' },
 };
 
 export default function OrdersPage() {
   const router = useRouter();
   const { token } = useAuthStore();
-  const [orders, setOrders] = useState<Order[]>([]);
+  const [orders, setOrders] = useState<OnlineOrder[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -57,7 +56,7 @@ export default function OrdersPage() {
 
   const fetchOrders = async () => {
     try {
-      const response = await api.get('/orders/my-orders');
+      const response = await api.get('/online-orders/my-orders');
       setOrders(response.data);
     } catch (error) {
       toast.error('Failed to load orders');
@@ -105,8 +104,12 @@ export default function OrdersPage() {
         ) : (
           <div className="space-y-6">
             {orders.map((order) => {
-              const statusInfo = statusConfig[order.status] || statusConfig.placed;
+              const statusInfo = statusConfig[order.status] || statusConfig.confirmed;
               const StatusIcon = statusInfo.icon;
+              const trackHref =
+                order.customer_email
+                  ? `/order-confirmation?order=${encodeURIComponent(order.order_number)}&email=${encodeURIComponent(order.customer_email)}`
+                  : `/order-confirmation?order=${encodeURIComponent(order.order_number)}`;
 
               return (
                 <div key={order.id} className="bg-white rounded-2xl shadow-lg hover:shadow-xl transition-shadow overflow-hidden">
@@ -128,11 +131,17 @@ export default function OrdersPage() {
                           })}
                         </p>
                       </div>
-                      <div className="flex items-center gap-3">
+                      <div className="flex items-center gap-3 flex-wrap">
                         <div className={`${statusInfo.bgColor} ${statusInfo.color} px-4 py-2 rounded-full flex items-center gap-2`}>
                           <StatusIcon className="w-5 h-5" />
                           <span className="font-semibold">{statusInfo.label}</span>
                         </div>
+                        <Link
+                          href={trackHref}
+                          className="text-sm font-semibold text-primary-600 hover:text-primary-700"
+                        >
+                          Track order
+                        </Link>
                       </div>
                     </div>
                   </div>
@@ -141,29 +150,21 @@ export default function OrdersPage() {
                   <div className="p-6">
                     <h4 className="font-semibold text-gray-900 mb-4">Items Ordered</h4>
                     <div className="space-y-4 mb-6">
-                      {order.items?.map((item) => (
-                        <div key={item.id} className="flex items-center gap-4 p-4 bg-gray-50 rounded-xl">
-                          {item.product_image ? (
-                            <img
-                              src={item.product_image}
-                              alt={item.product_name}
-                              className="w-16 h-16 object-cover rounded-lg"
-                            />
-                          ) : (
-                            <div className="w-16 h-16 bg-gradient-to-br from-primary-400 to-primary-600 rounded-lg flex items-center justify-center">
-                              <span className="text-2xl text-white font-bold">
-                                {item.product_name.charAt(0)}
-                              </span>
-                            </div>
-                          )}
+                      {order.items?.map((item, idx) => (
+                        <div key={idx} className="flex items-center gap-4 p-4 bg-gray-50 rounded-xl">
+                          <div className="w-16 h-16 bg-gradient-to-br from-primary-400 to-primary-600 rounded-lg flex items-center justify-center">
+                            <span className="text-2xl text-white font-bold">
+                              {(item.product_name || '?').charAt(0)}
+                            </span>
+                          </div>
                           <div className="flex-1">
                             <p className="font-semibold text-gray-900">{item.product_name}</p>
                             <p className="text-sm text-gray-600">
-                              Quantity: {item.quantity} × ${item.price.toFixed(2)}
+                              Quantity: {item.quantity} × ${Number(item.price).toFixed(2)}
                             </p>
                           </div>
                           <p className="font-bold text-lg text-gray-900">
-                            ${item.subtotal.toFixed(2)}
+                            ${Number(item.subtotal).toFixed(2)}
                           </p>
                         </div>
                       ))}
@@ -175,7 +176,7 @@ export default function OrdersPage() {
                         <h4 className="font-semibold text-gray-900 mb-4">Order Timeline</h4>
                         <div className="space-y-3">
                           {order.status_history.map((history, idx) => {
-                            const histStatusInfo = statusConfig[history.status] || statusConfig.placed;
+                            const histStatusInfo = statusConfig[history.status] || statusConfig.confirmed;
                             const HistIcon = histStatusInfo.icon;
                             return (
                               <div key={idx} className="flex items-start gap-3">
@@ -185,10 +186,10 @@ export default function OrdersPage() {
                                 <div className="flex-1">
                                   <p className="font-semibold text-gray-900">{histStatusInfo.label}</p>
                                   <p className="text-sm text-gray-600">
-                                    {new Date(history.created_at).toLocaleString()}
+                                    {new Date(history.timestamp).toLocaleString()}
                                   </p>
-                                  {history.notes && (
-                                    <p className="text-sm text-gray-500 mt-1">{history.notes}</p>
+                                  {history.note && (
+                                    <p className="text-sm text-gray-500 mt-1">{history.note}</p>
                                   )}
                                 </div>
                               </div>
@@ -202,7 +203,7 @@ export default function OrdersPage() {
                     <div className="border-t-2 border-gray-200 pt-4 flex justify-between items-center">
                       <span className="text-lg font-semibold text-gray-700">Total Amount</span>
                       <span className="text-3xl font-bold text-primary-600">
-                        ${parseFloat(order.total_amount.toString()).toFixed(2)}
+                        ${Number(order.total_amount).toFixed(2)}
                       </span>
                     </div>
                   </div>

@@ -124,10 +124,10 @@ export default function DashboardPage() {
   }
 
   const statusColors: Record<string, string> = {
-    placed: 'bg-blue-100 text-blue-700',
+    confirmed: 'bg-blue-100 text-blue-700',
     packed: 'bg-yellow-100 text-yellow-700',
-    ready_for_pickup: 'bg-green-100 text-green-700',
-    completed: 'bg-green-100 text-green-700',
+    dispatched: 'bg-purple-100 text-purple-700',
+    delivered: 'bg-green-100 text-green-700',
     cancelled: 'bg-red-100 text-red-700',
   };
 

@@ -1,8 +1,6 @@
 import express from 'express';
 import User from '../models/User';
-import Order from '../models/Order';
-import OrderItem from '../models/OrderItem';
-import OrderStatusHistory from '../models/OrderStatusHistory';
+import OnlineOrder from '../models/OnlineOrder';
 import { authenticateUser, AuthRequest } from '../middleware/auth';
 import { isUserLinkedToApprovedCustomer } from '../utils/customerAccount';
 import { z } from 'zod';
@@ -82,9 +80,9 @@ router.get('/dashboard', authenticateUser, async (req: AuthRequest, res) => {
       return res.status(404).json({ error: 'User not found' });
     }
 
-    // Get order stats
-    const totalOrders = await Order.countDocuments({ user_id: req.userId });
-    const recentOrders = await Order.find({ user_id: req.userId })
+    // OnlineOrder stats for the authenticated storefront user (JWT userId only)
+    const totalOrders = await OnlineOrder.countDocuments({ user_id: req.userId });
+    const recentOrders = await OnlineOrder.find({ user_id: req.userId })
       .sort({ created_at: -1 })
       .limit(5)
       .lean();

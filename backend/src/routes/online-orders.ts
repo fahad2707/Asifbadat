@@ -226,6 +226,50 @@ router.get('/track/:orderNumber', onlineTrackLimiter, async (req, res) => {
   }
 });
 
+// Authenticated storefront user: list only their own OnlineOrders (newest first).
+// Identity comes from JWT (req.userId) — never from query/body user_id.
+router.get('/my-orders', authenticateUser, async (req: AuthRequest, res) => {
+  try {
+    const userId = typeof req.userId === 'string' ? req.userId.trim() : '';
+    if (!userId) {
+      return res.status(401).json({ error: 'Authentication required' });
+    }
+
+    const orders = await OnlineOrder.find({ user_id: userId })
+      .sort({ created_at: -1 })
+      .lean();
+
+    res.json(
+      orders.map((o: any) => ({
+        id: o._id.toString(),
+        order_number: o.order_number,
+        customer_email: o.customer_email,
+        items: (o.items || []).map((item: any) => ({
+          product_name: item.product_name,
+          quantity: item.quantity,
+          price: item.price,
+          subtotal: item.subtotal,
+        })),
+        subtotal: o.subtotal,
+        tax_amount: o.tax_amount,
+        total_amount: o.total_amount,
+        payment_method: o.payment_method,
+        payment_status: o.payment_status,
+        status: o.status,
+        status_history: (o.status_history || []).map((h: any) => ({
+          status: h.status,
+          timestamp: h.timestamp,
+          note: h.note,
+        })),
+        created_at: o.created_at,
+      }))
+    );
+  } catch (error) {
+    console.error('Get my online orders error:', error);
+    res.status(500).json({ error: 'Failed to fetch orders' });
+  }
+});
+
 // Admin: list all online orders
 router.get('/', authenticateAdmin, async (req: AuthRequest, res) => {
   try {

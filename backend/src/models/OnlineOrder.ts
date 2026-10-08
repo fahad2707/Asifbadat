@@ -93,5 +93,6 @@ const OnlineOrderSchema = new Schema<IOnlineOrder>(
 
 OnlineOrderSchema.index({ status: 1 });
 OnlineOrderSchema.index({ created_at: -1 });
+OnlineOrderSchema.index({ user_id: 1, created_at: -1 });
 
 export default mongoose.model<IOnlineOrder>('OnlineOrder', OnlineOrderSchema);
