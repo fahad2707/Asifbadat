@@ -73,6 +73,8 @@ html:not(.use-custom-cursor) #dot,html:not(.use-custom-cursor) #ring{display:non
 .cart-n{position:absolute;top:-7px;right:-7px;width:17px;height:17px;border-radius:50%;background:var(--gold);color:var(--ink);font-size:9px;font-weight:700;display:flex;align-items:center;justify-content:center}
 .wl-btn{display:inline-flex;align-items:center;gap:7px;border:1px solid var(--line);padding:8px 18px;font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:rgba(245,240,232,.7);transition:border-color .3s,color .3s;position:relative}
 .wl-btn:hover{border-color:var(--gold);color:var(--gold)}
+.acct-btn{display:inline-flex;align-items:center;gap:7px;border:1px solid var(--line);padding:8px 18px;font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:rgba(245,240,232,.7);transition:border-color .3s,color .3s;text-decoration:none;font-family:var(--body);line-height:1.2}
+.acct-btn:hover{border-color:var(--gold);color:var(--gold)}
 .wl-n{position:absolute;top:-7px;right:-7px;width:17px;height:17px;border-radius:50%;background:var(--gold);color:var(--ink);font-size:9px;font-weight:700;display:flex;align-items:center;justify-content:center}
 #wishlist{position:fixed;top:0;right:-110%;width:min(400px,100%);height:100dvh;z-index:800;background:var(--ink2);border-left:1px solid var(--line2);display:flex;flex-direction:column;transition:right .42s var(--ease)}
 #wishlist.open{right:0}
@@ -489,7 +491,7 @@ body.category-mode #homeContent{display:none}
   #nav{padding:18px 20px;z-index:9999;border-bottom:1px solid var(--line2)}#nav.stuck{padding:12px 20px;border-bottom-color:var(--line)}
   .nav-mid{display:none}.ham{display:flex;z-index:10000}.mob-cart-btn{display:flex;z-index:10000}
   .nav-right{gap:10px;position:relative;align-items:center}
-  .nav-right .wl-btn,.nav-right .cart-btn{display:none !important}
+  .nav-right .wl-btn,.nav-right .cart-btn,.nav-right .acct-btn{display:none !important}
   .cart-fab{display:none !important}
   #mob-nav{z-index:10000}
   .cart-back-mob{display:inline-flex;align-items:center;justify-content:center}
@@ -532,13 +534,14 @@ body.category-mode #homeContent{display:none}
 <div id="wishlist"><div class="wl-hd"><button type="button" class="cart-back-mob" onclick="closeWl()">← Back</button><h3>♡ Wishlist</h3><button type="button" class="cart-cls" onclick="closeWl()" aria-label="Close wishlist">×</button></div><div class="wl-list" id="wlList"><div class="cart-mt"><div class="cart-mt-ico">♡</div><p style="font-size:13px">Your wishlist is empty</p></div></div></div>
 <div id="toast"><span class="ti">✓</span><span id="toastTxt"></span></div>
 <div class="nav-backdrop" id="navBg" onclick="closeMobNav()"></div>
-<div id="mob-nav"><div class="mob-nav-top"><h2>Menu</h2><button type="button" class="mob-nav-close" onclick="closeMobNav()" aria-label="Close menu">×</button></div><div class="mob-nav-links"><a class="mob-link" href="/site#highlights" onclick="closeMobNav()">Highlights</a><a class="mob-link" href="/site#shop" onclick="closeMobNav()">Shop</a><a class="mob-link" href="/site#about" onclick="closeMobNav()">About</a><a class="mob-link" href="/site#story" onclick="closeMobNav()">Our Story</a><a class="mob-link" href="/site#testi" onclick="closeMobNav()">Clients</a></div><div class="mob-nav-actions"><button type="button" class="mob-act" onclick="closeMobNav();openWl();">♡ Wishlist<span class="dot" id="mobWlN">0</span></button><button type="button" class="mob-act primary" onclick="closeMobNav();openCart();">🛒 Cart<span class="dot" id="mobCartActN">0</span></button></div></div>
+<div id="mob-nav"><div class="mob-nav-top"><h2>Menu</h2><button type="button" class="mob-nav-close" onclick="closeMobNav()" aria-label="Close menu">×</button></div><div class="mob-nav-links"><a class="mob-link" href="/site#highlights" onclick="closeMobNav()">Highlights</a><a class="mob-link" href="/site#shop" onclick="closeMobNav()">Shop</a><a class="mob-link" href="/site#about" onclick="closeMobNav()">About</a><a class="mob-link" href="/site#story" onclick="closeMobNav()">Our Story</a><a class="mob-link" href="/site#testi" onclick="closeMobNav()">Clients</a><a class="mob-link" id="mobAuthLink" href="/login" onclick="closeMobNav()">Login</a></div><div class="mob-nav-actions"><button type="button" class="mob-act" onclick="closeMobNav();openWl();">♡ Wishlist<span class="dot" id="mobWlN">0</span></button><button type="button" class="mob-act primary" onclick="closeMobNav();openCart();">🛒 Cart<span class="dot" id="mobCartActN">0</span></button></div></div>
 <nav id="nav">
   <a href="/site" class="logo" aria-label="Express Distributors Inc">
     <img src="/logo.png" alt="Express Distributors Inc"/>
   </a>
   <div class="nav-mid"><a href="/site#highlights">Highlights</a><a href="/site#shop">Shop</a><a href="/site#about">About</a><a href="/site#story">Our Story</a><a href="/site#testi">Clients</a></div>
   <div class="nav-right">
+    <a class="acct-btn" id="navAuthLink" href="/login">Login</a>
     <button class="wl-btn" onclick="openWl()">♡ Wishlist<div class="wl-n" id="wlN">0</div></button>
     <button class="cart-btn" onclick="openCart()">🛒 Cart<div class="cart-n" id="cartN">0</div></button>
     <button type="button" class="mob-cart-btn" id="mobCartTop" onclick="toggleCartPop()" aria-label="Cart">🛒<span class="cart-n" id="mobCartTopN">0</span></button>
@@ -703,6 +706,17 @@ let accountApproved=false;
 function storefrontUserToken(){
   try{return String(localStorage.getItem('token')||'').trim();}catch(e){return '';}
 }
+function updateNavAuthLink(){
+  const loggedIn=!!storefrontUserToken();
+  const href=loggedIn?'/dashboard':'/login';
+  const label=loggedIn?'Account':'Login';
+  ['navAuthLink','mobAuthLink'].forEach(function(id){
+    const el=document.getElementById(id);
+    if(!el) return;
+    el.setAttribute('href',href);
+    el.textContent=label;
+  });
+}
 function catalogHeaders(){
   const headers={'Accept':'application/json'};
   const token=storefrontUserToken();
@@ -711,6 +725,7 @@ function catalogHeaders(){
 }
 async function resolveAccountApproved(){
   accountApproved=false;
+  updateNavAuthLink();
   const token=storefrontUserToken();
   if(!token){updateCheckoutCta();return;}
   try{
@@ -721,6 +736,7 @@ async function resolveAccountApproved(){
   }catch(e){accountApproved=false;}
   updateCheckoutCta();
 }
+updateNavAuthLink();
 function updateCheckoutCta(){
   const title=document.getElementById('cartCtaTitle');
   const copy=document.getElementById('cartCtaCopy');
