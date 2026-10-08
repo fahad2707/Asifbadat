@@ -291,7 +291,7 @@ export default function PurchaseOrderDrawer({
           <div className="border-t border-[#E3E5E8] px-5 py-3 flex flex-wrap gap-2">
             {canEdit && (
               <button type="button" onClick={() => onEdit(po.id)} className={adminUi.btnSecondary}>
-                View/Edit
+                Open
               </button>
             )}
             <button

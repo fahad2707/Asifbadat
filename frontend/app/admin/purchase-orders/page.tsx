@@ -89,6 +89,7 @@ export default function PurchaseOrdersPage() {
   const [deleting, setDeleting] = useState(false);
   const [detailId, setDetailId] = useState<string | null>(null);
   const [uploadingVendorInvoice, setUploadingVendorInvoice] = useState(false);
+  const [savingPo, setSavingPo] = useState(false);
   const vendorInvoiceInputRef = useRef<HTMLInputElement>(null);
 
   const fetchPOs = async () => {
@@ -209,11 +210,13 @@ export default function PurchaseOrdersPage() {
 
   const handleSavePO = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (savingPo) return;
     const validRows = rows.filter((r) => r.product_id && r.qty > 0 && r.unit_cost >= 0);
     if (!vendorId || validRows.length === 0) {
       toast.error('Select supplier and add at least one item');
       return;
     }
+    setSavingPo(true);
     try {
       const res = await adminApi.post('/purchase-orders', {
         po_number: poNumber || undefined,
@@ -240,6 +243,8 @@ export default function PurchaseOrdersPage() {
       fetchPOs();
     } catch (err: any) {
       toast.error(err.response?.data?.error || 'Failed to save PO');
+    } finally {
+      setSavingPo(false);
     }
   };
 
@@ -311,12 +316,12 @@ export default function PurchaseOrdersPage() {
     return 'Pending';
   };
 
-  const shippingStatus = (po: PurchaseOrder) => {
+  const poStatusLabel = (po: PurchaseOrder) => {
     if (po.status === 'received') return 'Received';
     if (po.status === 'partial') return 'Partial';
     if (po.status === 'sent') return 'Sent';
     if (po.status === 'cancelled') return 'Cancelled';
-    return 'Pending';
+    return 'Draft';
   };
 
   const receivePoStock = async (po: PurchaseOrder) => {
@@ -434,7 +439,7 @@ export default function PurchaseOrdersPage() {
                   <th className="text-right py-3.5 px-4 text-[10px] font-bold uppercase tracking-wider">Total Paid</th>
                   <th className="text-right py-3.5 px-4 text-[10px] font-bold uppercase tracking-wider">PO Balance</th>
                   <th className="text-left py-3.5 px-4 text-[10px] font-bold uppercase tracking-wider">PMT Status</th>
-                  <th className="text-left py-3.5 px-4 text-[10px] font-bold uppercase tracking-wider">Shipping</th>
+                  <th className="text-left py-3.5 px-4 text-[10px] font-bold uppercase tracking-wider">PO Status</th>
                   <th className="text-right py-3.5 px-4 text-[10px] font-bold uppercase tracking-wider">Actions</th>
                 </tr>
               </thead>
@@ -448,7 +453,7 @@ export default function PurchaseOrdersPage() {
                 ) : (
                   pos.map((po) => {
                     const paySt = pmtStatus(po);
-                    const shipSt = shippingStatus(po);
+                    const shipSt = poStatusLabel(po);
                     return (
                       <tr
                         key={po.id}
@@ -492,7 +497,7 @@ export default function PurchaseOrdersPage() {
                             </button>
                             {po.status === 'draft' && (
                               <Link href={`/admin/purchase-orders/${po.id}`} className="text-[#0077C5] hover:underline font-medium">
-                                Edit
+                                Open
                               </Link>
                             )}
                             <button
@@ -709,7 +714,9 @@ export default function PurchaseOrdersPage() {
               </div>
               <div className="flex justify-end gap-2 p-4 border-t border-gray-200">
                 <button type="button" onClick={() => setShowCreate(false)} className="px-4 py-2 text-gray-700 hover:bg-gray-100 rounded-lg">Cancel</button>
-                <button type="submit" className="px-4 py-2 bg-black text-white rounded-lg hover:bg-[#2C2C2C]">Save</button>
+                <button type="submit" disabled={savingPo} className="px-4 py-2 bg-black text-white rounded-lg hover:bg-[#2C2C2C] disabled:opacity-50">
+                  {savingPo ? 'Saving…' : 'Save'}
+                </button>
               </div>
             </form>
           </div>

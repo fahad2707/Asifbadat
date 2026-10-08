@@ -48,6 +48,7 @@ export default function PurchaseOrderDetailPage() {
   const [loading, setLoading] = useState(true);
   const [receiveQty, setReceiveQty] = useState<Record<string, number>>({});
   const [receiving, setReceiving] = useState(false);
+  const [sending, setSending] = useState(false);
 
   const fetchPO = async () => {
     try {
@@ -72,12 +73,19 @@ export default function PurchaseOrderDetailPage() {
   }, [id]);
 
   const handleSend = async () => {
+    if (sending) return;
+    setSending(true);
     try {
       await adminApi.post(`/purchase-orders/${id}/send`);
       toast.success('PO marked as sent');
-      fetchPO();
-    } catch {
-      toast.error('Failed to update');
+      await fetchPO();
+    } catch (err: unknown) {
+      const message =
+        (err as { response?: { data?: { error?: string } } })?.response?.data?.error ||
+        'Failed to mark purchase order as sent';
+      toast.error(message);
+    } finally {
+      setSending(false);
     }
   };
 
@@ -143,9 +151,14 @@ export default function PurchaseOrderDetailPage() {
         </div>
         <div className="flex gap-2">
           {canSend && (
-            <button onClick={handleSend} className="bg-[#0F9F8F] hover:bg-[#0B8275] text-white px-3 py-2 rounded-md text-sm font-medium flex items-center gap-2">
+            <button
+              type="button"
+              onClick={handleSend}
+              disabled={sending}
+              className="bg-[#0F9F8F] hover:bg-[#0B8275] text-white px-3 py-2 rounded-md text-sm font-medium flex items-center gap-2 disabled:opacity-40"
+            >
               <Send className="w-4 h-4" />
-              Mark as Sent
+              {sending ? 'Marking as Sent…' : 'Mark as Sent'}
             </button>
           )}
           {canReceive && (
