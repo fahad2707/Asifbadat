@@ -130,7 +130,7 @@ function stubSuccessfulWrites(session: ReturnType<typeof createFakeSession>) {
     ];
   });
   mock.method(POSSale, 'findOneAndUpdate', async () => ({ _id: SALE_ID }));
-  mock.method(Product, 'findOneAndUpdate', async () => ({ _id: PRODUCT_ID }));
+  mock.method(Product, 'findOneAndUpdate', async () => ({ _id: PRODUCT_ID, stock_quantity: 99 }));
   mock.method(StockMovement, 'create', async () => [{}]);
   mock.method(User, 'findByIdAndUpdate', async () => ({}));
 }
@@ -194,7 +194,7 @@ test('A — successful full return of 3 × $100 with $30 bill discount is $270',
     return [{ _id: { toString: () => RETURN_ID }, ...created, toObject: () => created }];
   });
   mock.method(POSSale, 'findOneAndUpdate', async () => ({ _id: SALE_ID }));
-  mock.method(Product, 'findOneAndUpdate', async () => ({ _id: PRODUCT_ID }));
+  mock.method(Product, 'findOneAndUpdate', async () => ({ _id: PRODUCT_ID, stock_quantity: 99 }));
   mock.method(StockMovement, 'create', async () => [{}]);
   mock.method(User, 'findByIdAndUpdate', async () => ({}));
 
@@ -223,7 +223,7 @@ test('B — partial return of 1 of 3 is $90', async () => {
     return [{ _id: { toString: () => RETURN_ID }, ...created, toObject: () => created }];
   });
   mock.method(POSSale, 'findOneAndUpdate', async () => ({ _id: SALE_ID }));
-  mock.method(Product, 'findOneAndUpdate', async () => ({ _id: PRODUCT_ID }));
+  mock.method(Product, 'findOneAndUpdate', async () => ({ _id: PRODUCT_ID, stock_quantity: 99 }));
   mock.method(StockMovement, 'create', async () => [{}]);
   mock.method(User, 'findByIdAndUpdate', async () => ({}));
 
@@ -257,13 +257,15 @@ test('C — mixed disposition restocks only resalable units', async () => {
   mock.method(Product, 'findOneAndUpdate', async (...args: unknown[]) => {
     const update = args[1] as { $inc?: { stock_quantity?: number } };
     stockIncs.push(update?.$inc?.stock_quantity ?? 0);
-    return { _id: PRODUCT_ID };
+    return { _id: PRODUCT_ID, stock_quantity: 12 };
   });
   let movements = 0;
   let movementQty = 0;
+  let movementDoc: Record<string, unknown> | undefined;
   mock.method(StockMovement, 'create', async (docs: unknown) => {
     movements += 1;
-    movementQty += Number(firstDoc(docs).quantity_change) || 0;
+    movementDoc = firstDoc(docs);
+    movementQty += Number(movementDoc.quantity_change) || 0;
     return [{}];
   });
   mock.method(User, 'findByIdAndUpdate', async () => ({}));
@@ -288,6 +290,10 @@ test('C — mixed disposition restocks only resalable units', async () => {
   assert.deepEqual(stockIncs, [2]);
   assert.equal(movements, 1);
   assert.equal(movementQty, 2);
+  assert.equal(movementDoc?.movement_type, 'RETURN_IN');
+  assert.equal(movementDoc?.quantity_before, 10);
+  assert.equal(movementDoc?.quantity_after, 12);
+  assert.equal(movementDoc?.reference_type, 'pos_return');
 });
 
 test('D — original sale tax is excluded from the merchandise refund', async () => {
@@ -320,7 +326,7 @@ test('D — original sale tax is excluded from the merchandise refund', async ()
     return [{ _id: { toString: () => RETURN_ID }, ...created, toObject: () => created }];
   });
   mock.method(POSSale, 'findOneAndUpdate', async () => ({ _id: SALE_ID }));
-  mock.method(Product, 'findOneAndUpdate', async () => ({ _id: PRODUCT_ID }));
+  mock.method(Product, 'findOneAndUpdate', async () => ({ _id: PRODUCT_ID, stock_quantity: 99 }));
   mock.method(StockMovement, 'create', async () => [{}]);
   mock.method(User, 'findByIdAndUpdate', async () => ({}));
 
@@ -468,7 +474,7 @@ test('I — valid 30-day extension succeeds and is preserved', async () => {
     return [{ _id: { toString: () => RETURN_ID }, ...created, toObject: () => created }];
   });
   mock.method(POSSale, 'findOneAndUpdate', async () => ({ _id: SALE_ID }));
-  mock.method(Product, 'findOneAndUpdate', async () => ({ _id: PRODUCT_ID }));
+  mock.method(Product, 'findOneAndUpdate', async () => ({ _id: PRODUCT_ID, stock_quantity: 99 }));
   mock.method(StockMovement, 'create', async () => [{}]);
   mock.method(User, 'findByIdAndUpdate', async () => ({}));
 
@@ -777,7 +783,7 @@ test('Q — current catalog price is ignored; refund uses original POSSale econo
     return [{ _id: { toString: () => RETURN_ID }, ...created, toObject: () => created }];
   });
   mock.method(POSSale, 'findOneAndUpdate', async () => ({ _id: SALE_ID }));
-  mock.method(Product, 'findOneAndUpdate', async () => ({ _id: PRODUCT_ID }));
+  mock.method(Product, 'findOneAndUpdate', async () => ({ _id: PRODUCT_ID, stock_quantity: 99 }));
   mock.method(StockMovement, 'create', async () => [{}]);
   mock.method(User, 'findByIdAndUpdate', async () => ({}));
 
@@ -893,7 +899,7 @@ async function captureCreatedReturn(body: Record<string, unknown>) {
     return [{ _id: { toString: () => RETURN_ID }, ...created, toObject: () => created }];
   });
   mock.method(POSSale, 'findOneAndUpdate', async () => ({ _id: SALE_ID }));
-  mock.method(Product, 'findOneAndUpdate', async () => ({ _id: PRODUCT_ID }));
+  mock.method(Product, 'findOneAndUpdate', async () => ({ _id: PRODUCT_ID, stock_quantity: 99 }));
   mock.method(StockMovement, 'create', async () => [{}]);
   mock.method(User, 'findByIdAndUpdate', async () => ({}));
   const res = await postReturn(body);

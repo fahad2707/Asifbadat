@@ -82,14 +82,14 @@ function stubSuccessfulWrites(session: ReturnType<typeof createFakeSession>) {
   mock.method(Invoice, 'create', async (docs: unknown, options?: { session?: unknown }) => {
     assert.equal(options?.session, session);
     const doc = firstDoc(docs);
-    return [{ _id: { toString: () => 'inv-new' }, ...doc, toObject: () => doc }];
+    return [{ _id: { toString: () => '64b0000000000000000e0050' }, ...doc, toObject: () => doc }];
   });
   mock.method(POSSale, 'create', async (docs: unknown, options?: { session?: unknown }) => {
     assert.equal(options?.session, session);
     const doc = firstDoc(docs);
-    return [{ _id: { toString: () => 'sale-new' }, ...doc, toObject: () => doc }];
+    return [{ _id: { toString: () => '64b0000000000000000e0033' }, ...doc, toObject: () => doc }];
   });
-  mock.method(Product, 'findOneAndUpdate', async () => ({}));
+  mock.method(Product, 'findOneAndUpdate', async () => ({ stock_quantity: 99 }));
   mock.method(StockMovement, 'create', async () => [{}]);
   mock.method(User, 'findByIdAndUpdate', async () => ({}));
 }
@@ -144,8 +144,8 @@ test('A — missing key keeps current POS create behavior', async () => {
 
   assertNoMongoConnection();
   assert.equal(res.status, 201);
-  assert.equal(res.body.sale.id, 'sale-new');
-  assert.equal(res.body.invoice.id, 'inv-new');
+  assert.equal(res.body.sale.id, '64b0000000000000000e0033');
+  assert.equal(res.body.invoice.id, '64b0000000000000000e0050');
   assert.equal(keyedLookup, false);
   assert.equal(session.commitTransaction.mock.callCount(), 1);
 });
@@ -162,15 +162,15 @@ test('B — first request with a new key stores it and commits', async () => {
   mock.method(Invoice, 'create', async (docs: unknown, options?: { session?: unknown }) => {
     assert.equal(options?.session, session);
     const doc = firstDoc(docs);
-    return [{ _id: { toString: () => 'inv-keyed' }, ...doc, toObject: () => doc }];
+    return [{ _id: { toString: () => '64b0000000000000000e0051' }, ...doc, toObject: () => doc }];
   });
   mock.method(POSSale, 'create', async (docs: unknown, options?: { session?: unknown }) => {
     assert.equal(options?.session, session);
     const doc = firstDoc(docs);
     storedKey = doc.idempotency_key;
-    return [{ _id: { toString: () => 'sale-keyed' }, ...doc, toObject: () => doc }];
+    return [{ _id: { toString: () => '64b0000000000000000e0052' }, ...doc, toObject: () => doc }];
   });
-  mock.method(Product, 'findOneAndUpdate', async () => ({}));
+  mock.method(Product, 'findOneAndUpdate', async () => ({ stock_quantity: 99 }));
   mock.method(StockMovement, 'create', async () => [{}]);
   mock.method(User, 'findByIdAndUpdate', async () => ({}));
 
@@ -281,7 +281,7 @@ test('D — duplicate-key loser does not create a second sale (unique constraint
   }));
 
   let saleCreates = 0;
-  mock.method(Invoice, 'create', async () => [{ _id: { toString: () => 'inv-loser' } }]);
+  mock.method(Invoice, 'create', async () => [{ _id: { toString: () => '64b0000000000000000e0053' } }]);
   mock.method(POSSale, 'create', async () => {
     saleCreates += 1;
     const err = Object.assign(new Error('E11000 duplicate key error collection: possales index: idempotency_key_1'), {
@@ -348,7 +348,7 @@ test('E — aborted transaction does not permanently reserve the key', async () 
     }
     assert.equal(options?.session, session2);
     const doc = firstDoc(docs);
-    return [{ _id: { toString: () => 'inv-retry' }, ...doc, toObject: () => doc }];
+    return [{ _id: { toString: () => '64b0000000000000000e0054' }, ...doc, toObject: () => doc }];
   });
 
   let saleCreates = 0;
@@ -357,9 +357,9 @@ test('E — aborted transaction does not permanently reserve the key', async () 
     assert.equal(options?.session, session2);
     const doc = firstDoc(docs);
     assert.equal(doc.idempotency_key, KEY);
-    return [{ _id: { toString: () => 'sale-retry' }, ...doc, toObject: () => doc }];
+    return [{ _id: { toString: () => '64b0000000000000000e0055' }, ...doc, toObject: () => doc }];
   });
-  mock.method(Product, 'findOneAndUpdate', async () => ({}));
+  mock.method(Product, 'findOneAndUpdate', async () => ({ stock_quantity: 99 }));
   mock.method(StockMovement, 'create', async () => [{}]);
   mock.method(User, 'findByIdAndUpdate', async () => ({}));
 
@@ -382,7 +382,7 @@ test('E — aborted transaction does not permanently reserve the key', async () 
   assert.equal(session1.commitTransaction.mock.callCount(), 0);
   assert.equal(saleCreates, 1);
   assert.equal(second.status, 201);
-  assert.equal(second.body.sale.id, 'sale-retry');
+  assert.equal(second.body.sale.id, '64b0000000000000000e0055');
   assert.equal(session2.commitTransaction.mock.callCount(), 1);
 });
 
@@ -444,7 +444,7 @@ test('G — existing User + keyed sale reuses that User', async () => {
     const doc = firstDoc(docs);
     saleCustomerId = doc.customer_id;
     assert.equal(doc.idempotency_key, KEY);
-    return [{ _id: { toString: () => 'sale-existing' }, ...doc, toObject: () => doc }];
+    return [{ _id: { toString: () => '64b0000000000000000e0032' }, ...doc, toObject: () => doc }];
   });
 
   const res = await postSale({
@@ -481,7 +481,7 @@ test('H — new User + keyed sale creates User inside the transaction', async ()
     const doc = firstDoc(docs);
     saleCustomerId = doc.customer_id;
     assert.equal(doc.idempotency_key, KEY);
-    return [{ _id: { toString: () => 'sale-new-user' }, ...doc, toObject: () => doc }];
+    return [{ _id: { toString: () => '64b0000000000000000e0056' }, ...doc, toObject: () => doc }];
   });
 
   const res = await postSale({

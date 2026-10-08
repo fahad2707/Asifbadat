@@ -75,11 +75,11 @@ function stubCatalog(opts?: { stock?: number; committed?: number; name?: string 
 function stubSaleDocs() {
   mock.method(Invoice, 'create', async (docs: unknown) => {
     const doc = firstDoc(docs);
-    return [{ _id: { toString: () => 'inv-stock' }, ...doc, toObject: () => doc }];
+    return [{ _id: { toString: () => '64b0000000000000000e0011' }, ...doc, toObject: () => doc }];
   });
   mock.method(POSSale, 'create', async (docs: unknown) => {
     const doc = firstDoc(docs);
-    return [{ _id: { toString: () => 'sale-stock' }, ...doc, toObject: () => doc }];
+    return [{ _id: { toString: () => '64b0000000000000000e0010' }, ...doc, toObject: () => doc }];
   });
 }
 
@@ -146,7 +146,7 @@ test('transactional decrement uses availability filter, $inc, and the sale sessi
   let updateArgs: unknown[] | undefined;
   mock.method(Product, 'findOneAndUpdate', async (...args: unknown[]) => {
     updateArgs = args;
-    return { _id: PRODUCT_ID };
+    return { _id: PRODUCT_ID, stock_quantity: 9 };
   });
   mock.method(StockMovement, 'create', async () => [{}]);
 

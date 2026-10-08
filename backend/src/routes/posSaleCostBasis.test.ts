@@ -60,7 +60,7 @@ function catalogProduct(cost: number) {
 function stubCatalogProduct(cost = SALE_TIME_COST) {
   const product = catalogProduct(cost);
   mock.method(Product, 'findById', async () => product);
-  mock.method(Product, 'findOneAndUpdate', async () => ({}));
+  mock.method(Product, 'findOneAndUpdate', async () => ({ stock_quantity: 99 }));
   mock.method(StockMovement, 'create', async () => ({}));
   mock.method(User, 'findOne', async () => null);
   mock.method(User, 'create', async () => ({ _id: { toString: () => 'user-1' } }));
@@ -89,12 +89,12 @@ test('A — new POS sale persists sale-time Product.cost_price on the line', asy
   mock.method(mongoose, 'startSession', async () => session);
   mock.method(Invoice, 'create', async (docs: unknown) => {
     const doc = Array.isArray(docs) ? (docs[0] as Record<string, unknown>) : (docs as Record<string, unknown>);
-    return [{ _id: { toString: () => 'inv-cost-1' }, ...doc, toObject: () => doc }];
+    return [{ _id: { toString: () => '64b0000000000000000e0041' }, ...doc, toObject: () => doc }];
   });
   mock.method(POSSale, 'create', async (docs: unknown) => {
     const doc = Array.isArray(docs) ? (docs[0] as Record<string, unknown>) : (docs as Record<string, unknown>);
     createdSales.push(doc);
-    return [{ _id: { toString: () => 'sale-cost-1' }, ...doc, toObject: () => doc }];
+    return [{ _id: { toString: () => '64b0000000000000000e0040' }, ...doc, toObject: () => doc }];
   });
 
   const res = await postSale({
@@ -125,7 +125,7 @@ test('B — changing Product.cost_price after create does not change the persist
   mock.method(mongoose, 'startSession', async () => session);
   mock.method(Invoice, 'create', async (docs: unknown) => {
     const doc = Array.isArray(docs) ? (docs[0] as Record<string, unknown>) : (docs as Record<string, unknown>);
-    return [{ _id: { toString: () => 'inv-cost-2' }, ...doc, toObject: () => doc }];
+    return [{ _id: { toString: () => '64b0000000000000000e0043' }, ...doc, toObject: () => doc }];
   });
   mock.method(POSSale, 'create', async (docs: unknown) => {
     const doc = Array.isArray(docs) ? (docs[0] as Record<string, unknown>) : (docs as Record<string, unknown>);
@@ -134,7 +134,7 @@ test('B — changing Product.cost_price after create does not change the persist
       items: (doc.items as Array<Record<string, unknown>>).map((item) => ({ ...item })),
     });
     product.cost_price = 99.99;
-    return [{ _id: { toString: () => 'sale-cost-2' }, ...doc, toObject: () => doc }];
+    return [{ _id: { toString: () => '64b0000000000000000e0042' }, ...doc, toObject: () => doc }];
   });
 
   const res = await postSale({
@@ -165,12 +165,12 @@ test('C — sale-time cost snapshot does not change pricing, tax, tender, or tot
   mock.method(Invoice, 'create', async (docs: unknown) => {
     const doc = Array.isArray(docs) ? (docs[0] as Record<string, unknown>) : (docs as Record<string, unknown>);
     createdInvoices.push(doc);
-    return [{ _id: { toString: () => 'inv-cost-3' }, ...doc, toObject: () => doc }];
+    return [{ _id: { toString: () => '64b0000000000000000e0045' }, ...doc, toObject: () => doc }];
   });
   mock.method(POSSale, 'create', async (docs: unknown) => {
     const doc = Array.isArray(docs) ? (docs[0] as Record<string, unknown>) : (docs as Record<string, unknown>);
     createdSales.push(doc);
-    return [{ _id: { toString: () => 'sale-cost-3' }, ...doc, toObject: () => doc }];
+    return [{ _id: { toString: () => '64b0000000000000000e0044' }, ...doc, toObject: () => doc }];
   });
 
   const res = await postSale({

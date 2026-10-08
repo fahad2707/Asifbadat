@@ -72,14 +72,14 @@ function stubTxnWrites(session: ReturnType<typeof createFakeSession>) {
   mock.method(Invoice, 'create', async (docs: unknown, options?: { session?: unknown }) => {
     assert.equal(options?.session, session);
     const doc = firstDoc(docs);
-    return [{ _id: { toString: () => 'inv-user' }, ...doc, toObject: () => doc }];
+    return [{ _id: { toString: () => '64b0000000000000000e0031' }, ...doc, toObject: () => doc }];
   });
   mock.method(POSSale, 'create', async (docs: unknown, options?: { session?: unknown }) => {
     assert.equal(options?.session, session);
     const doc = firstDoc(docs);
-    return [{ _id: { toString: () => 'sale-user' }, ...doc, toObject: () => doc }];
+    return [{ _id: { toString: () => '64b0000000000000000e0030' }, ...doc, toObject: () => doc }];
   });
-  mock.method(Product, 'findOneAndUpdate', async () => ({}));
+  mock.method(Product, 'findOneAndUpdate', async () => ({ stock_quantity: 99 }));
   mock.method(StockMovement, 'create', async () => [{}]);
 }
 
@@ -150,7 +150,7 @@ test('B — existing User is reused and User.create is not called', async () => 
     assert.equal(options?.session, session);
     const doc = firstDoc(docs);
     saleCustomerId = doc.customer_id;
-    return [{ _id: { toString: () => 'sale-existing' }, ...doc, toObject: () => doc }];
+    return [{ _id: { toString: () => '64b0000000000000000e0032' }, ...doc, toObject: () => doc }];
   });
   mock.method(User, 'findByIdAndUpdate', async (...args: unknown[]) => {
     spentArgs = args;
@@ -193,7 +193,7 @@ test('C — new User is created after tenders, inside the sale session', async (
   mock.method(POSSale, 'create', async (docs: unknown) => {
     const doc = firstDoc(docs);
     saleCustomerId = doc.customer_id;
-    return [{ _id: { toString: () => 'sale-new' }, ...doc, toObject: () => doc }];
+    return [{ _id: { toString: () => '64b0000000000000000e0033' }, ...doc, toObject: () => doc }];
   });
   mock.method(User, 'findByIdAndUpdate', async (id: unknown) => {
     spentId = id;

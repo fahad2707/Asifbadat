@@ -50,7 +50,7 @@ function stubCatalogProduct() {
     stock_quantity: 10,
     committed_quantity: 0,
   }));
-  mock.method(Product, 'findOneAndUpdate', async () => ({}));
+  mock.method(Product, 'findOneAndUpdate', async () => ({ stock_quantity: 99 }));
   mock.method(StockMovement, 'create', async () => ({}));
   mock.method(User, 'findOne', async () => null);
   mock.method(User, 'create', async () => ({ _id: { toString: () => 'user-1' } }));
@@ -141,12 +141,12 @@ test('POST /pos/sale writes a settled POS slip and stores the POSSale tender', a
   mock.method(Invoice, 'create', async (docs: unknown) => {
     const doc = Array.isArray(docs) ? (docs[0] as Record<string, unknown>) : (docs as Record<string, unknown>);
     createdInvoices.push(doc);
-    return [{ _id: { toString: () => 'inv-pos-1' }, ...doc, toObject: () => doc }];
+    return [{ _id: { toString: () => '64b0000000000000000e0021' }, ...doc, toObject: () => doc }];
   });
   mock.method(POSSale, 'create', async (docs: unknown) => {
     const doc = Array.isArray(docs) ? (docs[0] as Record<string, unknown>) : (docs as Record<string, unknown>);
     createdSales.push(doc);
-    return [{ _id: { toString: () => 'sale-pos-1' }, ...doc, toObject: () => doc }];
+    return [{ _id: { toString: () => '64b0000000000000000e0020' }, ...doc, toObject: () => doc }];
   });
 
   const res = await postSale({

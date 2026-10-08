@@ -90,7 +90,7 @@ function stubSuccessfulWrites(session: ReturnType<typeof createFakeSession>) {
     const doc = firstDoc(docs);
     return [
       {
-        _id: { toString: () => 'inv-pos-atomic' },
+        _id: { toString: () => '64b0000000000000000e0002' },
         ...doc,
         toObject: () => doc,
       },
@@ -101,13 +101,13 @@ function stubSuccessfulWrites(session: ReturnType<typeof createFakeSession>) {
     const doc = firstDoc(docs);
     return [
       {
-        _id: { toString: () => 'sale-pos-atomic' },
+        _id: { toString: () => '64b0000000000000000e0001' },
         ...doc,
         toObject: () => doc,
       },
     ];
   });
-  mock.method(Product, 'findOneAndUpdate', async () => ({}));
+  mock.method(Product, 'findOneAndUpdate', async () => ({ stock_quantity: 99 }));
   mock.method(StockMovement, 'create', async () => [{}]);
   mock.method(User, 'findByIdAndUpdate', async () => ({}));
 }
@@ -157,13 +157,13 @@ test('B — Invoice.create uses array form and the sale session', async () => {
   mock.method(Invoice, 'create', async (...args: unknown[]) => {
     invoiceArgs = args;
     const doc = firstDoc(args[0]);
-    return [{ _id: { toString: () => 'inv-b' }, ...doc, toObject: () => doc }];
+    return [{ _id: { toString: () => '64b0000000000000000e0004' }, ...doc, toObject: () => doc }];
   });
   mock.method(POSSale, 'create', async (docs: unknown) => {
     const doc = firstDoc(docs);
-    return [{ _id: { toString: () => 'sale-b' }, ...doc, toObject: () => doc }];
+    return [{ _id: { toString: () => '64b0000000000000000e0003' }, ...doc, toObject: () => doc }];
   });
-  mock.method(Product, 'findOneAndUpdate', async () => ({}));
+  mock.method(Product, 'findOneAndUpdate', async () => ({ stock_quantity: 99 }));
   mock.method(StockMovement, 'create', async () => [{}]);
   mock.method(User, 'findByIdAndUpdate', async () => ({}));
 
@@ -191,7 +191,7 @@ test('C — POSSale.create uses array form, same session, and invoice_id from In
   const session = createFakeSession();
   mock.method(mongoose, 'startSession', async () => session);
 
-  const invoiceId = { toString: () => 'inv-c' };
+  const invoiceId = { toString: () => '64b0000000000000000e0006' };
   mock.method(Invoice, 'create', async (docs: unknown, options?: { session?: unknown }) => {
     assert.equal(options?.session, session);
     const doc = firstDoc(docs);
@@ -202,9 +202,9 @@ test('C — POSSale.create uses array form, same session, and invoice_id from In
   mock.method(POSSale, 'create', async (...args: unknown[]) => {
     saleArgs = args;
     const doc = firstDoc(args[0]);
-    return [{ _id: { toString: () => 'sale-c' }, ...doc, toObject: () => doc }];
+    return [{ _id: { toString: () => '64b0000000000000000e0005' }, ...doc, toObject: () => doc }];
   });
-  mock.method(Product, 'findOneAndUpdate', async () => ({}));
+  mock.method(Product, 'findOneAndUpdate', async () => ({ stock_quantity: 99 }));
   mock.method(StockMovement, 'create', async () => [{}]);
   mock.method(User, 'findByIdAndUpdate', async () => ({}));
 
@@ -232,7 +232,7 @@ test('D — Product stock update receives the same session', async () => {
   const productUpdateSessions: unknown[] = [];
   mock.method(Product, 'findOneAndUpdate', async (...args: unknown[]) => {
     productUpdateSessions.push((args[2] as { session?: unknown } | undefined)?.session);
-    return {};
+    return { stock_quantity: 99 };
   });
 
   const res = await postSale({
@@ -247,12 +247,14 @@ test('D — Product stock update receives the same session', async () => {
   assert.equal(productUpdateSessions[0], session);
 });
 
-test('E — StockMovement.create uses array form and the same session', async () => {
+test('E — createStockMovement writes SALE with before/delta/after on the same session', async () => {
   assertNoMongoConnection();
   stubCatalogReads();
   const session = createFakeSession();
   mock.method(mongoose, 'startSession', async () => session);
   stubSuccessfulWrites(session);
+
+  mock.method(Product, 'findOneAndUpdate', async () => ({ stock_quantity: 9 }));
 
   let movementArgs: unknown[] | undefined;
   mock.method(StockMovement, 'create', async (...args: unknown[]) => {
@@ -271,7 +273,13 @@ test('E — StockMovement.create uses array form and the same session', async ()
   assert.ok(movementArgs);
   assert.equal(Array.isArray(movementArgs[0]), true);
   assert.equal(createOptions(movementArgs)?.session, session);
-  assert.equal(firstDoc(movementArgs[0]).reference_id?.toString(), 'sale-pos-atomic');
+  const doc = firstDoc(movementArgs[0]);
+  assert.equal(doc.reference_id?.toString(), '64b0000000000000000e0001');
+  assert.equal(doc.movement_type, 'SALE');
+  assert.equal(doc.quantity_before, 10);
+  assert.equal(doc.quantity_change, -1);
+  assert.equal(doc.quantity_after, 9);
+  assert.equal(doc.reference_type, 'pos_sale');
 });
 
 test('F — User total_spent update receives the same session when a User is resolved', async () => {
@@ -329,7 +337,7 @@ test('H — POSSale.create failure aborts and skips later writes', async () => {
 
   mock.method(Invoice, 'create', async (docs: unknown) => {
     const doc = firstDoc(docs);
-    return [{ _id: { toString: () => 'inv-h' }, ...doc, toObject: () => doc }];
+    return [{ _id: { toString: () => '64b0000000000000000e0007' }, ...doc, toObject: () => doc }];
   });
   mock.method(POSSale, 'create', async () => {
     throw new Error('simulated POSSale.create failure');

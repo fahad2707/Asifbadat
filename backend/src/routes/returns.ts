@@ -7,7 +7,6 @@ import Return, {
 } from '../models/Return';
 import POSSale from '../models/POSSale';
 import Product from '../models/Product';
-import StockMovement from '../models/StockMovement';
 import User from '../models/User';
 import PosReturnSettlement from '../models/PosReturnSettlement';
 import PosCustomerCredit from '../models/PosCustomerCredit';
@@ -25,6 +24,8 @@ import {
   posReturnSettlementClaimUpdate,
   PosReturnSettlementError,
 } from '../utils/posReturnSettlement';
+import { createStockMovement } from '../utils/createStockMovement';
+import { StockMovementType } from '../shared/enums';
 
 const router = express.Router();
 
@@ -261,28 +262,33 @@ router.post('/', authenticateAdmin, async (req: AuthRequest, res) => {
         const product = productsById.get(String(item.product_id));
         if (!isInventoryProduct(product)) continue;
 
+        const delta = item.quantity;
         const restored = await Product.findOneAndUpdate(
           { _id: item.product_id },
-          { $inc: { stock_quantity: item.quantity } },
+          { $inc: { stock_quantity: delta } },
           { session, new: true }
         );
         if (!restored) {
           throw new Error('Failed to restore inventory for a returned product.');
         }
 
-        await StockMovement.create(
-          [
-            {
-              product_id: item.product_id,
-              movement_type: 'pos_return',
-              quantity_change: item.quantity,
-              reference_type: 'pos_return',
-              reference_id: created._id,
-              admin_id: adminId,
-            },
-          ],
-          { session }
-        );
+        const after = Number((restored as any).stock_quantity);
+        const before = after - delta;
+        await createStockMovement({
+          session,
+          productId: item.product_id,
+          movementType: StockMovementType.RETURN_IN,
+          quantityBefore: before,
+          quantityChange: delta,
+          quantityAfter: after,
+          referenceType: 'pos_return',
+          referenceId: created._id as mongoose.Types.ObjectId,
+          referenceNumber: created.return_number,
+          adminId:
+            typeof adminId === 'string' && mongoose.Types.ObjectId.isValid(adminId)
+              ? adminId
+              : undefined,
+        });
       }
 
       if (sale.customer_id) {

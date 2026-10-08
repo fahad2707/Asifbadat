@@ -3,7 +3,6 @@ import mongoose from 'mongoose';
 import POSSale from '../models/POSSale';
 import Product from '../models/Product';
 import Invoice from '../models/Invoice';
-import StockMovement from '../models/StockMovement';
 import User from '../models/User';
 import Customer from '../models/Customer';
 import { authenticateAdmin, AuthRequest } from '../middleware/auth';
@@ -16,6 +15,8 @@ import {
   isIdempotencyDuplicateKey,
   waitForCommittedKeyedSale,
 } from '../utils/posIdempotency';
+import { createStockMovement } from '../utils/createStockMovement';
+import { StockMovementType } from '../shared/enums';
 
 const router = express.Router();
 
@@ -329,27 +330,32 @@ router.post('/sale', authenticateAdmin, async (req: AuthRequest, res) => {
 
       for (const item of saleItems) {
         if (!(item as any).isInventory) continue;
+        const delta = -item.quantity;
         const decremented = await Product.findOneAndUpdate(
           posStockDecrementFilter(item.product_id, item.quantity),
-          { $inc: { stock_quantity: -item.quantity } },
+          { $inc: { stock_quantity: delta } },
           { session, new: true }
         );
         if (!decremented) {
           throw new PosStockError(`Insufficient stock for ${item.product_name}.`);
         }
-        await StockMovement.create(
-          [
-            {
-              product_id: item.product_id,
-              movement_type: 'sale',
-              quantity_change: -item.quantity,
-              reference_type: 'pos_sale',
-              reference_id: sale._id,
-              admin_id: adminId,
-            },
-          ],
-          { session }
-        );
+        const after = Number((decremented as any).stock_quantity);
+        const before = after - delta;
+        await createStockMovement({
+          session,
+          productId: item.product_id,
+          movementType: StockMovementType.SALE,
+          quantityBefore: before,
+          quantityChange: delta,
+          quantityAfter: after,
+          referenceType: 'pos_sale',
+          referenceId: sale._id as mongoose.Types.ObjectId,
+          referenceNumber: sale.sale_number,
+          adminId:
+            typeof adminId === 'string' && mongoose.Types.ObjectId.isValid(adminId)
+              ? adminId
+              : undefined,
+        });
       }
 
       if (customerId) {
