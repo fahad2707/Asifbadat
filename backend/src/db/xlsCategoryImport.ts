@@ -5,6 +5,10 @@ import mongoose from 'mongoose';
 import connectDB from './connection';
 import Category from '../models/Category';
 import Product from '../models/Product';
+import {
+  shouldWriteOpeningStockMovement,
+  writeOpeningStockMovement,
+} from '../utils/openingStockMovement';
 
 /** Turn `automotive` → `Automotive`; keep `Candy and Snacks` as-is. */
 export function prettyCategoryName(filenameBase: string): string {
@@ -118,22 +122,45 @@ export async function importCategoryXlsFiles(
           productSlug = `${productSlug}-${Math.floor(Math.random() * 100000)}`;
         }
 
-        await Product.create({
-          name: productName,
-          slug: productSlug,
-          description,
-          product_type: 'inventory',
-          price,
-          cost_price: costPrice,
-          category_id: categoryId,
-          image_url: imageUrl,
-          sku,
-          stock_quantity: stockQty,
-          committed_quantity: 0,
-          low_stock_threshold: 5,
-          is_active: true,
-          tax_rate: 0,
-        });
+        const session = await mongoose.startSession();
+        session.startTransaction();
+        try {
+          const created = await Product.create(
+            [
+              {
+                name: productName,
+                slug: productSlug,
+                description,
+                product_type: 'inventory',
+                price,
+                cost_price: costPrice,
+                category_id: categoryId,
+                image_url: imageUrl,
+                sku,
+                stock_quantity: stockQty,
+                committed_quantity: 0,
+                low_stock_threshold: 5,
+                is_active: true,
+                tax_rate: 0,
+              },
+            ],
+            { session }
+          );
+          const product = Array.isArray(created) ? created[0] : created;
+          if (shouldWriteOpeningStockMovement('inventory', stockQty)) {
+            await writeOpeningStockMovement({
+              productId: product._id,
+              openingQty: stockQty,
+              session,
+            });
+          }
+          await session.commitTransaction();
+        } catch (txnErr) {
+          await session.abortTransaction();
+          throw txnErr;
+        } finally {
+          session.endSession();
+        }
 
         fileCount++;
         totalProducts++;
