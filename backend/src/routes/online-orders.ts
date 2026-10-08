@@ -4,15 +4,57 @@ import { z } from 'zod';
 import OnlineOrder from '../models/OnlineOrder';
 import Product from '../models/Product';
 import Invoice from '../models/Invoice';
-import StockMovement from '../models/StockMovement';
 import { authenticateAdmin, authenticateUser, AuthRequest } from '../middleware/auth';
 import { onlineCheckoutLimiter, onlineTrackLimiter } from '../middleware/rateLimit';
 import { logSecurityEvent } from '../utils/securityLog';
 import { httpErrorFromPayment, paymentApplication } from '../services/paymentApplication';
 import { isUserLinkedToApprovedCustomer } from '../utils/customerAccount';
 import Customer from '../models/Customer';
+import { createStockMovement, StockMovementWriteError } from '../utils/createStockMovement';
+import { StockMovementType } from '../shared/enums';
 
 const router = express.Router();
+
+/** Operational reference for OnlineOrder delivery SALE movements (mirrors wholesale Invoice). */
+const ONLINE_ORDER_REFERENCE_TYPE = 'OnlineOrder';
+
+type DeliveryLine = { product_id?: unknown; quantity?: unknown };
+
+function aggregateDeliveryInventoryQuantities(items: DeliveryLine[] | undefined): Map<string, number> {
+  const totals = new Map<string, number>();
+  for (const item of items || []) {
+    if (!item.product_id) continue;
+    const pid = String(item.product_id);
+    if (!mongoose.Types.ObjectId.isValid(pid)) continue;
+    const raw = item.quantity;
+    if (raw == null || raw === '') continue;
+    const qty = typeof raw === 'number' ? raw : Number(raw);
+    if (!Number.isFinite(qty) || !Number.isInteger(qty) || qty === 0) continue;
+    totals.set(pid, (totals.get(pid) || 0) + qty);
+  }
+  return totals;
+}
+
+function isSkippedProductType(productType: unknown): boolean {
+  return productType === 'service' || productType === 'non_inventory';
+}
+
+async function withDeliveryInventoryTransaction<T>(
+  work: (session: mongoose.ClientSession) => Promise<T>
+): Promise<T> {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+  try {
+    const result = await work(session);
+    await session.commitTransaction();
+    return result;
+  } catch (error) {
+    await session.abortTransaction();
+    throw error;
+  } finally {
+    session.endSession();
+  }
+}
 
 const placeOrderSchema = z.object({
   customer_name: z.string().trim().min(1).max(200),
@@ -238,7 +280,8 @@ router.put('/:id/status', authenticateAdmin, async (req: AuthRequest, res) => {
       return res.status(400).json({ error: 'Cancelled orders cannot be modified' });
     }
 
-    // Delivered requires invoice + canonical payment before the status is persisted.
+    // Delivered: invoice + payment stay outside Mongo txn (paymentApplication has no session).
+    // Stock decrement + SALE movement + delivered claim commit together or roll back together.
     if (status === 'delivered') {
       const invoiceNumber = `INV-WEB-${order.order_number.replace('WEB-', '')}`;
       const LOCATION_OF_SALE = '511 W Germantown Pike, Plymouth Meeting, PA 19462-1303';
@@ -274,13 +317,15 @@ router.put('/:id/status', authenticateAdmin, async (req: AuthRequest, res) => {
         return res.status(500).json({ error: 'Failed to create invoice for delivered order' });
       }
 
+      let receiptId = '';
       try {
-        await paymentApplication.applyPaymentToInvoice({
+        const applied = await paymentApplication.applyPaymentToInvoice({
           invoiceId: (inv as any)._id.toString(),
           amount: order.total_amount,
           paymentMethod: order.payment_method === 'cod' ? 'COD' : 'Credit Card',
           customerName: order.customer_name,
         });
+        receiptId = String(applied?.receipt?.id || '').trim();
       } catch (payErr) {
         await Invoice.findByIdAndDelete((inv as any)._id).catch((delErr) => {
           console.error('Rollback newly created delivery invoice failed:', delErr);
@@ -291,25 +336,131 @@ router.put('/:id/status', authenticateAdmin, async (req: AuthRequest, res) => {
         return res.status(500).json({ error: 'Failed to apply payment for delivered order' });
       }
 
+      const invoiceId = (inv as any)._id as mongoose.Types.ObjectId;
+      const setFields: Record<string, unknown> = {
+        status: 'delivered',
+        invoice_id: invoiceId,
+      };
       if (order.payment_method === 'cod') {
-        order.payment_status = 'paid';
+        setFields.payment_status = 'paid';
       }
 
-      for (const item of order.items) {
-        if (!item.product_id) continue;
-        const product = await Product.findById(item.product_id);
-        if (!product) continue;
-        if ((product as any).product_type === 'service' || (product as any).product_type === 'non_inventory') continue;
-        await Product.findByIdAndUpdate(item.product_id, { $inc: { stock_quantity: -item.quantity } });
-        await StockMovement.create({
-          product_id: item.product_id,
-          type: 'sale',
-          quantity: -item.quantity,
-          reference: `Online Order ${order.order_number}`,
-        }).catch(() => {});
+      try {
+        await withDeliveryInventoryTransaction(async (session) => {
+          const claimed = await OnlineOrder.findOneAndUpdate(
+            {
+              _id: order._id,
+              status: { $nin: ['delivered', 'cancelled'] },
+            },
+            {
+              $set: setFields,
+              $push: { status_history: { status: 'delivered', timestamp: new Date() } },
+            },
+            { session, new: true }
+          );
+          if (!claimed) {
+            throw Object.assign(new Error('Delivered orders cannot be modified'), { status: 400 });
+          }
+
+          const qtyByProduct = aggregateDeliveryInventoryQuantities(order.items as DeliveryLine[]);
+          const adminId =
+            typeof req.userId === 'string' && mongoose.Types.ObjectId.isValid(req.userId)
+              ? req.userId
+              : undefined;
+
+          for (const [productId, qty] of qtyByProduct) {
+            if (qty <= 0) continue;
+            const product = await Product.findById(productId).session(session);
+            if (!product) continue;
+            if (isSkippedProductType((product as any).product_type)) continue;
+
+            const delta = -qty;
+            const updated = await Product.findOneAndUpdate(
+              { _id: productId },
+              { $inc: { stock_quantity: delta } },
+              { session, new: true }
+            );
+            if (!updated) {
+              throw new Error('Product not found during delivery inventory update');
+            }
+            const after = Number((updated as any).stock_quantity);
+            const before = after - delta;
+            await createStockMovement({
+              session,
+              productId,
+              movementType: StockMovementType.SALE,
+              quantityBefore: before,
+              quantityChange: delta,
+              quantityAfter: after,
+              referenceType: ONLINE_ORDER_REFERENCE_TYPE,
+              referenceId: order._id as mongoose.Types.ObjectId,
+              referenceNumber: order.order_number,
+              reason: `Online Order ${order.order_number} delivered`,
+              adminId,
+            });
+          }
+        });
+      } catch (deliveryErr: any) {
+        // Inventory txn already aborted. Compensate accounting outside the session.
+        if (!receiptId) {
+          console.error('Delivery inventory failed but payment receipt id is missing', {
+            orderId: order._id?.toString?.(),
+            invoiceId: invoiceId.toString(),
+            deliveryError: deliveryErr?.message || deliveryErr,
+          });
+          return res.status(500).json({
+            error: 'Delivery failed after payment; receipt id missing — manual accounting cleanup required',
+          });
+        }
+
+        try {
+          await paymentApplication.deleteReceiptLifecycle(receiptId);
+        } catch (compErr) {
+          console.error('Delivery accounting compensation failed (receipt still applied)', {
+            orderId: order._id?.toString?.(),
+            invoiceId: invoiceId.toString(),
+            receiptId,
+            deliveryError: deliveryErr?.message || deliveryErr,
+            compensationError: (compErr as Error)?.message || compErr,
+          });
+          const mapped = httpErrorFromPayment(compErr);
+          if (mapped) {
+            return res.status(500).json({
+              error: 'Delivery failed after payment; receipt compensation failed — manual cleanup required',
+              detail: mapped.body?.error || mapped.body,
+            });
+          }
+          return res.status(500).json({
+            error: 'Delivery failed after payment; receipt compensation failed — manual cleanup required',
+          });
+        }
+
+        try {
+          await Invoice.findByIdAndDelete(invoiceId);
+        } catch (delErr) {
+          console.error('Delivery accounting compensation: unpaid invoice delete failed', {
+            orderId: order._id?.toString?.(),
+            invoiceId: invoiceId.toString(),
+            receiptId,
+            deliveryError: deliveryErr?.message || deliveryErr,
+            invoiceDeleteError: (delErr as Error)?.message || delErr,
+          });
+          return res.status(500).json({
+            error: 'Delivery failed after payment; receipt reversed but unpaid invoice delete failed — manual cleanup required',
+          });
+        }
+
+        if (deliveryErr instanceof StockMovementWriteError) {
+          return res.status(deliveryErr.status).json({ error: deliveryErr.message });
+        }
+        if (deliveryErr?.status === 400) {
+          return res.status(400).json({ error: deliveryErr.message || 'Delivered orders cannot be modified' });
+        }
+        console.error('Delivery inventory transaction error:', deliveryErr);
+        return res.status(500).json({ error: 'Failed to update status' });
       }
 
-      order.invoice_id = (inv as any)._id as any;
+      return res.json({ message: 'Order marked as delivered', status: 'delivered' });
     }
 
     order.status = status;

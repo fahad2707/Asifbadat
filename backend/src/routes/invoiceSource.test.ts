@@ -359,6 +359,39 @@ test('no historical backfill or INV-WEB classification exists', () => {
   assert.equal(/source:\s*\{[^}]*required:\s*true/.test(model), false);
 });
 
+function stubOnlineDeliveryClaim(order: {
+  status: string;
+  status_history: Array<{ status: string; timestamp: Date }>;
+  invoice_id?: unknown;
+  payment_status?: string;
+}, opts?: { claimThrows?: boolean }) {
+  const session = {
+    startTransaction: mock.fn(),
+    commitTransaction: mock.fn(async () => {}),
+    abortTransaction: mock.fn(async () => {}),
+    endSession: mock.fn(),
+  };
+  mock.method(mongoose, 'startSession', async () => session);
+  mock.method(OnlineOrder, 'findOneAndUpdate', async (_filter: unknown, update: Record<string, unknown>) => {
+    if (opts?.claimThrows) {
+      throw new Error('simulated delivery claim persistence failure after invoice create');
+    }
+    Object.assign(order, update.$set || {});
+    if ((update.$push as { status_history?: { status: string; timestamp: Date } } | undefined)?.status_history) {
+      order.status_history.push((update.$push as { status_history: { status: string; timestamp: Date } }).status_history);
+    }
+    order.status = 'delivered';
+    return order;
+  });
+  mock.method(Product, 'findById', () => ({
+    session: async () => null,
+    then(onFulfilled?: (value: unknown) => unknown, onRejected?: (reason: unknown) => unknown) {
+      return Promise.resolve(null).then(onFulfilled, onRejected);
+    },
+  }));
+  return session;
+}
+
 test('E — online delivery Invoice.create includes source ONLINE', async () => {
   assertNoMongoConnection();
   const order = {
@@ -396,7 +429,7 @@ test('E — online delivery Invoice.create includes source ONLINE', async () => 
     payment_status: 'paid',
     receipt: { id: 'r', trx_id: 't', amount_received: 100, invoice_num: 'INV-WEB-0042' },
   }));
-  mock.method(Product, 'findById', async () => null);
+  stubOnlineDeliveryClaim(order);
 
   const res = await request(createApp())
     .put(`/api/online-orders/${ORDER_ID}/status`)
@@ -410,9 +443,11 @@ test('E — online delivery Invoice.create includes source ONLINE', async () => 
   assert.equal(created[0].invoice_type, 'invoice');
 });
 
-test('F — future online orphan still has source ONLINE when order.save fails', async () => {
+test('F — claim failure after payment compensates receipt and deletes unpaid ONLINE invoice', async () => {
   assertNoMongoConnection();
   const created: Record<string, unknown>[] = [];
+  const deletedReceipts: string[] = [];
+  const deletedInvoices: string[] = [];
   const order = {
     _id: { toString: () => ORDER_ID },
     order_number: 'WEB-0042',
@@ -431,9 +466,7 @@ test('F — future online orphan still has source ONLINE when order.save fails',
     payment_status: 'pending',
     status: 'dispatched',
     status_history: [] as Array<{ status: string; timestamp: Date }>,
-    save: async () => {
-      throw new Error('simulated order.save failure after invoice create');
-    },
+    save: async () => {},
   };
   mock.method(OnlineOrder, 'findById', async () => order);
   mock.method(Invoice, 'create', async (doc: Record<string, unknown>) => {
@@ -447,9 +480,26 @@ test('F — future online orphan still has source ONLINE when order.save fails',
     amount_paid: 100,
     remaining_balance: 0,
     payment_status: 'paid',
-    receipt: { id: 'r', trx_id: 't', amount_received: 100, invoice_num: 'INV-WEB-0042' },
+    receipt: { id: 'r-source', trx_id: 't', amount_received: 100, invoice_num: 'INV-WEB-0042' },
   }));
-  mock.method(Product, 'findById', async () => null);
+  mock.method(paymentApplication, 'deleteReceiptLifecycle', async (receiptId: string) => {
+    deletedReceipts.push(receiptId);
+    return {
+      deleted: true as const,
+      invoice: {
+        id: INVOICE_ID,
+        invoice_number: 'INV-WEB-0042',
+        total_amount: 100,
+        amount_paid: 0,
+        payment_status: 'unpaid',
+      },
+    };
+  });
+  mock.method(Invoice, 'findByIdAndDelete', async (id: { toString(): string }) => {
+    deletedInvoices.push(id.toString());
+    return { _id: id };
+  });
+  const session = stubOnlineDeliveryClaim(order, { claimThrows: true });
 
   const res = await request(createApp())
     .put(`/api/online-orders/${ORDER_ID}/status`)
@@ -460,5 +510,8 @@ test('F — future online orphan still has source ONLINE when order.save fails',
   assert.equal(res.status, 500);
   assert.equal(created.length, 1);
   assert.equal(created[0].source, 'ONLINE');
-  assert.equal((order as { invoice_id?: unknown }).invoice_id?.toString(), INVOICE_ID);
+  assert.equal(order.status, 'dispatched');
+  assert.ok(session.abortTransaction.mock.callCount() >= 1);
+  assert.deepEqual(deletedReceipts, ['r-source']);
+  assert.deepEqual(deletedInvoices, [INVOICE_ID]);
 });
