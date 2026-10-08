@@ -547,7 +547,7 @@ test('D — non_inventory product: no stock decrement, no SALE', async () => {
   assert.equal(h.movements.length, 0);
 });
 
-test('E — missing product skipped; delivery still succeeds for other lines', async () => {
+test('E — missing Product is fatal: delivery aborts with no stock/movement/claim', async () => {
   assertNoMongoConnection();
   const { order } = makeOrder({
     items: [
@@ -556,7 +556,7 @@ test('E — missing product skipped; delivery still succeeds for other lines', a
     ],
   });
   mock.method(OnlineOrder, 'findById', async () => order);
-  stubInvoicePaymentHappy(order);
+  const pay = stubInvoicePaymentHappy(order, { allowCompensation: true });
   const h = stubDeliveryTxn({
     order,
     products: { [PRODUCT_A]: { product_type: 'inventory', stock_quantity: 5 } },
@@ -564,11 +564,16 @@ test('E — missing product skipped; delivery still succeeds for other lines', a
   });
 
   const res = await putStatus(ORDER_ID, 'delivered');
-  assert.equal(res.status, 200);
-  assert.equal(order.status, 'delivered');
-  assert.equal(h.stock[PRODUCT_A], 4);
-  assert.equal(h.movements.length, 1);
-  assert.equal(String(h.movements[0].doc.product_id), PRODUCT_A);
+  assert.equal(res.status, 400);
+  assert.match(String(res.body.error), /Product not found/i);
+  assert.equal(order.status, 'dispatched');
+  assert.equal(h.stock[PRODUCT_A], 5);
+  assert.equal(h.movements.length, 0);
+  assert.equal(h.productUpdates.length, 0);
+  assert.equal(h.committed.value, false);
+  assert.ok(h.session.abortTransaction.mock.callCount() >= 1);
+  assert.equal(pay.deletedReceipts.length, 1);
+  assert.equal(pay.deletedInvoices.length, 1);
 });
 
 test('F — movement failure aborts; compensates receipt and deletes unpaid invoice', async () => {

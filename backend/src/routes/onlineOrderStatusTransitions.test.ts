@@ -17,6 +17,7 @@ import { createApp } from '../server';
 import OnlineOrder from '../models/OnlineOrder';
 import Invoice from '../models/Invoice';
 import Product from '../models/Product';
+import StockMovement from '../models/StockMovement';
 import { paymentApplication } from '../services/paymentApplication';
 
 const ORDER_ID = '64b0000000000000000d0202';
@@ -191,8 +192,17 @@ test('A — dispatched → delivered claims only status dispatched', async () =>
     return order;
   });
   mock.method(Product, 'findById', () => ({
-    session: async () => null,
+    session: async () => ({
+      _id: PRODUCT_A,
+      product_type: 'inventory',
+      stock_quantity: 10,
+    }),
   }));
+  mock.method(Product, 'findOneAndUpdate', async () => ({
+    _id: PRODUCT_A,
+    stock_quantity: 9,
+  }));
+  mock.method(StockMovement, 'create', async () => [{}]);
 
   const res = await putStatus(ORDER_ID, 'delivered');
   assert.equal(res.status, 200);

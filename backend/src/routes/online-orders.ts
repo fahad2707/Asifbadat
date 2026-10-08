@@ -479,7 +479,11 @@ router.put('/:id/status', authenticateAdmin, async (req: AuthRequest, res) => {
           for (const [productId, qty] of qtyByProduct) {
             if (qty <= 0) continue;
             const product = await Product.findById(productId).session(session);
-            if (!product) continue;
+            if (!product) {
+              throw Object.assign(new Error('Product not found for online order delivery'), {
+                status: 400,
+              });
+            }
             if (isSkippedProductType((product as any).product_type)) continue;
 
             const delta = -qty;
