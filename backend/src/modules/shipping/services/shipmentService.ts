@@ -1,13 +1,40 @@
 import mongoose from 'mongoose';
 import Shipment from '../models/Shipment';
 import Product from '../../../models/Product';
-import StockMovement from '../../../models/StockMovement';
 import CreditMemo from '../../credit-memo/models/CreditMemo';
 import { StockMovementType } from '../../../shared/enums';
+import { createStockMovement } from '../../../utils/createStockMovement';
 
 function generateShipmentNumber(type: 'GROUND' | 'GROUND_RG'): string {
   const prefix = type === 'GROUND_RG' ? 'RG' : 'SH';
   return prefix + '-' + Date.now().toString(36).toUpperCase() + '-' + Math.random().toString(36).substring(2, 6).toUpperCase();
+}
+
+function isSkippedProductType(productType: unknown): boolean {
+  return productType === 'service' || productType === 'non_inventory';
+}
+
+type ReturnLine = { product_id?: unknown; quantity?: unknown };
+
+/** Aggregate duplicate product lines for inventory only; does not mutate shipment.items. */
+export function aggregateReturnInventoryQuantities(
+  items: ReturnLine[] | undefined
+): Map<string, number> {
+  const totals = new Map<string, number>();
+  for (const item of items || []) {
+    if (item.product_id == null || item.product_id === '') continue;
+    const pid = String(item.product_id);
+    if (!mongoose.Types.ObjectId.isValid(pid)) {
+      throw Object.assign(new Error('Invalid product on return shipment'), { status: 400 });
+    }
+    const raw = item.quantity;
+    const qty = typeof raw === 'number' ? raw : Number(raw);
+    if (!Number.isFinite(qty) || !Number.isInteger(qty) || qty <= 0) {
+      throw Object.assign(new Error('Return quantity must be a positive integer'), { status: 400 });
+    }
+    totals.set(pid, (totals.get(pid) || 0) + qty);
+  }
+  return totals;
 }
 
 /**
@@ -54,7 +81,8 @@ export async function markShipmentDelivered(
 }
 
 /**
- * GROUND_RG: On delivered (return received at warehouse) → increase stock, optionally auto-create Credit Memo
+ * GROUND_RG: On return received at warehouse → increase stock, optionally auto-create Credit Memo.
+ * Phase 2N-A: conditional claim before inventory; canonical createStockMovement; missing Product is fatal.
  */
 export async function markReturnShipmentReceived(
   shipmentId: string,
@@ -78,28 +106,73 @@ export async function markReturnShipmentReceived(
       return { success: false, error: 'Already processed' };
     }
 
-    const adminId = userId ? new mongoose.Types.ObjectId(userId) : undefined;
+    let qtyByProduct: Map<string, number>;
+    try {
+      qtyByProduct = aggregateReturnInventoryQuantities(shipment.items as ReturnLine[]);
+    } catch (validationErr: any) {
+      await session.abortTransaction();
+      return {
+        success: false,
+        error: validationErr?.message || 'Invalid return shipment quantities',
+      };
+    }
 
-    for (const item of shipment.items || []) {
-      await Product.findByIdAndUpdate(
-        item.product_id,
-        { $inc: { stock_quantity: item.quantity } },
-        { session }
+    // Claim BEFORE inventory so concurrent receipts cannot both apply stock.
+    const claimed = await Shipment.findOneAndUpdate(
+      {
+        _id: shipment._id,
+        shipment_type: 'GROUND_RG',
+        status: { $nin: ['DELIVERED', 'RETURNED'] },
+      },
+      {
+        $set: { status: 'RETURNED', delivered_date: new Date() },
+      },
+      { session, new: true }
+    );
+    if (!claimed) {
+      await session.abortTransaction();
+      return { success: false, error: 'Already processed' };
+    }
+
+    const adminId =
+      userId && mongoose.Types.ObjectId.isValid(userId)
+        ? new mongoose.Types.ObjectId(userId)
+        : undefined;
+
+    for (const [productId, qty] of qtyByProduct) {
+      const product = await Product.findById(productId).session(session);
+      if (!product) {
+        throw Object.assign(new Error('Product not found for return receipt'), { status: 400 });
+      }
+      if (isSkippedProductType((product as any).product_type)) {
+        continue;
+      }
+
+      const updated = await Product.findOneAndUpdate(
+        { _id: productId },
+        { $inc: { stock_quantity: qty } },
+        { session, new: true }
       );
-      await StockMovement.create(
-        [
-          {
-            product_id: item.product_id,
-            movement_type: StockMovementType.SHIPMENT_IN,
-            quantity_change: item.quantity,
-            reference_type: 'Shipment',
-            reference_id: shipment._id,
-            notes: 'Return shipment received',
-            admin_id: adminId,
-          },
-        ],
-        { session }
-      );
+      if (!updated) {
+        throw Object.assign(new Error('Product not found for return receipt'), { status: 400 });
+      }
+
+      const after = Number((updated as any).stock_quantity);
+      const before = after - qty;
+      await createStockMovement({
+        session,
+        productId,
+        movementType: StockMovementType.SHIPMENT_IN,
+        quantityBefore: before,
+        quantityChange: qty,
+        quantityAfter: after,
+        referenceType: 'Shipment',
+        referenceId: shipment._id as mongoose.Types.ObjectId,
+        referenceNumber: shipment.shipment_number,
+        reason: `Return shipment ${shipment.shipment_number} received`,
+        notes: 'Return shipment received',
+        adminId,
+      });
     }
 
     let creditMemoId: string | undefined;
@@ -138,12 +211,6 @@ export async function markReturnShipmentReceived(
       );
       creditMemoId = cm[0]._id.toString();
     }
-
-    await Shipment.findByIdAndUpdate(
-      shipmentId,
-      { status: 'RETURNED', delivered_date: new Date() },
-      { session }
-    );
 
     await session.commitTransaction();
     return { success: true, credit_memo_id: creditMemoId };

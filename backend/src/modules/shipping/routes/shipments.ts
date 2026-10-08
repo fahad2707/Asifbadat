@@ -217,7 +217,10 @@ router.post('/:id/mark-return-received', authenticateAdmin, async (req: AuthRequ
     );
     if (!result.success) return res.status(400).json({ error: result.error });
     res.json({ success: true, credit_memo_id: result.credit_memo_id, message: 'Return received' });
-  } catch (e) {
+  } catch (e: any) {
+    if (e?.status === 400 && typeof e.message === 'string') {
+      return res.status(400).json({ error: e.message });
+    }
     console.error('Mark return received:', e);
     res.status(500).json({ error: 'Failed to mark return received' });
   }

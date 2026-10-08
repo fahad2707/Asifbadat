@@ -108,10 +108,33 @@ function stubShipmentOps(opts: {
     Object.assign(shipment, update);
     return shipment;
   });
+  mock.method(Shipment, 'findOneAndUpdate', async (_filter: unknown, update: Record<string, unknown>) => {
+    statusUpdates.push({ id: shipment._id, update: (update.$set as Record<string, unknown>) || update });
+    Object.assign(shipment, update.$set || update);
+    return shipment;
+  });
 
   const stock: Record<string, number> = { [PRODUCT_A]: 500, ...(opts.stock || {}) };
   const productUpdates: Array<{ id: unknown; update: Record<string, unknown>; options?: unknown }> = [];
+  mock.method(Product, 'findById', (id: unknown) => {
+    const key = String(id);
+    const doc = { _id: key, product_type: 'inventory', stock_quantity: stock[key] ?? 0 };
+    return {
+      session: async () => doc,
+      then(onFulfilled?: (v: unknown) => unknown, onRejected?: (e: unknown) => unknown) {
+        return Promise.resolve(doc).then(onFulfilled, onRejected);
+      },
+    };
+  });
   mock.method(Product, 'findByIdAndUpdate', async (id: unknown, update: Record<string, unknown>, options?: unknown) => {
+    productUpdates.push({ id, update, options });
+    const key = String(id);
+    const delta = Number((update.$inc as { stock_quantity?: number } | undefined)?.stock_quantity || 0);
+    stock[key] = Number(stock[key] || 0) + delta;
+    return { _id: key, stock_quantity: stock[key] };
+  });
+  mock.method(Product, 'findOneAndUpdate', async (filter: Record<string, unknown>, update: Record<string, unknown>, options?: unknown) => {
+    const id = filter._id;
     productUpdates.push({ id, update, options });
     const key = String(id);
     const delta = Number((update.$inc as { stock_quantity?: number } | undefined)?.stock_quantity || 0);
@@ -242,6 +265,8 @@ test('F — GROUND_RG mark-return-received still increases stock and writes SHIP
   assert.equal(h.movements.length, 1);
   assert.equal(h.movements[0].doc.movement_type, StockMovementType.SHIPMENT_IN);
   assert.equal(h.movements[0].doc.quantity_change, 12);
+  assert.equal(h.movements[0].doc.quantity_before, 400);
+  assert.equal(h.movements[0].doc.quantity_after, 412);
   assert.equal(h.shipment.status, 'RETURNED');
 });
 
