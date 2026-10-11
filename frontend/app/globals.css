@@ -212,7 +212,20 @@ img {
 .admin-workspace .text-slate-100,
 .admin-workspace .text-slate-200,
 .admin-workspace .text-slate-300 {
-  color: var(--admin-text);
+  color: var(--admin-text) !important;
+}
+
+/* Keep contrast on filled primary controls when light-text remaps are forced */
+.admin-workspace button.bg-black .text-white,
+.admin-workspace a.bg-black .text-white,
+.admin-workspace button[class*='bg-[#0F9F8F]'] .text-white,
+.admin-workspace button[class*='bg-[#0B8275]'] .text-white,
+.admin-workspace button.bg-black,
+.admin-workspace a.bg-black,
+.admin-workspace button[class*='bg-[#0F9F8F]'],
+.admin-workspace button[class*='bg-[#0B8275]'],
+.admin-workspace a[class*='bg-[#0F9F8F]'] {
+  color: #ffffff !important;
 }
 
 .admin-app button.bg-black,
@@ -508,6 +521,57 @@ img {
 .admin-workspace .admin-lightbox button.bg-white.text-gray-700 {
   background-color: #ffffff !important;
   color: #334155 !important;
+}
+
+/*
+ * Portaled admin menus (often rendered on document.body, outside .admin-workspace).
+ * Light slate utility classes were designed for dark UI and become unreadable on white.
+ */
+[data-admin-menu] {
+  color: #1a1a1a;
+}
+
+[data-admin-menu] .text-white:not(.bg-black):not([class*='bg-black']),
+[data-admin-menu] .text-slate-100,
+[data-admin-menu] .text-slate-200,
+[data-admin-menu] .text-slate-300,
+[data-admin-menu] .text-slate-400,
+[data-admin-menu] .text-slate-500,
+[data-admin-menu] [class*='text-slate-'] {
+  color: #1a1a1a !important;
+}
+
+[data-admin-menu] button:not(.bg-black):not([class*='bg-black']),
+[data-admin-menu] a:not(.bg-black):not([class*='bg-black']) {
+  color: #1a1a1a !important;
+}
+
+[data-admin-menu] button:not(.bg-black):not([class*='bg-black']):hover,
+[data-admin-menu] a:not(.bg-black):not([class*='bg-black']):hover {
+  background-color: #f4f5f8 !important;
+  color: #1a1a1a !important;
+}
+
+[data-admin-menu] button.bg-black,
+[data-admin-menu] a.bg-black,
+[data-admin-menu] button.bg-black *,
+[data-admin-menu] a.bg-black * {
+  background-color: #000000 !important;
+  color: #ffffff !important;
+}
+
+[data-admin-menu] button[class*='text-[#8A100E]'],
+[data-admin-menu] a[class*='text-[#8A100E]'],
+[data-admin-menu] .text-red-600,
+[data-admin-menu] .text-rose-600 {
+  color: #8a100e !important;
+}
+
+[data-admin-menu] button[class*='text-[#8A100E]']:hover,
+[data-admin-menu] .text-red-600:hover,
+[data-admin-menu] .text-rose-600:hover {
+  background-color: #fdecec !important;
+  color: #8a100e !important;
 }
 
 .admin-workspace .admin-lightbox .flex.rounded-lg.overflow-hidden > button {

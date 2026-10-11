@@ -6,17 +6,26 @@ import Customer from '../models/Customer';
 import Invoice from '../models/Invoice';
 import { authenticateAdmin, AuthRequest } from '../middleware/auth';
 import { derivedUnpaidReceivableMatch } from '../utils/invoiceFinancialState';
+import User from '../models/User';
 import {
   ACCOUNT_STATUS_APPROVED,
   ACCOUNT_STATUS_PENDING,
+  ACCOUNT_STATUS_REJECTED,
+  ACCOUNT_STATUS_VALUES,
   accountStatusFromDocument,
 } from '../utils/customerAccount';
 import { z } from 'zod';
 
-function customerAccountFields(c: { account_status?: unknown; user_id?: unknown; is_active?: unknown }) {
+function customerAccountFields(c: {
+  account_status?: unknown;
+  user_id?: unknown;
+  is_active?: unknown;
+  website_signup?: unknown;
+}) {
   return {
     account_status: accountStatusFromDocument(c.account_status),
     user_id: c.user_id ? String(c.user_id) : null,
+    website_signup: c.website_signup === true,
     is_active: c.is_active !== false,
   };
 }
@@ -123,6 +132,84 @@ router.get('/balances', authenticateAdmin, async (_req, res) => {
   } catch (error) {
     console.error('Customers balances error:', error);
     res.status(500).json({ error: 'Failed to fetch balances' });
+  }
+});
+
+/**
+ * Website signup queue for future admin UI.
+ * Only Customers created by storefront registration (website_signup: true).
+ * Excludes ordinary admin-created / imported CRM rows.
+ */
+router.get('/website-signups', authenticateAdmin, async (req: AuthRequest, res) => {
+  try {
+    const { status, page = 1, limit = 50 } = req.query;
+    const skip = (Number(page) - 1) * Number(limit);
+    const query: Record<string, unknown> = {
+      website_signup: true,
+      user_id: { $exists: true, $ne: null },
+    };
+    if (typeof status === 'string' && status.trim()) {
+      const parsed = accountStatusFromDocument(status.trim());
+      if (!parsed) {
+        return res.status(400).json({ error: 'Invalid status filter' });
+      }
+      query.account_status = parsed;
+    } else {
+      query.account_status = { $in: [ACCOUNT_STATUS_PENDING, ACCOUNT_STATUS_REJECTED] };
+    }
+
+    const [rows, total] = await Promise.all([
+      Customer.find(query).sort({ created_at: -1 }).skip(skip).limit(Number(limit)).lean(),
+      Customer.countDocuments(query),
+    ]);
+
+    const userIds = rows
+      .map((c: { user_id?: unknown }) => c.user_id)
+      .filter(Boolean)
+      .map((id) => String(id));
+    const users = userIds.length
+      ? await User.find({ _id: { $in: userIds } })
+          .select('name email phone email_verified created_at')
+          .lean()
+      : [];
+    const userById = new Map(users.map((u: any) => [String(u._id), u]));
+
+    res.json({
+      signups: rows.map((c: any) => {
+        const uid = c.user_id ? String(c.user_id) : null;
+        const user = uid ? userById.get(uid) : undefined;
+        return {
+          id: c._id.toString(),
+          customer_code: c.customer_code,
+          name: c.name,
+          company: c.company,
+          phone: c.phone,
+          email: c.email,
+          notes: c.notes,
+          created_at: c.created_at,
+          ...customerAccountFields(c),
+          user: user
+            ? {
+                id: String(user._id),
+                name: user.name || '',
+                email: user.email || null,
+                phone: user.phone || null,
+                email_verified: user.email_verified !== false,
+                created_at: user.created_at,
+              }
+            : null,
+        };
+      }),
+      pagination: {
+        page: Number(page),
+        limit: Number(limit),
+        total,
+        totalPages: Math.ceil(total / Number(limit)),
+      },
+    });
+  } catch (error) {
+    console.error('List website signups error:', error);
+    res.status(500).json({ error: 'Failed to fetch website signups' });
   }
 });
 
@@ -249,7 +336,7 @@ router.put('/:id', authenticateAdmin, async (req: AuthRequest, res) => {
 router.put('/:id/account-status', authenticateAdmin, async (req: AuthRequest, res) => {
   try {
     const schema = z.object({
-      account_status: z.enum([ACCOUNT_STATUS_PENDING, ACCOUNT_STATUS_APPROVED]),
+      account_status: z.enum(ACCOUNT_STATUS_VALUES),
     });
     const { account_status } = schema.parse(req.body);
     const customer = await Customer.findById(req.params.id);

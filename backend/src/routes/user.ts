@@ -2,7 +2,10 @@ import express from 'express';
 import User from '../models/User';
 import OnlineOrder from '../models/OnlineOrder';
 import { authenticateUser, AuthRequest } from '../middleware/auth';
-import { isUserLinkedToApprovedCustomer } from '../utils/customerAccount';
+import {
+  getLinkedCustomerAccountStatus,
+  isApprovedAccountStatus,
+} from '../utils/customerAccount';
 import { z } from 'zod';
 
 const router = express.Router();
@@ -16,7 +19,10 @@ router.get('/profile', authenticateUser, async (req: AuthRequest, res) => {
       return res.status(404).json({ error: 'User not found' });
     }
 
-    const account_approved = await isUserLinkedToApprovedCustomer(req.userId);
+    // Status from Customer linked by user_id only (not email/phone CRM match).
+    // account_approved remains the boolean commercial gate; account_status is for UI routing.
+    const account_status = await getLinkedCustomerAccountStatus(req.userId);
+    const account_approved = isApprovedAccountStatus(account_status);
 
     res.json({
       id: user._id.toString(),
@@ -27,6 +33,7 @@ router.get('/profile', authenticateUser, async (req: AuthRequest, res) => {
       total_spent: user.total_spent || 0,
       created_at: user.created_at,
       account_approved,
+      account_status,
     });
   } catch (error) {
     console.error('Get profile error:', error);

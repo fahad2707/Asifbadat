@@ -19,7 +19,11 @@ import Product from '../models/Product';
 import User from '../models/User';
 import Customer from '../models/Customer';
 import RFQ from '../models/RFQ';
-import { ACCOUNT_STATUS_APPROVED, ACCOUNT_STATUS_PENDING } from '../utils/customerAccount';
+import {
+  ACCOUNT_STATUS_APPROVED,
+  ACCOUNT_STATUS_PENDING,
+  ACCOUNT_STATUS_REJECTED,
+} from '../utils/customerAccount';
 
 const PRODUCT_ID = '64c1c2d3e4f5a6b7c8d9e0a1';
 const USER_ID = '64b0000000000000000a0001';
@@ -148,6 +152,16 @@ test('4 — unapproved User → 403', async () => {
     throw new Error('must not create');
   });
   const res = await postOrder(userTestToken(USER_ID, { account_status: 'approved' }));
+  assert.equal(res.status, 403);
+});
+
+test('4b — rejected User → 403', async () => {
+  assertNoMongoConnection();
+  stubUserCustomer(ACCOUNT_STATUS_REJECTED);
+  mock.method(OnlineOrder, 'create', async () => {
+    throw new Error('must not create');
+  });
+  const res = await postOrder(userTestToken());
   assert.equal(res.status, 403);
 });
 

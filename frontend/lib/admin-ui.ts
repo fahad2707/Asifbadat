@@ -103,6 +103,18 @@ export function adminCreateTagClass(active: boolean): string {
   }`;
 }
 
+/** White popover / action menu shell (including menus portaled to document.body). */
+export const adminMenuPanel =
+  'bg-white border border-[#E3E5E8] rounded-lg shadow-lg text-[#1A1A1A] text-xs font-medium';
+
+/** Readable menu row — never use light slate text on white menus. */
+export function adminMenuItemClass(opts?: { danger?: boolean }): string {
+  if (opts?.danger) {
+    return 'w-full text-left px-4 py-2.5 text-[#8A100E] hover:bg-[#FDECEC] transition-colors';
+  }
+  return 'w-full text-left px-4 py-2.5 text-[#1A1A1A] hover:bg-[#F4F5F8] transition-colors';
+}
+
 export function adminRailBtnClass(active: boolean): string {
   return `w-full text-left px-3 py-2 rounded-md text-sm ${
     active ? 'bg-[#F4F5F8] text-[#1A1A1A] font-medium' : 'text-[#393A3D] hover:bg-[#F4F5F8]'

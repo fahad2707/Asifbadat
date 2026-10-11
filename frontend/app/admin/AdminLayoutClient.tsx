@@ -58,6 +58,7 @@ function headerContextLabel(pathname: string | null | undefined, creatingInvoice
   if ((pathname === '/admin/invoices' || pathname.startsWith('/admin/invoices/')) && creatingInvoice) return 'Offline sales';
   if (pathname === '/admin/invoices' || pathname.startsWith('/admin/invoices/')) return 'Invoices & quotations';
   if (pathname === '/admin/customers' || pathname.startsWith('/admin/customers/')) return 'Customers';
+  if (pathname === '/admin/website-signups' || pathname.startsWith('/admin/website-signups/')) return 'Website signups';
   if (pathname === '/admin/orders' || pathname.startsWith('/admin/orders/')) return 'Online sales';
   if (pathname === '/admin/products/new') return 'Product';
   if (pathname === '/admin/products' || pathname.startsWith('/admin/products/')) return 'Products';
@@ -119,6 +120,7 @@ export default function AdminLayoutClient({ children }: { children: React.ReactN
   const [searchFocused, setSearchFocused] = useState(false);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const [createOpen, setCreateOpen] = useState(false);
 
   const searchRef = useRef<HTMLDivElement>(null);
   const closeMobileNav = () => setMobileNavOpen(false);
@@ -129,11 +131,13 @@ export default function AdminLayoutClient({ children }: { children: React.ReactN
       if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
         e.preventDefault();
         setPaletteOpen((prev) => !prev);
+        setCreateOpen(false);
       }
       if (e.key === 'Escape') {
         setPaletteOpen(false);
         setSearchFocused(false);
         setMobileNavOpen(false);
+        setCreateOpen(false);
       }
     };
     window.addEventListener('keydown', handleKeyDown);
@@ -142,6 +146,7 @@ export default function AdminLayoutClient({ children }: { children: React.ReactN
 
   useEffect(() => {
     setMobileNavOpen(false);
+    setCreateOpen(false);
   }, [pathname]);
 
   // Handle outside click for search dropdown
@@ -376,14 +381,20 @@ export default function AdminLayoutClient({ children }: { children: React.ReactN
           }}
         >
           <div>
-            <p className={`${adminUi.navGroup} px-3 py-1.5`}>Create</p>
-            <div className="px-2 mt-0.5 flex flex-wrap gap-1.5">
-              {createActions.map((a) => (
-                <Link key={a.href} href={a.href} className={adminCreateTagClass(createHrefIsActive(pathname, searchParams, a.href))} onClick={() => setMobileNavOpen(false)}>
-                  {a.label}
-                </Link>
-              ))}
-            </div>
+            <button
+              type="button"
+              onClick={() => setCreateOpen((v) => !v)}
+              className="w-full flex items-center justify-between px-3 py-2 rounded-md hover:bg-[#F4F5F8] text-left"
+              aria-expanded={createOpen}
+              aria-controls="admin-create-panel"
+            >
+              <span className={adminUi.navGroup}>Create</span>
+              {createOpen ? (
+                <ChevronDown className="w-3.5 h-3.5 text-[#8D9096]" />
+              ) : (
+                <ChevronRight className="w-3.5 h-3.5 text-[#8D9096]" />
+              )}
+            </button>
           </div>
           <div>
             <button type="button" onClick={() => toggleGroup('sales')} className="w-full flex items-center justify-between px-3 py-1.5 rounded-md hover:bg-[#F4F5F8] text-left">
@@ -393,13 +404,14 @@ export default function AdminLayoutClient({ children }: { children: React.ReactN
             {openGroups.sales && (
               <div className="pl-2 mt-0.5 space-y-0.5">
                 <Link href="/admin/customers" className={adminNavItemClass(pathMatches(pathname, '/admin/customers'))}>Customer</Link>
-                <Link href="/admin/orders" className={adminNavItemClass(pathMatches(pathname, '/admin/orders'))}>Online sales</Link>
                 <Link href="/admin/invoices" className={adminNavItemClass(pathMatches(pathname, '/admin/invoices') && !creatingInvoice && !receivingPayment)}>Invoices &amp; quotations</Link>
                 <Link href="/admin/rfq" className={adminNavItemClass(pathMatches(pathname, '/admin/rfq'))}>RFQ</Link>
-                <Link href="/admin/credit-memos/customers" className={adminNavItemClass(pathname?.includes('/admin/credit-memos/customers') || pathname === '/admin/credit-memos')}>Credit memo (customers)</Link>
+                <Link href="/admin/credit-memos/customers" className={adminNavItemClass(pathname?.includes('/admin/credit-memos/customers') || pathname === '/admin/credit-memos')}>Credit memo for customers</Link>
                 <Link href="/admin/invoices?receive=1" className={adminNavItemClass(receivingPayment)}>Receive payments</Link>
                 <Link href="/admin/products/active" className={adminNavItemClass(pathMatches(pathname, '/admin/products') && pathname !== '/admin/products/new')}>Products</Link>
                 <Link href="/admin/catalog?tab=categories" className={adminNavItemClass(pathMatches(pathname, '/admin/catalog') && catalogTabIs(searchParams, 'categories'))}>Categories</Link>
+                <Link href="/admin/website-signups" className={adminNavItemClass(pathMatches(pathname, '/admin/website-signups'))}>Website signups</Link>
+                <Link href="/admin/orders" className={adminNavItemClass(pathMatches(pathname, '/admin/orders'))}>Online sales</Link>
               </div>
             )}
           </div>
@@ -427,7 +439,6 @@ export default function AdminLayoutClient({ children }: { children: React.ReactN
                 <Link href="/admin/inventory" className={adminNavItemClass(pathMatches(pathname, '/admin/inventory') && !adjustingStock && !countingStock)}>Inventory</Link>
                 <Link href="/admin/inventory?count=1" className={adminNavItemClass(countingStock)}>Physical count</Link>
                 <Link href="/admin/invoices?create=invoice" className={adminNavItemClass(creatingInvoice)}>Offline sales</Link>
-                <Link href="/admin/inventory?adjust=1" className={adminNavItemClass(adjustingStock)}>Stock adjustments</Link>
                 <Link href="/admin/returns" className={adminNavItemClass(pathMatches(pathname, '/admin/returns'))}>POS returns</Link>
               </div>
             )}
@@ -479,6 +490,51 @@ export default function AdminLayoutClient({ children }: { children: React.ReactN
           </button>
         </div>
       </aside>
+
+      {createOpen && (
+        <>
+          <button
+            type="button"
+            className="fixed inset-0 z-[45] bg-[rgba(26,26,26,0.35)] backdrop-blur-sm"
+            aria-label="Close create menu"
+            onClick={() => setCreateOpen(false)}
+          />
+          <div
+            id="admin-create-panel"
+            data-admin-menu
+            role="dialog"
+            aria-label="Create"
+            className="fixed z-[46] left-3 right-3 top-[4.5rem] lg:left-72 lg:right-auto lg:top-20 lg:w-[min(520px,calc(100vw-20rem))] rounded-xl border border-[#E3E5E8] bg-white/95 shadow-xl p-4 text-[#1A1A1A]"
+          >
+            <div className="flex items-center justify-between gap-3 mb-3">
+              <p className="text-sm font-semibold text-[#1A1A1A]">Create</p>
+              <button
+                type="button"
+                onClick={() => setCreateOpen(false)}
+                className={adminUi.btnIcon}
+                aria-label="Collapse create menu"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {createActions.map((a) => (
+                <Link
+                  key={a.href}
+                  href={a.href}
+                  className={adminCreateTagClass(createHrefIsActive(pathname, searchParams, a.href))}
+                  onClick={() => {
+                    setCreateOpen(false);
+                    setMobileNavOpen(false);
+                  }}
+                >
+                  {a.label}
+                </Link>
+              ))}
+            </div>
+          </div>
+        </>
+      )}
 
       <div className="flex-1 flex flex-col min-w-0 min-h-0 overflow-hidden">
         <header className={`z-20 flex items-center gap-3 px-4 h-14 shrink-0 ${adminUi.header}`}>

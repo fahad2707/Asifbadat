@@ -141,7 +141,7 @@ export default function SearchableProductDropdown({
         />
       )}
       {open && (
-        <div className="absolute z-50 left-0 right-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-lg max-h-60 overflow-y-auto">
+        <div data-admin-menu className="absolute z-50 left-0 right-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-lg max-h-60 overflow-y-auto text-[#1A1A1A]">
           <Link
             href="/admin/products/new"
             className="flex items-center gap-2 px-3 py-2 text-sm text-[#0F9F8F] font-medium hover:bg-teal-50 border-b border-gray-100 sticky top-0 bg-white"

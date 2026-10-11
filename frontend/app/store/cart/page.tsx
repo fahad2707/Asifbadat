@@ -4,7 +4,10 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { ArrowLeft, Plus, Minus, Trash2, ShoppingCart, FileSignature, MessageSquare, Truck } from 'lucide-react';
-import api from '@/lib/api';
+import {
+  fetchProfileAccountStatus,
+  type ParsedAccountStatus,
+} from '@/lib/account-status';
 import { useAuthStore, useCartStore } from '@/lib/store';
 import toast from 'react-hot-toast';
 import RFQLightbox, { type RFQLightboxItem } from '@/components/RFQLightbox';
@@ -15,20 +18,32 @@ export default function CartPage() {
   const token = useAuthStore((s) => s.token);
   const [rfqOpen, setRfqOpen] = useState(false);
   const [accountApproved, setAccountApproved] = useState(false);
+  const [accountStatus, setAccountStatus] = useState<ParsedAccountStatus>(null);
+  const [statusChecked, setStatusChecked] = useState(false);
 
   useEffect(() => {
     if (!token) {
       setAccountApproved(false);
+      setAccountStatus(null);
+      setStatusChecked(true);
       return;
     }
     let cancelled = false;
-    api
-      .get('/user/profile')
-      .then((res) => {
-        if (!cancelled) setAccountApproved(res.data?.account_approved === true);
+    setStatusChecked(false);
+    fetchProfileAccountStatus()
+      .then(({ account_approved, account_status }) => {
+        if (cancelled) return;
+        setAccountApproved(account_approved && account_status === 'approved');
+        setAccountStatus(account_status);
       })
       .catch(() => {
-        if (!cancelled) setAccountApproved(false);
+        if (cancelled) return;
+        // Fail closed for Place Order; RFQ remains available.
+        setAccountApproved(false);
+        setAccountStatus('invalid');
+      })
+      .finally(() => {
+        if (!cancelled) setStatusChecked(true);
       });
     return () => {
       cancelled = true;
@@ -43,9 +58,23 @@ export default function CartPage() {
     setRfqOpen(true);
   };
 
-  const handlePlaceOrder = () => {
+  const handlePlaceOrder = async () => {
     if (items.length === 0) {
       toast.error('Your cart is empty');
+      return;
+    }
+    try {
+      const { account_approved, account_status } = await fetchProfileAccountStatus();
+      if (!(account_approved && account_status === 'approved')) {
+        toast.error('Online ordering requires an approved wholesale account.');
+        setAccountApproved(false);
+        setAccountStatus(account_status);
+        return;
+      }
+    } catch {
+      toast.error('Account status could not be verified. Try again or request a quote.');
+      setAccountApproved(false);
+      setAccountStatus('invalid');
       return;
     }
     const payload = items.map((item) => ({
@@ -58,6 +87,20 @@ export default function CartPage() {
     localStorage.setItem('checkout_cart', JSON.stringify(payload));
     router.push('/checkout');
   };
+
+  const statusNote = (() => {
+    if (!statusChecked || accountApproved) return null;
+    if (!token) {
+      return 'Online ordering requires an approved wholesale account. You can still request a quote as a guest — your cart is kept.';
+    }
+    if (accountStatus === 'pending') {
+      return 'Your account is awaiting review, so online ordering is not available yet. Quote requests remain open — your cart is kept.';
+    }
+    if (accountStatus === 'rejected') {
+      return 'Online ordering is unavailable for this account. You can still browse the catalog — your cart is kept.';
+    }
+    return 'Account status could not be verified for online ordering. You can retry later or request a quote — your cart is kept.';
+  })();
 
   const rfqItems: RFQLightboxItem[] = items.map((item) => ({
     product_id: item.product_id,
@@ -194,6 +237,36 @@ export default function CartPage() {
                       </div>
                     </div>
                   </>
+                )}
+
+                {statusNote && (
+                  <p className="text-xs text-amber-200/90 mb-4 leading-relaxed" role="status">
+                    {statusNote}
+                    {accountStatus === 'pending' && (
+                      <>
+                        {' '}
+                        <Link href="/account/pending" className="underline hover:text-amber-100">
+                          View application status
+                        </Link>
+                      </>
+                    )}
+                    {accountStatus === 'rejected' && (
+                      <>
+                        {' '}
+                        <Link href="/account/rejected" className="underline hover:text-amber-100">
+                          View account status
+                        </Link>
+                      </>
+                    )}
+                    {!token && (
+                      <>
+                        {' '}
+                        <Link href="/login?redirect=/checkout" className="underline hover:text-amber-100">
+                          Sign in
+                        </Link>
+                      </>
+                    )}
+                  </p>
                 )}
 
                 <p className="text-xs text-slate-400 mb-4">

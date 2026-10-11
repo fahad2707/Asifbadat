@@ -5,8 +5,14 @@ import crypto from 'crypto';
 import User from '../models/User';
 import Customer from '../models/Customer';
 import Admin from '../models/Admin';
+import WebsiteSignupApplication, {
+  WEBSITE_SIGNUP_STATUS_PENDING,
+} from '../models/WebsiteSignupApplication';
 import bcrypt from 'bcryptjs';
-import { linkOrCreateCustomerForNewUser } from '../utils/customerAccount';
+import {
+  linkOrCreateCustomerForNewUser,
+  type CustomerLinkResult,
+} from '../utils/customerAccount';
 import { isSmtpConfigured, sendVerificationEmail, sendPasswordResetEmail } from '../utils/mail';
 import { logSecurityEvent } from '../utils/securityLog';
 import {
@@ -14,10 +20,79 @@ import {
   registerLimiter,
   forgotPasswordLimiter,
 } from '../middleware/rateLimit';
+import mongoose from 'mongoose';
 
 const router = express.Router();
 
 const BCRYPT_ROUNDS = 12;
+
+function emptyLinkResult(): CustomerLinkResult {
+  return {
+    action: 'unlinked',
+    customerId: null,
+    matchedCustomerIds: [],
+    matchKind: 'none',
+  };
+}
+
+/** True when Mongo reports a duplicate-key on WebsiteSignupApplication.user_id. */
+function isWebsiteSignupUserDuplicateKey(err: unknown): boolean {
+  const e = err as { code?: number; keyPattern?: Record<string, unknown>; message?: string };
+  if (e?.code !== 11000) return false;
+  if (e.keyPattern && Object.prototype.hasOwnProperty.call(e.keyPattern, 'user_id')) return true;
+  return typeof e.message === 'string' && /user_id/.test(e.message);
+}
+
+/**
+ * Undo Customer link/create for this registration only.
+ * Never deletes a pre-existing CRM Customer row.
+ */
+async function rollbackCustomerLink(
+  userId: mongoose.Types.ObjectId,
+  link: CustomerLinkResult
+): Promise<void> {
+  if (link.action === 'created') {
+    await Customer.deleteOne({ user_id: userId });
+  } else if (link.action === 'linked') {
+    await Customer.updateOne({ user_id: userId }, { $unset: { user_id: 1 } });
+  }
+}
+
+async function rollbackRegistration(
+  userId: mongoose.Types.ObjectId,
+  link: CustomerLinkResult
+): Promise<void> {
+  await WebsiteSignupApplication.deleteOne({ user_id: userId });
+  await rollbackCustomerLink(userId, link);
+  await User.findByIdAndDelete(userId);
+}
+
+async function createWebsiteSignupApplication(opts: {
+  userId: mongoose.Types.ObjectId;
+  name?: string;
+  email?: string;
+  phone?: string;
+  link: CustomerLinkResult;
+}) {
+  const matchedIds = opts.link.matchedCustomerIds
+    .filter((id) => mongoose.Types.ObjectId.isValid(id))
+    .map((id) => new mongoose.Types.ObjectId(id));
+
+  return WebsiteSignupApplication.create({
+    user_id: opts.userId,
+    submitted_name: opts.name,
+    submitted_email: opts.email,
+    submitted_phone: opts.phone,
+    status: WEBSITE_SIGNUP_STATUS_PENDING,
+    link_outcome: opts.link.action,
+    customer_id:
+      opts.link.customerId && mongoose.Types.ObjectId.isValid(opts.link.customerId)
+        ? new mongoose.Types.ObjectId(opts.link.customerId)
+        : undefined,
+    matched_customer_ids: matchedIds,
+    match_kind: opts.link.matchKind,
+  });
+}
 
 const emailSchema = z.string().trim().toLowerCase().email().max(320);
 const phoneSchema = z
@@ -145,10 +220,7 @@ router.post('/register', registerLimiter, async (req, res) => {
       email_verification_expires: verifyExp,
     });
 
-    let link: Awaited<ReturnType<typeof linkOrCreateCustomerForNewUser>> = {
-      action: 'unlinked',
-      customerId: null,
-    };
+    let link: CustomerLinkResult = emptyLinkResult();
     try {
       link = await linkOrCreateCustomerForNewUser({
         userId: user._id,
@@ -162,17 +234,32 @@ router.post('/register', registerLimiter, async (req, res) => {
       return res.status(500).json({ error: 'Registration failed' });
     }
 
+    // Application is created after link and before verification email so a failed
+    // insert never yields a successful registration, and email failure can clean it up.
+    try {
+      await createWebsiteSignupApplication({
+        userId: user._id,
+        name,
+        email,
+        phone,
+        link,
+      });
+    } catch (appErr) {
+      console.error('Register website signup application error:', appErr);
+      await rollbackCustomerLink(user._id, link);
+      await User.findByIdAndDelete(user._id);
+      if (isWebsiteSignupUserDuplicateKey(appErr)) {
+        return res.status(500).json({ error: 'Registration failed' });
+      }
+      return res.status(500).json({ error: 'Registration failed' });
+    }
+
     if (needsEmailVerify && plainVerifyToken && email) {
       try {
         await sendVerificationEmail(email, plainVerifyToken);
       } catch (e) {
         console.error('Verification email failed:', e);
-        if (link.action === 'created') {
-          await Customer.deleteOne({ user_id: user._id });
-        } else if (link.action === 'linked') {
-          await Customer.updateOne({ user_id: user._id }, { $unset: { user_id: 1 } });
-        }
-        await User.findByIdAndDelete(user._id);
+        await rollbackRegistration(user._id, link);
         return res.status(500).json({ error: 'Could not send verification email' });
       }
       logSecurityEvent('auth_register', req, { verified: false });

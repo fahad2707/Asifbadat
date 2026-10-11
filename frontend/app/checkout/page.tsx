@@ -4,6 +4,8 @@ import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { ShoppingBag, CreditCard, Truck, ArrowLeft, Lock } from 'lucide-react';
 import { useCartStore } from '@/lib/store';
+import CheckoutAccessGate from '@/components/auth/CheckoutAccessGate';
+import { fetchProfileAccountStatus } from '@/lib/account-status';
 
 const CHECKOUT_SUBMISSION_KEY = 'checkout_submission_id';
 
@@ -160,6 +162,18 @@ export default function CheckoutPage() {
         router.push('/login?redirect=/checkout');
         return;
       }
+      // Defense in depth: re-check profile before calling the order API.
+      // Backend authorization remains authoritative.
+      try {
+        const { account_approved, account_status } = await fetchProfileAccountStatus();
+        if (!(account_approved && account_status === 'approved')) {
+          alert('Online ordering is only available for approved wholesale accounts.');
+          return;
+        }
+      } catch {
+        alert('Account status could not be verified. Please try again.');
+        return;
+      }
       const checkout_submission_id = getOrCreateSubmissionId();
       const res = await fetch(`${API}/online-orders`, {
         method: 'POST',
@@ -188,6 +202,11 @@ export default function CheckoutPage() {
       if (!res.ok) throw new Error(data.error || 'Failed');
       clearSubmissionId();
       localStorage.removeItem('checkout_cart');
+      try {
+        localStorage.removeItem('edi_site_cart');
+      } catch {
+        /* ignore */
+      }
       clearPersistCart();
       router.push(
         `/order-confirmation?order=${encodeURIComponent(data.order_number)}&email=${encodeURIComponent(email.trim().toLowerCase())}`
@@ -212,7 +231,7 @@ export default function CheckoutPage() {
       <header className="sticky top-0 z-10 border-b" style={{ background: theme.ink2, borderColor: theme.line2 }}>
         <div className="max-w-5xl mx-auto px-4 py-3 flex items-center justify-between">
           <button
-            onClick={() => router.push('/')}
+            onClick={() => router.push('/site')}
             className="flex items-center gap-2 text-sm transition-colors hover:text-[#BFA06A]"
             style={{ color: theme.fog }}
           >
@@ -225,6 +244,7 @@ export default function CheckoutPage() {
         </div>
       </header>
 
+      <CheckoutAccessGate>
       <div className="max-w-5xl mx-auto px-4 py-8">
         <h1 className="text-2xl font-semibold mb-2" style={{ fontFamily: theme.serif, color: theme.cream }}>
           Checkout
@@ -467,6 +487,7 @@ export default function CheckoutPage() {
           </div>
         </div>
       </div>
+      </CheckoutAccessGate>
     </div>
   );
 }

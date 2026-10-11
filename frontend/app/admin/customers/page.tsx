@@ -6,7 +6,7 @@ import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Plus, Edit, Search, User, Trash2, FileDown, X, FileText, DollarSign, ChevronDown } from 'lucide-react';
 import adminApi from '@/lib/admin-api';
-import { adminUi } from '@/lib/admin-ui';
+import { adminMenuItemClass, adminMenuPanel, adminUi } from '@/lib/admin-ui';
 import toast from 'react-hot-toast';
 import ReceivePaymentLightbox from '@/components/admin/ReceivePaymentLightbox';
 
@@ -505,7 +505,7 @@ export default function CustomersPage() {
                                 setActionDropdownAnchor(e.currentTarget.getBoundingClientRect());
                               }
                             }}
-                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-[#0F9F8F] text-white hover:bg-[#0B8275]"
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold bg-black text-white hover:bg-[#1A1A1A]"
                           >
                             {openBal > 0 ? 'Receive payment' : 'Create invoice'}
                             <ChevronDown className="w-3.5 h-3.5" />
@@ -534,26 +534,27 @@ export default function CustomersPage() {
           <>
             <div className="fixed inset-0 z-[100]" aria-hidden onClick={(e) => { e.stopPropagation(); closeDropdown(); }} />
             <div
-              className="fixed z-[101] py-1.5 bg-white border border-[#E2E8F0] rounded-lg min-w-[170px] text-xs font-medium text-[#0F172A]"
+              data-admin-menu
+              className={`fixed z-[101] py-1.5 min-w-[170px] ${adminMenuPanel}`}
               style={{ top: actionDropdownAnchor.bottom + 4, right: typeof window !== 'undefined' ? window.innerWidth - actionDropdownAnchor.right : 0 }}
             >
               {openBal > 0 && (
-                <button type="button" onClick={(e) => { openReceivePayment(c.id, e); closeDropdown(); }} className="w-full text-left px-4 py-2.5 text-slate-200 hover:bg-white/5 transition-colors">
+                <button type="button" onClick={(e) => { openReceivePayment(c.id, e); closeDropdown(); }} className={adminMenuItemClass()}>
                   Receive payment
                 </button>
               )}
-              <button type="button" onClick={(e) => { openCreateInvoice(c, e); closeDropdown(); }} className="w-full text-left px-4 py-2.5 text-slate-200 hover:bg-white/5 transition-colors">
+              <button type="button" onClick={(e) => { openCreateInvoice(c, e); closeDropdown(); }} className={adminMenuItemClass()}>
                 Create invoice
               </button>
-              <button type="button" onClick={(e) => { e.stopPropagation(); openEdit(c); closeDropdown(); }} className="w-full text-left px-4 py-2.5 text-slate-200 hover:bg-white/5 transition-colors">
+              <button type="button" onClick={(e) => { e.stopPropagation(); openEdit(c); closeDropdown(); }} className={adminMenuItemClass()}>
                 Edit customer info
               </button>
               {c.account_status === 'approved' ? (
-                <button type="button" onClick={(e) => { e.stopPropagation(); updateAccountStatus(c.id, 'pending'); closeDropdown(); }} className="w-full text-left px-4 py-2.5 text-slate-200 hover:bg-white/5 transition-colors">
+                <button type="button" onClick={(e) => { e.stopPropagation(); updateAccountStatus(c.id, 'pending'); closeDropdown(); }} className={adminMenuItemClass({ danger: true })}>
                   Revoke online access
                 </button>
               ) : (
-                <button type="button" onClick={(e) => { e.stopPropagation(); updateAccountStatus(c.id, 'approved'); closeDropdown(); }} className="w-full text-left px-4 py-2.5 text-slate-200 hover:bg-white/5 transition-colors">
+                <button type="button" onClick={(e) => { e.stopPropagation(); updateAccountStatus(c.id, 'approved'); closeDropdown(); }} className={adminMenuItemClass()}>
                   Approve for online ordering
                 </button>
               )}

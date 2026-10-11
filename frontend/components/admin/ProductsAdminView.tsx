@@ -128,7 +128,8 @@ export function ProductsAdminView({ mode }: { mode: ProductsAdminMode }) {
     setLoading(true);
     try {
       const response = await adminApi.get('/products', {
-        params: { limit: 5000, visibility: mode === 'inactive' ? 'inactive' : 'all' },
+        // Active list must exclude soft-deleted (is_active=false) or deletes appear to "stick".
+        params: { limit: 5000, visibility: mode === 'inactive' ? 'inactive' : 'active' },
       });
       setProducts(response.data.products || []);
       setTotalCount(response.data.pagination?.total ?? (response.data.products?.length ?? 0));
@@ -286,11 +287,15 @@ export function ProductsAdminView({ mode }: { mode: ProductsAdminMode }) {
   const handleBulkDelete = async () => {
     if (selectedIds.size === 0) return;
     if (!confirm(`Delete ${selectedIds.size} selected product(s)?`)) return;
+    const ids = Array.from(selectedIds);
     try {
-      await adminApi.post('/products/bulk-delete', { ids: Array.from(selectedIds) });
-      toast.success(`${selectedIds.size} product(s) deleted`);
+      await adminApi.post('/products/bulk-delete', { ids });
+      toast.success(`${ids.length} product(s) deleted`);
       setSelectedIds(new Set());
-      fetchProducts();
+      // Soft-delete on the server — remove from this list immediately so UI matches the toast.
+      setProducts((prev) => prev.filter((p) => !ids.includes(String(p.id))));
+      setTotalCount((prev) => Math.max(0, prev - ids.length));
+      await fetchProducts();
     } catch (err: unknown) {
       toast.error(formatApiError(err, 'Failed to delete'));
     }

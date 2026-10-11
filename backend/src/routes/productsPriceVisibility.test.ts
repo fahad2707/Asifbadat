@@ -17,7 +17,11 @@ import { createApp } from '../server';
 import Product from '../models/Product';
 import User from '../models/User';
 import Customer from '../models/Customer';
-import { ACCOUNT_STATUS_APPROVED, ACCOUNT_STATUS_PENDING } from '../utils/customerAccount';
+import {
+  ACCOUNT_STATUS_APPROVED,
+  ACCOUNT_STATUS_PENDING,
+  ACCOUNT_STATUS_REJECTED,
+} from '../utils/customerAccount';
 
 const PRODUCT_ID = '64c1c2d3e4f5a6b7c8d9e0a1';
 const USER_ID = '64b0000000000000000a0001';
@@ -176,6 +180,23 @@ test('GET /api/products — unapproved User has no price', async () => {
   const res = await request(createApp())
     .get('/api/products')
     .set('Authorization', `Bearer ${userTestToken({ account_status: 'approved' })}`);
+
+  assert.equal(res.status, 200);
+  const product = res.body.products[0] as Record<string, unknown>;
+  assertPublicFields(product);
+  assertNoPrice(product);
+  assertNoCost(product);
+  assertVaryAuthorization(res);
+});
+
+test('GET /api/products — rejected User has no price', async () => {
+  assertNoMongoConnection();
+  stubCatalogList();
+  stubUserCustomer(ACCOUNT_STATUS_REJECTED);
+
+  const res = await request(createApp())
+    .get('/api/products')
+    .set('Authorization', `Bearer ${userTestToken()}`);
 
   assert.equal(res.status, 200);
   const product = res.body.products[0] as Record<string, unknown>;

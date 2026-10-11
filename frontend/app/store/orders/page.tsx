@@ -43,29 +43,45 @@ const statusConfig: Record<string, { label: string; icon: any; color: string; bg
 export default function OrdersPage() {
   const router = useRouter();
   const { token } = useAuthStore();
+  const [hydrated, setHydrated] = useState(false);
   const [orders, setOrders] = useState<OnlineOrder[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (!token) {
+    const mark = () => setHydrated(true);
+    const unsub = useAuthStore.persist.onFinishHydration(mark);
+    if (useAuthStore.persist.hasHydrated()) mark();
+    return () => {
+      unsub();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!hydrated) return;
+    const session =
+      String(token || '').trim() ||
+      (typeof window !== 'undefined' ? String(localStorage.getItem('token') || '').trim() : '');
+    if (!session) {
       router.push('/login');
       return;
     }
-    fetchOrders();
-  }, [token, router]);
+    let cancelled = false;
+    (async () => {
+      try {
+        const response = await api.get('/online-orders/my-orders');
+        if (!cancelled) setOrders(response.data);
+      } catch {
+        if (!cancelled) toast.error('Failed to load orders');
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [hydrated, token, router]);
 
-  const fetchOrders = async () => {
-    try {
-      const response = await api.get('/online-orders/my-orders');
-      setOrders(response.data);
-    } catch (error) {
-      toast.error('Failed to load orders');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  if (loading) {
+  if (!hydrated || loading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50">
         <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-600"></div>
@@ -77,7 +93,7 @@ export default function OrdersPage() {
     <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100">
       <div className="container mx-auto px-4 py-8">
         <Link
-          href="/"
+          href="/site"
           className="inline-flex items-center gap-2 text-primary-600 hover:text-primary-700 mb-6 transition-colors"
         >
           <ArrowLeft className="w-5 h-5" />

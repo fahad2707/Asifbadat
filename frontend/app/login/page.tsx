@@ -1,45 +1,108 @@
 'use client';
 
 import { useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import api from '@/lib/api';
 import { useAuthStore } from '@/lib/store';
+import { formatApiError } from '@/lib/format-api-error';
+import { customerAuthUi } from '@/lib/customer-auth-ui';
+import {
+  fetchProfileAccountStatus,
+  routeForAccountStatus,
+} from '@/lib/account-status';
+import CustomerAuthShell from '@/components/auth/CustomerAuthShell';
+import PasswordField from '@/components/auth/PasswordField';
 import toast from 'react-hot-toast';
+
+const LOGIN_CREDENTIALS_ERROR = 'Email id or password is incorrect';
+
+async function navigateAfterAuth(
+  push: (href: string) => void,
+  options?: { preferredRedirect?: string | null }
+) {
+  try {
+    const { account_status, account_approved } = await fetchProfileAccountStatus();
+    const preferred = (options?.preferredRedirect || '').trim();
+    // Only honor an explicit checkout return path for verified approved accounts.
+    if (
+      preferred === '/checkout' &&
+      account_approved &&
+      account_status === 'approved'
+    ) {
+      push('/checkout');
+      return;
+    }
+    push(routeForAccountStatus(account_status));
+  } catch {
+    // Fail closed: never send users to approved storefront without a verified status.
+    toast.error('Signed in, but account status could not be verified.');
+    push('/account/restricted');
+  }
+}
 
 type Mode = 'login' | 'signup';
 
+function axiosStatus(error: unknown): number | undefined {
+  if (error && typeof error === 'object' && 'response' in error) {
+    const status = (error as { response?: { status?: number } }).response?.status;
+    return typeof status === 'number' ? status : undefined;
+  }
+  return undefined;
+}
+
 export default function LoginPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const preferredRedirect = searchParams.get('redirect');
   const { setAuth } = useAuthStore();
   const [mode, setMode] = useState<Mode>('login');
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
-  const [phone, setPhone] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
+  const [fieldError, setFieldError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+
+  const switchMode = (next: Mode) => {
+    setMode(next);
+    setFieldError(null);
+    setPassword('');
+    setConfirmPassword('');
+  };
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
+    setFieldError(null);
+    if (!email.trim()) {
+      setFieldError('Email is required');
+      return;
+    }
+    if (!password) {
+      setFieldError('Password is required');
+      return;
+    }
+
     setLoading(true);
     try {
-      if (!email && !phone) {
-        toast.error('Enter email or phone');
-        return;
-      }
       const response = await api.post('/auth/login', {
-        email: email || undefined,
-        phone: phone || undefined,
+        email: email.trim(),
         password,
       });
       setAuth(response.data.user, response.data.token);
       toast.success('Login successful!');
-
-      const redirect = new URLSearchParams(window.location.search).get('redirect') || '/dashboard';
-      router.push(redirect);
-    } catch (error: any) {
-      toast.error(error.response?.data?.error || 'Login failed');
+      await navigateAfterAuth((href) => router.push(href), {
+        preferredRedirect,
+      });
+    } catch (error: unknown) {
+      if (axiosStatus(error) === 401) {
+        setFieldError(LOGIN_CREDENTIALS_ERROR);
+        toast.error(LOGIN_CREDENTIALS_ERROR);
+      } else {
+        const message = formatApiError(error, 'Login failed');
+        setFieldError(message);
+        toast.error(message);
+      }
     } finally {
       setLoading(false);
     }
@@ -47,36 +110,41 @@ export default function LoginPage() {
 
   const handleSignup = async (e: React.FormEvent) => {
     e.preventDefault();
+    setFieldError(null);
+    if (!email.trim()) {
+      setFieldError('Email is required');
+      return;
+    }
+    if (password.length < 8) {
+      setFieldError('Password must be at least 8 characters');
+      return;
+    }
+    if (password !== confirmPassword) {
+      setFieldError('Passwords do not match');
+      return;
+    }
+
     setLoading(true);
     try {
-      if (password !== confirmPassword) {
-        toast.error('Passwords do not match');
-        return;
-      }
-      if (!email && !phone) {
-        toast.error('Enter email or phone');
-        return;
-      }
-      if (password.length < 8) {
-        toast.error('Password must be at least 8 characters');
-        return;
-      }
       const response = await api.post('/auth/register', {
-        name: name || undefined,
-        email: email || undefined,
-        phone: phone || undefined,
+        name: name.trim() || undefined,
+        email: email.trim(),
         password,
       });
       if (response.data.requiresVerification) {
         toast.success(response.data.message || 'Check your email to verify your account.');
-        setMode('login');
+        switchMode('login');
         return;
       }
       setAuth(response.data.user, response.data.token);
       toast.success('Account created!');
-      router.push('/dashboard');
-    } catch (error: any) {
-      toast.error(error.response?.data?.error || 'Signup failed');
+      await navigateAfterAuth((href) => router.push(href), {
+        preferredRedirect,
+      });
+    } catch (error: unknown) {
+      const message = formatApiError(error, 'Signup failed');
+      setFieldError(message);
+      toast.error(message);
     } finally {
       setLoading(false);
     }
@@ -85,114 +153,124 @@ export default function LoginPage() {
   const isLogin = mode === 'login';
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-[#0f1115] px-4">
-      <div className="glass-panel max-w-md w-full px-8 py-8 md:px-10 md:py-10">
-        <h1 className="gradient-heading text-xl md:text-2xl text-center mb-6">
-          {isLogin ? 'Customer Access' : 'Create your account'}
-        </h1>
+    <CustomerAuthShell
+      title={isLogin ? 'Sign in' : 'Create your account'}
+      lead={
+        isLogin
+          ? 'Access your wholesale account to view pricing and place orders once approved.'
+          : 'Register for a wholesale account. Pricing and ordering require admin approval after signup.'
+      }
+    >
+      <div className={customerAuthUi.tabRow} role="tablist" aria-label="Authentication mode">
+        <button
+          type="button"
+          role="tab"
+          aria-selected={isLogin}
+          onClick={() => switchMode('login')}
+          className={`${customerAuthUi.tab} ${isLogin ? customerAuthUi.tabActive : customerAuthUi.tabIdle}`}
+        >
+          Login
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={!isLogin}
+          onClick={() => switchMode('signup')}
+          className={`${customerAuthUi.tab} ${!isLogin ? customerAuthUi.tabActive : customerAuthUi.tabIdle}`}
+        >
+          Sign up
+        </button>
+      </div>
 
-        <div className="flex items-center justify-center gap-2 mb-8 text-xs md:text-sm">
-          <button
-            type="button"
-            onClick={() => setMode('login')}
-            className={`px-4 py-2 rounded-full transition-all ${
-              isLogin ? 'glass-button glass-button-gradient text-white' : 'bg-white/5 text-slate-200'
-            }`}
-          >
-            Login
-          </button>
-          <button
-            type="button"
-            onClick={() => setMode('signup')}
-            className={`px-4 py-2 rounded-full transition-all ${
-              !isLogin ? 'glass-button glass-button-gradient text-white' : 'bg-white/5 text-slate-200'
-            }`}
-          >
-            Sign up
-          </button>
-        </div>
-
-        <form onSubmit={isLogin ? handleLogin : handleSignup} className="space-y-5">
-          {!isLogin && (
-            <div>
-              <label className="block text-sm font-medium text-slate-200 mb-1">Name</label>
-              <input
-                type="text"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                className="w-full px-4 py-2 rounded-lg bg-white/5 border border-white/15 text-slate-50 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-[#7c5cff]"
-                placeholder="Your name"
-              />
-            </div>
-          )}
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-slate-200 mb-1">Email</label>
-              <input
-                type="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                className="w-full px-4 py-2 rounded-lg bg-white/5 border border-white/15 text-slate-50 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-[#7c5cff]"
-                placeholder="you@example.com"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-slate-200 mb-1">Phone</label>
-              <input
-                type="tel"
-                value={phone}
-                onChange={(e) => setPhone(e.target.value)}
-                className="w-full px-4 py-2 rounded-lg bg-white/5 border border-white/15 text-slate-50 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-[#7c5cff]"
-                placeholder="+1 234 567 890"
-              />
-            </div>
+      <form onSubmit={isLogin ? handleLogin : handleSignup} className="space-y-4" noValidate>
+        {fieldError && (
+          <div className={customerAuthUi.errorBox} role="alert">
+            {fieldError}
           </div>
+        )}
 
+        {!isLogin && (
           <div>
-            <label className="block text-sm font-medium text-slate-200 mb-1">Password</label>
+            <label htmlFor="signup-name" className={customerAuthUi.label}>
+              Name
+            </label>
             <input
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              className="w-full px-4 py-2 rounded-lg bg-white/5 border border-white/15 text-slate-50 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-[#7c5cff]"
-              placeholder="At least 8 characters"
-              required
+              id="signup-name"
+              type="text"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              className={customerAuthUi.field}
+              placeholder="Business or contact name"
+              autoComplete="name"
             />
           </div>
+        )}
 
-          {!isLogin && (
-            <div>
-              <label className="block text-sm font-medium text-slate-200 mb-1">Confirm password</label>
-              <input
-                type="password"
-                value={confirmPassword}
-                onChange={(e) => setConfirmPassword(e.target.value)}
-                className="w-full px-4 py-2 rounded-lg bg-white/5 border border-white/15 text-slate-50 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-[#7c5cff]"
-                placeholder="Repeat password"
-                required
-              />
-            </div>
-          )}
+        <div>
+          <label htmlFor="auth-email" className={customerAuthUi.label}>
+            Email
+          </label>
+          <input
+            id="auth-email"
+            type="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            className={customerAuthUi.field}
+            placeholder="you@company.com"
+            autoComplete="email"
+            required
+          />
+        </div>
 
-          <button
-            type="submit"
-            disabled={loading}
-            className="w-full glass-button glass-button-gradient text-white py-3 rounded-lg font-semibold transition-all hover:scale-[1.03] disabled:opacity-50"
-          >
-            {loading ? (isLogin ? 'Signing in...' : 'Creating account...') : isLogin ? 'Login' : 'Sign up'}
-          </button>
+        <PasswordField
+          id="auth-password"
+          label="Password"
+          value={password}
+          onChange={setPassword}
+          placeholder={isLogin ? 'Your password' : 'At least 8 characters'}
+          required
+          autoComplete={isLogin ? 'current-password' : 'new-password'}
+          minLength={isLogin ? undefined : 8}
+        />
 
-          {isLogin && (
-            <p className="text-center text-sm text-slate-400">
-              <Link href="/forgot-password" className="text-[#7c5cff] hover:underline">
-                Forgot password?
-              </Link>
-            </p>
-          )}
-        </form>
-      </div>
-    </div>
+        {!isLogin && (
+          <PasswordField
+            id="auth-confirm-password"
+            label="Confirm password"
+            value={confirmPassword}
+            onChange={setConfirmPassword}
+            placeholder="Repeat password"
+            required
+            autoComplete="new-password"
+            minLength={8}
+          />
+        )}
+
+        <button type="submit" disabled={loading} className={customerAuthUi.btnPrimary}>
+          {loading
+            ? isLogin
+              ? 'Signing in…'
+              : 'Creating account…'
+            : isLogin
+              ? 'Sign in'
+              : 'Create account'}
+        </button>
+
+        {isLogin ? (
+          <p className={customerAuthUi.linkRow}>
+            <Link href="/forgot-password" className={customerAuthUi.btnGhost}>
+              Forgot password?
+            </Link>
+          </p>
+        ) : (
+          <p className={customerAuthUi.linkRow}>
+            Already have an account?{' '}
+            <button type="button" onClick={() => switchMode('login')} className={customerAuthUi.btnGhost}>
+              Sign in
+            </button>
+          </p>
+        )}
+      </form>
+    </CustomerAuthShell>
   );
 }
-

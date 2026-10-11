@@ -1,10 +1,15 @@
 'use client';
 
-import { useEffect, useState, Suspense } from 'react';
+import { useEffect, useState, Suspense, type CSSProperties } from 'react';
+import Link from 'next/link';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { CheckCircle, Package, Truck, MapPin, Clock } from 'lucide-react';
+import { customerAuthTheme, customerAuthUi } from '@/lib/customer-auth-ui';
 
-const API = typeof window !== 'undefined' ? '/api' : (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5001/api');
+const API =
+  typeof window !== 'undefined'
+    ? '/api'
+    : process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5001/api';
 
 interface OrderData {
   order_number: string;
@@ -21,6 +26,21 @@ interface OrderData {
 }
 
 const STATUS_STEPS = ['confirmed', 'packed', 'dispatched', 'delivered'];
+
+const pageShell: CSSProperties = {
+  background: `
+    radial-gradient(ellipse 80% 50% at 50% -10%, rgba(191,160,106,0.16), transparent 55%),
+    radial-gradient(ellipse 60% 40% at 100% 100%, rgba(191,160,106,0.06), transparent 50%),
+    ${customerAuthTheme.bg}
+  `,
+  fontFamily: customerAuthTheme.body,
+  color: customerAuthTheme.text,
+};
+
+const panelStyle: CSSProperties = {
+  background: customerAuthTheme.panel,
+  borderColor: customerAuthTheme.panelBorder,
+};
 
 function OrderConfirmationContent() {
   const params = useSearchParams();
@@ -72,32 +92,48 @@ function OrderConfirmationContent() {
 
   if (!orderNum) {
     return (
-      <div className="min-h-screen flex items-center justify-center text-gray-500 px-4">
-        Missing order reference. Return to the store to place an order.
+      <div className="min-h-screen flex flex-col items-center justify-center px-4" style={pageShell}>
+        <p className="text-sm text-[#A8A29A] text-center mb-4">
+          Missing order reference. Return to the store to place an order.
+        </p>
+        <Link href="/site" className={customerAuthUi.btnGhost}>
+          Back to store
+        </Link>
       </div>
     );
   }
 
   if (!emailGate) {
     return (
-      <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-center px-4 py-12">
-        <div className="max-w-md w-full bg-white rounded-xl shadow-sm border p-6">
-          <h1 className="text-lg font-semibold text-gray-900 mb-2">View your order</h1>
-          <p className="text-sm text-gray-600 mb-4">
-            Enter the email address you used at checkout. This keeps your order details private.
+      <div className="min-h-screen flex flex-col items-center justify-center px-4 py-12" style={pageShell}>
+        <div className="max-w-md w-full rounded-2xl border px-6 py-8 shadow-[0_24px_80px_rgba(0,0,0,0.45)]" style={panelStyle}>
+          <Link href="/site" className="inline-block mb-6 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#BFA06A] rounded-sm">
+            <h1 className={customerAuthUi.brandTitle} style={{ fontFamily: customerAuthTheme.serif }}>
+              Express <span className={customerAuthUi.brandAccent}>Distributors</span>
+            </h1>
+          </Link>
+          <h2 className="text-xl text-[#F5F1E8] mb-2" style={{ fontFamily: customerAuthTheme.serif }}>
+            Track your order
+          </h2>
+          <p className="text-sm text-[#A8A29A] mb-5 leading-relaxed">
+            Enter the email address used at checkout. This keeps your order details private.
           </p>
+          <label htmlFor="track-email" className={customerAuthUi.label}>
+            Email
+          </label>
           <input
+            id="track-email"
             type="email"
             value={emailDraft}
             onChange={(e) => setEmailDraft(e.target.value)}
-            className="w-full border rounded-lg px-3 py-2 mb-4 text-gray-900"
+            className={`${customerAuthUi.field} mb-4`}
             placeholder="you@example.com"
             autoComplete="email"
           />
           <button
             type="button"
             onClick={() => setEmailGate(emailDraft.trim().toLowerCase())}
-            className="w-full bg-[#0f766e] text-white py-2.5 rounded-lg font-medium hover:opacity-95"
+            className={customerAuthUi.btnPrimary}
           >
             Load order
           </button>
@@ -107,15 +143,23 @@ function OrderConfirmationContent() {
   }
 
   if (loading) {
-    return <div className="min-h-screen flex items-center justify-center text-gray-500">Loading…</div>;
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center gap-3" style={pageShell} role="status">
+        <div className="animate-spin rounded-full h-9 w-9 border-2 border-[#BFA06A] border-t-transparent" />
+        <p className="text-sm text-[#A8A29A]">Loading order…</p>
+      </div>
+    );
   }
+
   if (!order) {
     return (
-      <div className="min-h-screen flex flex-col items-center justify-center text-gray-500 px-4 gap-2">
-        <p>We couldn&apos;t find that order, or the email doesn&apos;t match.</p>
+      <div className="min-h-screen flex flex-col items-center justify-center px-4 gap-4" style={pageShell}>
+        <p className="text-sm text-[#A8A29A] text-center">
+          We couldn&apos;t find that order, or the email doesn&apos;t match.
+        </p>
         <button
           type="button"
-          className="text-[#0f766e] underline text-sm"
+          className={customerAuthUi.btnGhost}
           onClick={() => {
             setEmailGate('');
             setOrder(null);
@@ -123,6 +167,9 @@ function OrderConfirmationContent() {
         >
           Try a different email
         </button>
+        <Link href="/site" className={customerAuthUi.btnGhost}>
+          Back to store
+        </Link>
       </div>
     );
   }
@@ -131,26 +178,51 @@ function OrderConfirmationContent() {
   const isCancelled = order.status === 'cancelled';
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      <div className="max-w-2xl mx-auto px-4 py-12">
-        {/* Success header */}
-        <div className="text-center mb-8">
-          <div className={`w-16 h-16 rounded-full mx-auto mb-4 flex items-center justify-center ${isCancelled ? 'bg-red-100' : 'bg-green-100'}`}>
-            <CheckCircle className={`w-8 h-8 ${isCancelled ? 'text-red-600' : 'text-green-600'}`} />
+    <div className="min-h-screen px-4 py-10 sm:py-14" style={pageShell}>
+      <div className="max-w-2xl mx-auto space-y-6">
+        <div className="text-center">
+          <Link
+            href="/site"
+            className="inline-block focus:outline-none focus-visible:ring-2 focus-visible:ring-[#BFA06A] rounded-sm"
+          >
+            <h1 className={customerAuthUi.brandTitle} style={{ fontFamily: customerAuthTheme.serif }}>
+              Express <span className={customerAuthUi.brandAccent}>Distributors</span>
+            </h1>
+          </Link>
+        </div>
+
+        <div className="text-center mb-2">
+          <div
+            className={`w-16 h-16 rounded-full mx-auto mb-4 flex items-center justify-center border ${
+              isCancelled
+                ? 'bg-[rgba(248,113,113,0.12)] border-[#F87171]/40'
+                : 'bg-[#BFA06A]/15 border-[#BFA06A]/40'
+            }`}
+          >
+            <CheckCircle className={`w-8 h-8 ${isCancelled ? 'text-[#F87171]' : 'text-[#BFA06A]'}`} />
           </div>
-          <h1 className="text-2xl font-bold text-gray-900 mb-2">
-            {isCancelled ? 'Order Cancelled' : 'Thank You for Your Order!'}
-          </h1>
-          <p className="text-gray-600">
-            Order <span className="font-semibold">{order.order_number}</span> •{' '}
-            {new Date(order.created_at).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}
+          <h2
+            className="text-2xl text-[#F5F1E8] mb-2"
+            style={{ fontFamily: customerAuthTheme.serif }}
+          >
+            {isCancelled ? 'Order cancelled' : 'Thank you for your order'}
+          </h2>
+          <p className="text-sm text-[#A8A29A]">
+            Order <span className="text-[#D4B88A] font-semibold">{order.order_number}</span>
+            {' · '}
+            {new Date(order.created_at).toLocaleDateString('en-US', {
+              month: 'long',
+              day: 'numeric',
+              year: 'numeric',
+            })}
           </p>
         </div>
 
-        {/* Status timeline */}
         {!isCancelled && (
-          <div className="bg-white rounded-xl shadow-sm border p-6 mb-6">
-            <h2 className="font-semibold mb-4">Order Status</h2>
+          <div className="rounded-2xl border px-5 py-6 shadow-[0_24px_80px_rgba(0,0,0,0.35)]" style={panelStyle}>
+            <h3 className="text-sm font-semibold tracking-wide uppercase text-[#BFA06A] mb-5">
+              Order status
+            </h3>
             <div className="flex items-center justify-between">
               {STATUS_STEPS.map((s, i) => {
                 const done = i <= currentIdx;
@@ -159,12 +231,24 @@ function OrderConfirmationContent() {
                 return (
                   <div key={s} className="flex flex-col items-center flex-1 relative">
                     {i > 0 && (
-                      <div className={`absolute top-4 right-1/2 w-full h-0.5 -z-0 ${i <= currentIdx ? 'bg-[#0f766e]' : 'bg-gray-200'}`} />
+                      <div
+                        className={`absolute top-4 right-1/2 w-full h-0.5 -z-0 ${
+                          i <= currentIdx ? 'bg-[#BFA06A]' : 'bg-white/10'
+                        }`}
+                      />
                     )}
-                    <div className={`w-8 h-8 rounded-full flex items-center justify-center z-10 ${done ? 'bg-[#0f766e] text-white' : 'bg-gray-200 text-gray-400'}`}>
+                    <div
+                      className={`w-8 h-8 rounded-full flex items-center justify-center z-10 border ${
+                        done
+                          ? 'bg-[#BFA06A] border-[#BFA06A] text-[#0C0C0E]'
+                          : 'bg-white/[0.04] border-white/15 text-[#78716C]'
+                      }`}
+                    >
                       <Icon className="w-4 h-4" />
                     </div>
-                    <span className="text-xs mt-2 text-center capitalize text-gray-600">{s.replace(/_/g, ' ')}</span>
+                    <span className="text-[10px] mt-2 text-center capitalize text-[#A8A29A] tracking-wide">
+                      {s.replace(/_/g, ' ')}
+                    </span>
                   </div>
                 );
               })}
@@ -172,68 +256,96 @@ function OrderConfirmationContent() {
           </div>
         )}
 
-        <div className="bg-white rounded-xl shadow-sm border p-6 mb-6">
-          <h2 className="font-semibold mb-4 flex items-center gap-2">
-            <Clock className="w-5 h-5 text-gray-500" />
+        <div className="rounded-2xl border px-5 py-6 shadow-[0_24px_80px_rgba(0,0,0,0.35)]" style={panelStyle}>
+          <h3 className="text-sm font-semibold tracking-wide uppercase text-[#BFA06A] mb-4 flex items-center gap-2">
+            <Clock className="w-4 h-4" />
             Timeline
-          </h2>
-          <ul className="space-y-3">
-            {(order.status_history || []).map((h, idx) => (
-              <li key={idx} className="text-sm text-gray-700 border-l-2 border-[#0f766e] pl-3">
-                <span className="font-medium capitalize">{h.status.replace(/_/g, ' ')}</span>
-                <span className="text-gray-500 ml-2">
-                  {h.timestamp ? new Date(h.timestamp).toLocaleString() : ''}
-                </span>
-              </li>
-            ))}
-          </ul>
+          </h3>
+          {(order.status_history || []).length === 0 ? (
+            <p className="text-sm text-[#A8A29A]">No status updates yet.</p>
+          ) : (
+            <ul className="space-y-3">
+              {(order.status_history || []).map((h, idx) => (
+                <li
+                  key={idx}
+                  className="text-sm text-[#E7E5E4] border-l-2 border-[#BFA06A]/70 pl-3"
+                >
+                  <span className="font-medium capitalize text-[#F5F1E8]">
+                    {h.status.replace(/_/g, ' ')}
+                  </span>
+                  <span className="text-[#78716C] ml-2">
+                    {h.timestamp ? new Date(h.timestamp).toLocaleString() : ''}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
         </div>
 
-        <div className="bg-white rounded-xl shadow-sm border p-6 mb-6">
-          <h2 className="font-semibold mb-4">Items</h2>
-          <ul className="divide-y">
+        <div className="rounded-2xl border px-5 py-6 shadow-[0_24px_80px_rgba(0,0,0,0.35)]" style={panelStyle}>
+          <h3 className="text-sm font-semibold tracking-wide uppercase text-[#BFA06A] mb-4">
+            Items
+          </h3>
+          <ul className="divide-y divide-white/10">
             {order.items.map((it, i) => (
-              <li key={i} className="py-3 flex justify-between text-sm">
-                <span>
-                  {it.product_name} × {it.quantity}
+              <li key={i} className="py-3 flex justify-between gap-3 text-sm">
+                <span className="text-[#E7E5E4]">
+                  {it.product_name}{' '}
+                  <span className="text-[#A8A29A]">× {it.quantity}</span>
                 </span>
-                <span className="font-medium">${it.subtotal.toFixed(2)}</span>
+                <span className="font-semibold text-[#D4B88A] tabular-nums">
+                  ${Number(it.subtotal).toFixed(2)}
+                </span>
               </li>
             ))}
           </ul>
-          <div className="mt-4 pt-4 border-t space-y-1 text-sm">
-            <div className="flex justify-between text-gray-600">
+          <div className="mt-4 pt-4 border-t border-white/10 space-y-2 text-sm">
+            <div className="flex justify-between text-[#A8A29A]">
               <span>Subtotal</span>
-              <span>${order.subtotal.toFixed(2)}</span>
+              <span className="tabular-nums">${Number(order.subtotal).toFixed(2)}</span>
             </div>
-            <div className="flex justify-between text-gray-600">
+            <div className="flex justify-between text-[#A8A29A]">
               <span>Tax</span>
-              <span>${order.tax_amount.toFixed(2)}</span>
+              <span className="tabular-nums">${Number(order.tax_amount).toFixed(2)}</span>
             </div>
-            <div className="flex justify-between font-semibold text-gray-900 pt-2">
+            <div className="flex justify-between font-semibold text-[#F5F1E8] pt-2">
               <span>Total</span>
-              <span>${order.total_amount.toFixed(2)}</span>
+              <span className="text-[#BFA06A] tabular-nums">
+                ${Number(order.total_amount).toFixed(2)}
+              </span>
             </div>
           </div>
         </div>
 
-        <div className="text-center">
+        <div className="flex flex-col sm:flex-row gap-2 justify-center pt-2">
           <button
             type="button"
-            onClick={() => router.push('/')}
-            className="text-[#0f766e] font-medium hover:underline"
+            onClick={() => router.push('/site')}
+            className={customerAuthUi.btnPrimary}
           >
             Continue shopping
           </button>
+          <Link href="/account/orders" className={`${customerAuthUi.btnGhost} text-center py-3`}>
+            My orders
+          </Link>
         </div>
       </div>
     </div>
   );
 }
 
+function LoadingShell() {
+  return (
+    <div className="min-h-screen flex flex-col items-center justify-center gap-3" style={pageShell} role="status">
+      <div className="animate-spin rounded-full h-9 w-9 border-2 border-[#BFA06A] border-t-transparent" />
+      <p className="text-sm text-[#A8A29A]">Loading…</p>
+    </div>
+  );
+}
+
 export default function OrderConfirmationPage() {
   return (
-    <Suspense fallback={<div className="min-h-screen flex items-center justify-center text-gray-500">Loading…</div>}>
+    <Suspense fallback={<LoadingShell />}>
       <OrderConfirmationContent />
     </Suspense>
   );
