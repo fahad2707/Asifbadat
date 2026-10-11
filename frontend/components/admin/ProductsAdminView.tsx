@@ -294,7 +294,7 @@ export function ProductsAdminView({ mode }: { mode: ProductsAdminMode }) {
       setSelectedIds(new Set());
       // Soft-delete on the server — remove from this list immediately so UI matches the toast.
       setProducts((prev) => prev.filter((p) => !ids.includes(String(p.id))));
-      setTotalCount((prev) => Math.max(0, prev - ids.length));
+      setTotalCount((prev) => Math.max(0, (prev ?? 0) - ids.length));
       await fetchProducts();
     } catch (err: unknown) {
       toast.error(formatApiError(err, 'Failed to delete'));
