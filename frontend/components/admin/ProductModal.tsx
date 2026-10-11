@@ -349,6 +349,7 @@ export default function ProductModal({ product, onClose, onSuccess }: ProductMod
     low_stock_threshold: 10,
   });
   const [loading, setLoading] = useState(false);
+  const [generatingSku, setGeneratingSku] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [imagePreview, setImagePreview] = useState<string | null>(null);
   const [showAddCategory, setShowAddCategory] = useState(false);
@@ -586,13 +587,57 @@ export default function ProductModal({ product, onClose, onSuccess }: ProductMod
         <form onSubmit={handleSubmit} className="p-6 space-y-4">
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">SKU / Barcode (scan or type UPC)</label>
-            <input
-              type="text"
-              value={formData.sku ?? ''}
-              onChange={(e) => setFormData({ ...formData, sku: e.target.value })}
-              placeholder="Scan barcode or enter vendor SKU / UPC"
-              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500"
-            />
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={formData.sku ?? ''}
+                onChange={(e) => setFormData({ ...formData, sku: e.target.value })}
+                placeholder="Scan barcode or enter vendor SKU / UPC"
+                className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 font-mono"
+              />
+              {product?.id && !(formData.sku || '').trim() && (
+                <button
+                  type="button"
+                  disabled={generatingSku}
+                  onClick={async () => {
+                    setGeneratingSku(true);
+                    try {
+                      const { data } = await adminApi.post(`/products/${product.id}/generate-internal-sku`);
+                      const sku = String(data?.sku || '').trim();
+                      if (!sku) {
+                        toast.error('Server did not return a SKU');
+                        return;
+                      }
+                      setFormData((f) => ({
+                        ...f,
+                        sku,
+                        product_id: data?.product_id ? String(data.product_id) : f.product_id,
+                      }));
+                      toast.success(data?.created ? `Internal SKU assigned: ${sku}` : `Existing SKU preserved: ${sku}`);
+                      onSuccess();
+                    } catch (err: unknown) {
+                      toast.error(formatApiError(err, 'Failed to generate internal SKU'));
+                    } finally {
+                      setGeneratingSku(false);
+                    }
+                  }}
+                  className="px-3 py-2 rounded-lg font-medium bg-black text-white hover:bg-[#2C2C2C] disabled:opacity-50 whitespace-nowrap text-sm"
+                >
+                  {generatingSku ? 'Generating…' : 'Generate internal SKU'}
+                </button>
+              )}
+            </div>
+            {product?.id && (formData.sku || '').trim() ? (
+              <p className="text-xs text-gray-500 mt-1">
+                Existing manufacturer/vendor SKU is preserved. Internal codes use format {'EDI-<product ID>'} and are not UPC/EAN/GTIN.
+              </p>
+            ) : product?.id ? (
+              <p className="text-xs text-gray-500 mt-1">
+                No SKU yet. Generate assigns {'EDI-<product ID>'} for scanning — does not invent a retail UPC.
+              </p>
+            ) : (
+              <p className="text-xs text-gray-500 mt-1">Save the product first, then you can generate an internal SKU if none is entered.</p>
+            )}
           </div>
 
           <div>

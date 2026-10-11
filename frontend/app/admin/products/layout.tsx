@@ -17,11 +17,17 @@ export default function ProductsSectionLayout({ children }: { children: React.Re
   return (
     <div className="space-y-6">
       <nav className="flex flex-wrap gap-2.5 border-b border-white/5 pb-4" aria-label="Product lists">
-        <Link href="/admin/products/active" className={tabClass(!isInactive)}>
+        <Link href="/admin/products/active" className={tabClass(!isInactive && !pathname?.includes('/labels'))}>
           Active Products Index
         </Link>
-        <Link href="/admin/products/inactive" className={tabClass(isInactive)}>
+        <Link href="/admin/products/inactive" className={tabClass(!!isInactive)}>
           Inactive / Archived Products
+        </Link>
+        <Link
+          href="/admin/products/labels"
+          className={tabClass(!!pathname?.includes('/admin/products/labels'))}
+        >
+          Print labels
         </Link>
       </nav>
       {children}

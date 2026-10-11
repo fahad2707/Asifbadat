@@ -46,6 +46,7 @@
   "dependencies": {
     "@aws-sdk/client-s3": "^3.490.0",
     "bcryptjs": "^2.4.3",
+    "bwip-js": "^4.11.4",
     "cloudinary": "^2.9.0",
     "cors": "^2.8.5",
     "csv-parse": "^6.1.0",
@@ -60,13 +61,14 @@
     "pdfkit": "^0.14.0",
     "stripe": "^14.7.0",
     "twilio": "^4.19.0",
+    "typescript": "5.6.3",
     "uuid": "^9.0.1",
     "xlsx": "^0.18.5",
-    "zod": "^3.22.4",
-    "typescript": "5.6.3"
+    "zod": "^3.22.4"
   },
   "devDependencies": {
     "@types/bcryptjs": "^2.4.6",
+    "@types/bwip-js": "^3.2.3",
     "@types/cors": "^2.8.17",
     "@types/express": "^4.17.21",
     "@types/jsonwebtoken": "^9.0.5",

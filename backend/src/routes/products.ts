@@ -14,7 +14,9 @@ import {
 import { z } from 'zod';
 import { buildPreview, executeImport } from '../services/productImportService';
 import {
+  ensureInternalSkuForProduct,
   generateProductId,
+  InternalSkuError,
   migrateProductIdAndSku,
 } from '../utils/productCodes';
 import { toPublicProduct, toStaffProduct } from '../utils/productProjection';
@@ -25,6 +27,13 @@ import {
   shouldWriteOpeningStockMovement,
   writeOpeningStockMovement,
 } from '../utils/openingStockMovement';
+import {
+  LabelPdfError,
+  buildProductLabelsPdf,
+  resolveLabelsFromProducts,
+  validateLabelRequestItems,
+} from '../utils/productLabelPdf';
+import { sendPdfResponse } from '../utils/pdfHelpers';
 
 /**
  * Any response that contains internal product fields (cost_price, vendor_id,
@@ -249,6 +258,72 @@ router.get('/', optionalAuthenticateAdmin, optionalAuthenticateUser, async (req:
   } catch (error) {
     console.error('Get products error:', error);
     res.status(500).json({ error: 'Failed to fetch products' });
+  }
+});
+
+/**
+ * Admin: print-ready PDF of 2×1" warehouse labels (Code 128 of stored sku).
+ * Must be registered before /:id routes so "labels" is not treated as an id.
+ */
+router.post('/labels/pdf', authenticateAdmin, async (req: AuthRequest, res) => {
+  try {
+    markStaffPrivate(res);
+    const items = validateLabelRequestItems(req.body?.items);
+    const ids = items.map((i) => i.product_id);
+    for (const id of ids) {
+      if (!mongoose.isValidObjectId(id)) {
+        throw new LabelPdfError(400, `Invalid product id: ${id}`);
+      }
+    }
+    const docs = await Product.find({ _id: { $in: ids } })
+      .select('_id name sku product_id')
+      .lean();
+    const byId = new Map(
+      (docs as { _id: { toString: () => string }; name?: string; sku?: string; product_id?: string }[]).map((d) => [
+        d._id.toString(),
+        {
+          id: d._id.toString(),
+          name: d.name,
+          sku: d.sku,
+          product_id: d.product_id,
+        },
+      ])
+    );
+    const labels = resolveLabelsFromProducts(items, byId);
+    const { buffer, labelCount } = await buildProductLabelsPdf(labels);
+    sendPdfResponse(res, buffer, `product-labels-${labelCount}.pdf`);
+  } catch (e: unknown) {
+    if (e instanceof LabelPdfError) {
+      return res.status(e.status).json({ error: e.message });
+    }
+    console.error('Product labels PDF error:', e);
+    res.status(500).json({ error: 'Failed to generate product labels' });
+  }
+});
+
+/**
+ * Admin: assign internal scannable SKU (EDI-<product_id>) when sku is blank.
+ * Idempotent — never overwrites a manufacturer/vendor SKU. Does not write barcode/plu.
+ */
+router.post('/:id/generate-internal-sku', authenticateAdmin, async (req: AuthRequest, res) => {
+  try {
+    markStaffPrivate(res);
+    const result = await ensureInternalSkuForProduct(String(req.params.id || ''));
+    res.json({
+      id: result.id,
+      product_id: result.product_id,
+      sku: result.sku,
+      created: result.created,
+      message: result.created
+        ? `Internal SKU ${result.sku} assigned`
+        : `Existing SKU preserved: ${result.sku}`,
+    });
+  } catch (e: unknown) {
+    if (e instanceof InternalSkuError) {
+      return res.status(e.status).json({ error: e.message });
+    }
+    console.error('Generate internal SKU error:', e);
+    res.status(500).json({ error: 'Failed to generate internal SKU' });
   }
 });
 

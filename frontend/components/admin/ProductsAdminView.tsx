@@ -17,6 +17,7 @@ import {
   RotateCcw,
   ChevronLeft,
   ChevronRight,
+  Printer,
 } from 'lucide-react';
 import adminApi, { uploadApi } from '@/lib/admin-api';
 import { isAdminAuthRedirectError } from '@/lib/admin-auth-redirect';
@@ -780,6 +781,17 @@ export function ProductsAdminView({ mode }: { mode: ProductsAdminMode }) {
               </button>
             </div>
             <div className="flex items-center gap-2 flex-wrap">
+              <button
+                type="button"
+                onClick={() => {
+                  const ids = Array.from(selectedIds).slice(0, 50);
+                  router.push(`/admin/products/labels?ids=${ids.map(encodeURIComponent).join(',')}`);
+                }}
+                className="inline-flex items-center gap-2 px-3 py-2 bg-slate-950/40 border border-white/10 hover:bg-white/5 text-slate-300 rounded-lg text-xs font-semibold"
+              >
+                <Printer className="w-3.5 h-3.5 text-teal-400" />
+                Print labels
+              </button>
               <button
                 type="button"
                 onClick={handleExportSelected}

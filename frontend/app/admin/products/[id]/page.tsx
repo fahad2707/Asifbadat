@@ -53,6 +53,7 @@ export default function Product360Page() {
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<TabId>('overview');
   const [showEditModal, setShowEditModal] = useState(false);
+  const [generatingSku, setGeneratingSku] = useState(false);
 
   const fetchProductData = async () => {
     if (!id) return;
@@ -97,12 +98,20 @@ export default function Product360Page() {
         <Link href="/admin/products/active" className="inline-flex items-center gap-1.5 text-xs font-medium text-slate-400 hover:text-white transition-colors">
           <ChevronLeft className="w-4 h-4" /> Products Directory
         </Link>
-        <button
-          onClick={() => setShowEditModal(true)}
-          className="inline-flex items-center gap-2 px-3.5 py-2.5 bg-[#0F9F8F] hover:bg-[#0B8275] border-transparent active:scale-[0.98] rounded-xl text-xs font-bold text-white transition-all shadow-md shadow-teal-500/10 cursor-pointer"
-        >
-          <Edit className="w-4 h-4" /> Edit Specifications
-        </button>
+        <div className="flex items-center gap-2">
+          <Link
+            href={`/admin/products/labels?ids=${encodeURIComponent(product.id)}`}
+            className="inline-flex items-center gap-2 px-3.5 py-2.5 bg-white border border-[#CBD5E1] hover:bg-[#F1F5F9] rounded-md text-xs font-medium text-[#334155]"
+          >
+            Print label
+          </Link>
+          <button
+            onClick={() => setShowEditModal(true)}
+            className="inline-flex items-center gap-2 px-3.5 py-2.5 bg-[#0F9F8F] hover:bg-[#0B8275] border-transparent active:scale-[0.98] rounded-xl text-xs font-bold text-white transition-all shadow-md shadow-teal-500/10 cursor-pointer"
+          >
+            <Edit className="w-4 h-4" /> Edit Specifications
+          </button>
+        </div>
       </div>
 
       {/* Product Header Card (iOS glassmorphism) */}
@@ -126,7 +135,43 @@ export default function Product360Page() {
                   ABC Rank A
                 </span>
               </div>
-              <p className="text-xs text-slate-500 mt-1">Item ID: {product.product_id || '90123'} | SKU: {product.sku || 'N/A'}</p>
+              <p className="text-xs text-slate-500 mt-1">
+                Item ID: <span className="font-mono text-slate-300">{product.product_id || '—'}</span>
+                {' · '}
+                SKU: <span className="font-mono text-slate-300">{product.sku?.trim() || '—'}</span>
+              </p>
+              {product.sku?.trim() ? (
+                <p className="text-[11px] text-slate-500 mt-2">
+                  Manufacturer/vendor SKU is preserved. Internal codes use {'EDI-<product ID>'} (not UPC/EAN/GTIN).
+                </p>
+              ) : (
+                <div className="mt-3 flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    disabled={generatingSku || !product.id}
+                    onClick={async () => {
+                      setGeneratingSku(true);
+                      try {
+                        const { data } = await adminApi.post(`/products/${product.id}/generate-internal-sku`);
+                        toast.success(
+                          data?.created
+                            ? `Internal SKU assigned: ${data.sku}`
+                            : `Existing SKU preserved: ${data.sku}`
+                        );
+                        await fetchProductData();
+                      } catch {
+                        toast.error('Failed to generate internal SKU');
+                      } finally {
+                        setGeneratingSku(false);
+                      }
+                    }}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-black text-white text-xs font-medium hover:bg-[#2C2C2C] disabled:opacity-50"
+                  >
+                    {generatingSku ? 'Generating…' : 'Generate internal SKU'}
+                  </button>
+                  <span className="text-[11px] text-slate-500">Assigns {'EDI-<product ID>'} for scanning when no SKU exists.</span>
+                </div>
+              )}
               
               <div className="flex items-center gap-3 mt-4 text-[11px] text-slate-400">
                 <span>Tax type: <span className="font-semibold text-slate-200">{productTaxLabel(product)}</span></span>
@@ -200,22 +245,11 @@ export default function Product360Page() {
             <div className="space-y-4">
               <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest pb-1.5 border-b border-white/5">Catalog Specifications</h3>
               <div className="grid grid-cols-2 gap-4">
-                <div><span className="text-slate-500 block text-[11px]">SKU Number</span><span className="font-mono text-slate-200">{product.sku || 'N/A'}</span></div>
-                <div><span className="text-slate-500 block text-[11px]">Product Code</span><span className="font-mono text-slate-200">{product.product_id || '90123'}</span></div>
-                <div><span className="text-slate-500 block text-[11px]">Primary Brand</span><span className="font-semibold text-slate-200">Express House Brand</span></div>
+                <div><span className="text-slate-500 block text-[11px]">SKU / barcode</span><span className="font-mono text-slate-200">{product.sku?.trim() || '—'}</span></div>
+                <div><span className="text-slate-500 block text-[11px]">Product ID</span><span className="font-mono text-slate-200">{product.product_id || '—'}</span></div>
                 <div><span className="text-slate-500 block text-[11px]">Tax type</span><span className="font-semibold text-slate-200">{productTaxLabel(product)}</span></div>
               </div>
-              <div className="pt-2"><span className="text-slate-500 block text-[11px]">Sales Description</span><span className="text-slate-200 text-xs">{product.description || 'Standard corporate catalog component.'}</span></div>
-            </div>
-
-            <div className="space-y-4">
-              <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest pb-1.5 border-b border-white/5">Product Meta details</h3>
-              <div className="grid grid-cols-2 gap-4">
-                <div><span className="text-slate-500 block text-[11px]">Weight</span><span className="font-semibold text-slate-200">1.25 lbs / unit</span></div>
-                <div><span className="text-slate-500 block text-[11px]">Country Orgin</span><span className="font-semibold text-slate-200">United States</span></div>
-                <div><span className="text-slate-500 block text-[11px]">Harmonized HSN</span><span className="font-mono text-xs text-slate-200">8544-4290</span></div>
-                <div><span className="text-slate-500 block text-[11px]">UPC Barcode</span><span className="font-mono text-xs text-slate-200">719283018273</span></div>
-              </div>
+              <div className="pt-2"><span className="text-slate-500 block text-[11px]">Sales Description</span><span className="text-slate-200 text-xs">{product.description || '—'}</span></div>
             </div>
           </div>
         )}
