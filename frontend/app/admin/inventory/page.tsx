@@ -3,7 +3,7 @@
 import { Suspense, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { Package, Search, Trash2, X } from 'lucide-react';
+import { ArrowDown, Package, Search, Trash2, X } from 'lucide-react';
 import adminApi from '@/lib/admin-api';
 import toast from 'react-hot-toast';
 import { StockAttentionBanner } from '@/components/admin/StockAttentionBanner';
@@ -36,6 +36,12 @@ interface SubCategory {
   id: string;
   name: string;
   category_id: string;
+}
+
+interface PriceGroupOption {
+  id: string;
+  name: string;
+  product_count?: number;
 }
 
 interface AdjustLine {
@@ -164,6 +170,11 @@ function InventoryPageInner() {
   const [adjustScan, setAdjustScan] = useState('');
   const [adjustNotes, setAdjustNotes] = useState('');
   const [adjustSaving, setAdjustSaving] = useState(false);
+  const [priceGroups, setPriceGroups] = useState<PriceGroupOption[]>([]);
+  const [selectedPriceGroupId, setSelectedPriceGroupId] = useState('');
+  const [showNewPriceGroupModal, setShowNewPriceGroupModal] = useState(false);
+  const [newPriceGroupName, setNewPriceGroupName] = useState('');
+  const [priceGroupLoading, setPriceGroupLoading] = useState(false);
   const adjustSavingRef = useRef(false);
   const adjustScanRef = useRef<HTMLInputElement>(null);
   const [showCountModal, setShowCountModal] = useState(false);
@@ -186,6 +197,7 @@ function InventoryPageInner() {
     item_subcategory: '',
     item_name: '',
     reorder_level: '10',
+    physical_count: '' as number | '',
   });
 
   const fetchProducts = async () => {
@@ -239,6 +251,22 @@ function InventoryPageInner() {
     }
   };
 
+  const fetchPriceGroups = async () => {
+    try {
+      const res = await adminApi.get('/price-groups');
+      const groups = Array.isArray(res.data) ? res.data : [];
+      setPriceGroups(
+        groups.map((g: PriceGroupOption) => ({
+          id: String(g.id),
+          name: g.name || '',
+          product_count: g.product_count,
+        }))
+      );
+    } catch {
+      setPriceGroups([]);
+    }
+  };
+
   useEffect(() => {
     (async () => {
       setLoading(true);
@@ -258,14 +286,108 @@ function InventoryPageInner() {
     setAdjustLines(Array.from({ length: ADJUST_LINES }, emptyAdjustLine));
     setAdjustScan('');
     setAdjustNotes('');
+    setSelectedPriceGroupId('');
     setShowAdjustModal(true);
+    void fetchPriceGroups();
     window.setTimeout(() => adjustScanRef.current?.focus(), 50);
   };
 
   const closeAdjust = () => {
     if (adjustSaving) return;
     setShowAdjustModal(false);
+    setSelectedPriceGroupId('');
     if (searchParams.get('adjust') === '1') router.replace('/admin/inventory');
+  };
+
+  const loadPriceGroupIntoAdjust = async (groupId: string) => {
+    if (!groupId) return;
+    setPriceGroupLoading(true);
+    try {
+      const { data } = await adminApi.get<{
+        id: string;
+        name: string;
+        products: Array<{
+          id: string;
+          name: string;
+          sku?: string;
+          stock_quantity?: number;
+          cost_price?: number;
+          price?: number;
+        }>;
+      }>(`/price-groups/${groupId}`);
+      const products = data.products || [];
+      if (products.length === 0) {
+        toast.error(`"${data.name}" has no products yet. Add products from the Products page.`);
+        setAdjustLines(Array.from({ length: ADJUST_LINES }, emptyAdjustLine));
+        return;
+      }
+      const lines: AdjustLine[] = products.map((p) => ({
+        product_id: p.id,
+        product_name: p.name,
+        sku: p.sku || '',
+        current_stock: p.stock_quantity ?? 0,
+        quantity_change: 0,
+        ...pricesFromProduct(p),
+      }));
+      // Keep at least one empty row for manual adds
+      lines.push(emptyAdjustLine());
+      setAdjustLines(lines);
+      toast.success(`Loaded ${products.length} product(s) from "${data.name}"`);
+    } catch (err: any) {
+      toast.error(err.response?.data?.error || 'Failed to load price group');
+    } finally {
+      setPriceGroupLoading(false);
+    }
+  };
+
+  const handlePriceGroupSelect = (value: string) => {
+    if (value === '__new__') {
+      setNewPriceGroupName('');
+      setShowNewPriceGroupModal(true);
+      return;
+    }
+    setSelectedPriceGroupId(value);
+    if (value) void loadPriceGroupIntoAdjust(value);
+  };
+
+  const createPriceGroupFromAdjust = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const name = newPriceGroupName.trim();
+    if (!name) {
+      toast.error('Enter a price group name');
+      return;
+    }
+    try {
+      const { data } = await adminApi.post<PriceGroupOption>('/price-groups', { name });
+      setPriceGroups((prev) => [...prev, { id: data.id, name: data.name, product_count: 0 }].sort((a, b) => a.name.localeCompare(b.name)));
+      setSelectedPriceGroupId(data.id);
+      setShowNewPriceGroupModal(false);
+      setNewPriceGroupName('');
+      toast.success(`Created price group "${data.name}"`);
+      setAdjustLines(Array.from({ length: ADJUST_LINES }, emptyAdjustLine));
+    } catch (err: any) {
+      toast.error(err.response?.data?.error || 'Failed to create price group');
+    }
+  };
+
+  const fillDownCostPrice = () => {
+    const first = adjustLines.find((l) => l.product_id);
+    if (!first || first.cost_price === '') {
+      toast.error('Set a cost price on the first product first');
+      return;
+    }
+    const value = first.cost_price;
+    setAdjustLines((prev) => prev.map((l) => (l.product_id ? { ...l, cost_price: value } : l)));
+  };
+
+  const fillDownSellingPrice = () => {
+    const first = adjustLines.find((l) => l.product_id);
+    if (!first || first.selling_price === '') {
+      toast.error('Set a selling price on the first product first');
+      return;
+    }
+    const value = first.selling_price;
+    setAdjustLines((prev) => prev.map((l) => (l.product_id ? { ...l, selling_price: value } : l)));
   };
 
   const openCount = () => {
@@ -333,6 +455,28 @@ function InventoryPageInner() {
           sub_category_id: form.item_subcategory || undefined,
           low_stock_threshold: parseInt(form.reorder_level, 10) || 10,
         });
+
+        if (form.physical_count !== '') {
+          const counted = Math.trunc(Number(form.physical_count));
+          if (!Number.isFinite(counted) || counted < 0) {
+            toast.error('Physical count must be a whole number 0 or greater');
+            return;
+          }
+          const current = editing.stock_quantity ?? 0;
+          if (counted !== current) {
+            await adminApi.post('/inventory/physical-count', {
+              lines: [
+                {
+                  product_id: editing.id,
+                  counted_quantity: counted,
+                  expected_current_quantity: current,
+                },
+              ],
+              reason: 'PHYSICAL_COUNT',
+            });
+          }
+        }
+
         toast.success('Item updated');
       } else {
         await adminApi.post('/products', {
@@ -348,8 +492,17 @@ function InventoryPageInner() {
       }
       setShowItemModal(false);
       setEditing(null);
-      setForm({ item_id: '', item_type: '', item_category: '', item_subcategory: '', item_name: '', reorder_level: '10' });
+      setForm({
+        item_id: '',
+        item_type: '',
+        item_category: '',
+        item_subcategory: '',
+        item_name: '',
+        reorder_level: '10',
+        physical_count: '',
+      });
       fetchProducts();
+      fetchMovementSummary();
     } catch (err: any) {
       toast.error(err.response?.data?.error || 'Failed to save');
     }
@@ -364,6 +517,7 @@ function InventoryPageInner() {
       item_subcategory: item.sub_category_id || '',
       item_name: item.name,
       reorder_level: String(item.low_stock_threshold ?? 10),
+      physical_count: '',
     });
     setShowItemModal(true);
   };
@@ -883,9 +1037,26 @@ function InventoryPageInner() {
                   </button>
                   . Columns: current stock, adjustment qty (the change), new stock.
                 </div>
-                <div className="flex items-center gap-2">
-                  <label className="block text-sm font-medium text-gray-700">Product or service</label>
-                  <div className="flex-1 flex gap-2 items-center">
+                <div className="flex flex-wrap items-end gap-3">
+                  <div className="min-w-[220px]">
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Price group</label>
+                    <select
+                      value={selectedPriceGroupId}
+                      onChange={(e) => handlePriceGroupSelect(e.target.value)}
+                      disabled={priceGroupLoading}
+                      className="w-full border border-gray-300 rounded-lg px-3 py-1.5 text-sm bg-white disabled:opacity-50"
+                    >
+                      <option value="">Select price group…</option>
+                      <option value="__new__">+ Add price group</option>
+                      {priceGroups.map((g) => (
+                        <option key={g.id} value={g.id}>
+                          {g.name}{g.product_count != null ? ` (${g.product_count})` : ''}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="flex-1 flex items-center gap-2 min-w-[280px]">
+                    <label className="block text-sm font-medium text-gray-700 shrink-0">Product or service</label>
                     <input
                       ref={adjustScanRef}
                       type="text"
@@ -899,7 +1070,7 @@ function InventoryPageInner() {
                       placeholder="Scan barcode / item ID and press Enter"
                       className="flex-1 max-w-xs pl-3 py-1.5 border border-gray-300 rounded-lg text-sm"
                     />
-                    <Link href="/admin/products/new" className="text-sm text-[#0F9F8F] font-medium hover:underline">+ Add product</Link>
+                    <Link href="/admin/products/new" className="text-sm text-[#0F9F8F] font-medium hover:underline whitespace-nowrap">+ Add product</Link>
                   </div>
                 </div>
                 <div className="border border-gray-200 rounded-lg overflow-x-auto">
@@ -912,8 +1083,32 @@ function InventoryPageInner() {
                         <th className="text-right py-3 px-4 w-28">Current stock</th>
                         <th className="text-right py-3 px-4 w-32">Adjustment qty</th>
                         <th className="text-right py-3 px-4 w-28">New stock</th>
-                        <th className="text-right py-3 px-4 w-32">Cost price</th>
-                        <th className="text-right py-3 px-4 w-32">Selling price</th>
+                        <th className="text-right py-3 px-4 w-36">
+                          <span className="inline-flex items-center justify-end gap-1 w-full">
+                            Cost price
+                            <button
+                              type="button"
+                              title="Apply first cost price to all rows"
+                              onClick={fillDownCostPrice}
+                              className="p-0.5 rounded hover:bg-gray-200 text-gray-600"
+                            >
+                              <ArrowDown className="w-3.5 h-3.5" />
+                            </button>
+                          </span>
+                        </th>
+                        <th className="text-right py-3 px-4 w-36">
+                          <span className="inline-flex items-center justify-end gap-1 w-full">
+                            Selling price
+                            <button
+                              type="button"
+                              title="Apply first selling price to all rows"
+                              onClick={fillDownSellingPrice}
+                              className="p-0.5 rounded hover:bg-gray-200 text-gray-600"
+                            >
+                              <ArrowDown className="w-3.5 h-3.5" />
+                            </button>
+                          </span>
+                        </th>
                         <th className="w-12 px-4" />
                       </tr>
                     </thead>
@@ -1378,12 +1573,79 @@ function InventoryPageInner() {
                 <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">Reorder Buffer Target (Qty) *</label>
                 <NumberInput min={0} value={form.reorder_level} onValueChange={(n) => setForm((f) => ({ ...f, reorder_level: n === '' ? '' : String(n) }))} className="w-full bg-slate-950/60 border border-white/10 rounded-xl px-4 py-2 text-xs text-slate-200 focus:outline-none" />
               </div>
+              {editing && (
+                <div className="grid grid-cols-3 gap-3 pt-2 border-t border-white/5">
+                  <div>
+                    <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">Current system count</label>
+                    <div className="w-full bg-slate-950/40 border border-white/10 rounded-xl px-4 py-2 text-xs text-slate-300 font-mono">
+                      {editing.stock_quantity ?? 0}
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">Physical count</label>
+                    <NumberInput
+                      min={0}
+                      step={1}
+                      value={form.physical_count}
+                      onValueChange={(n) => setForm((f) => ({ ...f, physical_count: n === '' ? '' : n }))}
+                      placeholder="Enter count"
+                      className="w-full bg-slate-950/60 border border-white/10 rounded-xl px-4 py-2 text-xs text-slate-200 focus:outline-none"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">Difference</label>
+                    <div
+                      className={`w-full bg-slate-950/40 border border-white/10 rounded-xl px-4 py-2 text-xs font-mono font-semibold ${
+                        (() => {
+                          const preview = physicalCountPreview(editing.stock_quantity ?? 0, form.physical_count);
+                          if (preview.difference == null) return 'text-slate-500';
+                          if (preview.difference > 0) return 'text-emerald-400';
+                          if (preview.difference < 0) return 'text-rose-400';
+                          return 'text-slate-300';
+                        })()
+                      }`}
+                    >
+                      {(() => {
+                        const preview = physicalCountPreview(editing.stock_quantity ?? 0, form.physical_count);
+                        return preview.difference == null ? '—' : formatStockDifference(preview.difference);
+                      })()}
+                    </div>
+                  </div>
+                </div>
+              )}
               <div className="flex justify-end gap-2.5 pt-4 border-t border-white/5">
                 <button type="button" onClick={() => setShowItemModal(false)} className="px-4 py-2.5 bg-slate-800 border border-white/5 text-slate-400 hover:text-white rounded-xl text-xs font-semibold">
                   Close
                 </button>
                 <button type="submit" className="px-4 py-2.5 bg-[#0F9F8F] hover:bg-[#0B8275] border-transparent text-white rounded-xl text-xs font-bold transition-all shadow-sm">
                   Save Item
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {showNewPriceGroupModal && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-4" onClick={() => setShowNewPriceGroupModal(false)}>
+          <div className="bg-white rounded-xl shadow-xl max-w-sm w-full p-5" onClick={(e) => e.stopPropagation()}>
+            <h3 className="text-lg font-bold text-gray-900 mb-1">Add price group</h3>
+            <p className="text-sm text-gray-500 mb-4">Name the group, then add products from the Products page.</p>
+            <form onSubmit={createPriceGroupFromAdjust}>
+              <input
+                type="text"
+                value={newPriceGroupName}
+                onChange={(e) => setNewPriceGroupName(e.target.value)}
+                placeholder="Price group name…"
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm mb-4"
+                autoFocus
+              />
+              <div className="flex justify-end gap-2">
+                <button type="button" onClick={() => setShowNewPriceGroupModal(false)} className="px-4 py-2 text-gray-700 hover:bg-gray-100 rounded-lg text-sm">
+                  Cancel
+                </button>
+                <button type="submit" className="px-4 py-2 bg-black text-white rounded-lg text-sm hover:bg-[#2C2C2C]">
+                  Create
                 </button>
               </div>
             </form>

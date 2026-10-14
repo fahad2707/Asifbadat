@@ -60,6 +60,12 @@ interface SubCategoryOption {
   category_id: string;
 }
 
+interface PriceGroupOption {
+  id: string;
+  name: string;
+  product_count?: number;
+}
+
 interface PreviewRow {
   rowIndex: number;
   data: {
@@ -120,6 +126,10 @@ export function ProductsAdminView({ mode }: { mode: ProductsAdminMode }) {
   const [taxTypes, setTaxTypes] = useState<TaxTypeOption[]>([]);
   const [bulkTaxTypeId, setBulkTaxTypeId] = useState('');
   const [bulkTaxAssigning, setBulkTaxAssigning] = useState(false);
+  const [priceGroups, setPriceGroups] = useState<PriceGroupOption[]>([]);
+  const [bulkPriceGroupId, setBulkPriceGroupId] = useState('');
+  const [bulkPriceGroupName, setBulkPriceGroupName] = useState('');
+  const [bulkPriceGroupAssigning, setBulkPriceGroupAssigning] = useState(false);
   const [togglingId, setTogglingId] = useState<string | null>(null);
   const [categoryFilter, setCategoryFilter] = useState('');
   const [page, setPage] = useState(1);
@@ -175,6 +185,20 @@ export function ProductsAdminView({ mode }: { mode: ProductsAdminMode }) {
         return;
       }
       toast.error('Failed to load categories');
+    }
+    try {
+      const pgRes = await adminApi.get('/price-groups');
+      const groups = Array.isArray(pgRes.data) ? pgRes.data : [];
+      setPriceGroups(
+        groups.map((g: PriceGroupOption) => ({
+          id: String(g.id),
+          name: g.name || '',
+          product_count: g.product_count,
+        }))
+      );
+    } catch (e) {
+      if (isAdminAuthRedirectError(e)) return;
+      setPriceGroups([]);
     }
   };
 
@@ -358,6 +382,53 @@ export function ProductsAdminView({ mode }: { mode: ProductsAdminMode }) {
       toast.error(formatApiError(err, 'Failed to assign category'));
     } finally {
       setBulkAssigning(false);
+    }
+  };
+
+  const handleBulkAssignPriceGroup = async () => {
+    if (selectedIds.size === 0) {
+      toast.error('Select products first');
+      return;
+    }
+    const ids = Array.from(selectedIds);
+    const creatingNew = bulkPriceGroupId === '__new__';
+    if (creatingNew && !bulkPriceGroupName.trim()) {
+      toast.error('Enter a name for the new price group');
+      return;
+    }
+    if (!creatingNew && !bulkPriceGroupId) {
+      toast.error('Select a price group or create a new one');
+      return;
+    }
+    const label = creatingNew
+      ? bulkPriceGroupName.trim()
+      : priceGroups.find((g) => g.id === bulkPriceGroupId)?.name || 'price group';
+    if (!confirm(`Add ${selectedIds.size} selected product(s) to price group "${label}"?`)) {
+      return;
+    }
+    setBulkPriceGroupAssigning(true);
+    try {
+      if (creatingNew) {
+        const { data } = await adminApi.post<PriceGroupOption>('/price-groups', {
+          name: bulkPriceGroupName.trim(),
+          product_ids: ids,
+        });
+        toast.success(`Created "${data.name}" with ${ids.length} product(s)`);
+      } else {
+        const { data } = await adminApi.post<{ added: number; name: string }>(
+          `/price-groups/${bulkPriceGroupId}/products`,
+          { product_ids: ids }
+        );
+        toast.success(`Added ${data.added} product(s) to "${data.name || label}"`);
+      }
+      setBulkPriceGroupId('');
+      setBulkPriceGroupName('');
+      setSelectedIds(new Set());
+      await fetchTaxonomy();
+    } catch (err: unknown) {
+      toast.error(formatApiError(err, 'Failed to update price group'));
+    } finally {
+      setBulkPriceGroupAssigning(false);
     }
   };
 
@@ -780,6 +851,48 @@ export function ProductsAdminView({ mode }: { mode: ProductsAdminMode }) {
                 {bulkTaxAssigning ? 'Applying…' : 'Apply'}
               </button>
             </div>
+            {mode === 'active' && (
+            <div className="flex flex-wrap items-center gap-2 p-2 border border-white/5 bg-slate-950/40 rounded-xl w-full lg:w-auto">
+              <span className="text-slate-350 shrink-0">Price group:</span>
+              <select
+                value={bulkPriceGroupId}
+                onChange={(e) => {
+                  setBulkPriceGroupId(e.target.value);
+                  if (e.target.value !== '__new__') setBulkPriceGroupName('');
+                }}
+                className="border border-white/10 rounded-lg px-2.5 py-1 bg-slate-950/60 font-medium text-white focus:outline-none focus:ring-1 focus:ring-teal-500"
+              >
+                <option value="">Select price group…</option>
+                <option value="__new__">+ Add price group</option>
+                {priceGroups.map((g) => (
+                  <option key={g.id} value={g.id}>
+                    {g.name}{g.product_count != null ? ` (${g.product_count})` : ''}
+                  </option>
+                ))}
+              </select>
+              {bulkPriceGroupId === '__new__' && (
+                <input
+                  type="text"
+                  value={bulkPriceGroupName}
+                  onChange={(e) => setBulkPriceGroupName(e.target.value)}
+                  placeholder="New group name…"
+                  className="border border-white/10 rounded-lg px-2.5 py-1 bg-slate-950/60 font-medium text-white focus:outline-none focus:ring-1 focus:ring-teal-500 min-w-[140px]"
+                />
+              )}
+              <button
+                type="button"
+                disabled={
+                  bulkPriceGroupAssigning ||
+                  !bulkPriceGroupId ||
+                  (bulkPriceGroupId === '__new__' && !bulkPriceGroupName.trim())
+                }
+                onClick={handleBulkAssignPriceGroup}
+                className="bg-teal-600 hover:bg-teal-500 text-white px-3 py-1.5 rounded-lg border border-white/10 font-bold whitespace-nowrap active:scale-95 disabled:opacity-40 transition-all cursor-pointer"
+              >
+                {bulkPriceGroupAssigning ? 'Applying…' : `Add ${selectedIds.size}`}
+              </button>
+            </div>
+            )}
             <div className="flex items-center gap-2 flex-wrap">
               <button
                 type="button"
