@@ -649,7 +649,7 @@ test('email failure after unlinked match still completes registration', async ()
   assert.deepEqual(apps.deletedUserIds, []);
 });
 
-test('application insert failure rolls back User/Customer and does not succeed', async () => {
+test('application insert failure still completes registration', async () => {
   assertNoMongoConnection();
   delete process.env.SMTP_USER;
   delete process.env.SMTP_PASS;
@@ -665,10 +665,8 @@ test('application insert failure rolls back User/Customer and does not succeed',
     ...doc,
   }));
 
-  let deletedCustomer = false;
   mock.method(Customer, 'deleteOne', async () => {
-    deletedCustomer = true;
-    return { deletedCount: 1 };
+    throw new Error('must not roll back Customer after application insert failure');
   });
   let userDeleted = false;
   mock.method(User, 'findByIdAndDelete', async () => {
@@ -685,13 +683,12 @@ test('application insert failure rolls back User/Customer and does not succeed',
       password: 'password12',
     });
 
-  assert.equal(res.status, 500);
-  assert.equal(userDeleted, true);
-  assert.equal(deletedCustomer, true);
-  assert.equal(res.body.token, undefined);
+  assert.equal(res.status, 201);
+  assert.ok(res.body.token);
+  assert.equal(userDeleted, false);
 });
 
-test('duplicate application for same User fails registration safely', async () => {
+test('duplicate application for same User still completes registration', async () => {
   assertNoMongoConnection();
   delete process.env.SMTP_USER;
   delete process.env.SMTP_PASS;
@@ -709,7 +706,9 @@ test('duplicate application for same User fails registration safely', async () =
     _id: { toString: () => CUSTOMER_ID },
     ...doc,
   }));
-  mock.method(Customer, 'deleteOne', async () => ({ deletedCount: 1 }));
+  mock.method(Customer, 'deleteOne', async () => {
+    throw new Error('must not roll back Customer after duplicate application');
+  });
   let userDeleted = false;
   mock.method(User, 'findByIdAndDelete', async () => {
     userDeleted = true;
@@ -725,9 +724,9 @@ test('duplicate application for same User fails registration safely', async () =
       password: 'password12',
     });
 
-  assert.equal(res.status, 500);
-  assert.equal(userDeleted, true);
-  assert.equal(res.body.token, undefined);
+  assert.equal(res.status, 201);
+  assert.ok(res.body.token);
+  assert.equal(userDeleted, false);
 });
 
 test('website-signups queue lists only website_signup Customers', async () => {

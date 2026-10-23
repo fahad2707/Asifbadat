@@ -224,16 +224,13 @@ export async function linkOrCreateCustomerForNewUser(opts: {
       matchKind: 'none',
     };
   } catch (err) {
-    const code = (err as { code?: number })?.code;
-    // Unique phone/email/user_id in Atlas must not abort website registration.
-    if (code === 11000) {
-      return {
-        action: 'unlinked',
-        customerId: null,
-        matchedCustomerIds: [],
-        matchKind: 'none',
-      };
-    }
-    throw err;
+    // Unique indexes or Atlas document validation must not abort website registration.
+    console.error('Customer.create during website signup failed:', err);
+    return {
+      action: 'unlinked',
+      customerId: null,
+      matchedCustomerIds: [],
+      matchKind: 'none',
+    };
   }
 }

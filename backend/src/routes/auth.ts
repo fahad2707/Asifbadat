@@ -35,38 +35,6 @@ function emptyLinkResult(): CustomerLinkResult {
   };
 }
 
-/** True when Mongo reports a duplicate-key on WebsiteSignupApplication.user_id. */
-function isWebsiteSignupUserDuplicateKey(err: unknown): boolean {
-  const e = err as { code?: number; keyPattern?: Record<string, unknown>; message?: string };
-  if (e?.code !== 11000) return false;
-  if (e.keyPattern && Object.prototype.hasOwnProperty.call(e.keyPattern, 'user_id')) return true;
-  return typeof e.message === 'string' && /user_id/.test(e.message);
-}
-
-/**
- * Undo Customer link/create for this registration only.
- * Never deletes a pre-existing CRM Customer row.
- */
-async function rollbackCustomerLink(
-  userId: mongoose.Types.ObjectId,
-  link: CustomerLinkResult
-): Promise<void> {
-  if (link.action === 'created') {
-    await Customer.deleteOne({ user_id: userId });
-  } else if (link.action === 'linked') {
-    await Customer.updateOne({ user_id: userId }, { $unset: { user_id: 1 } });
-  }
-}
-
-async function rollbackRegistration(
-  userId: mongoose.Types.ObjectId,
-  link: CustomerLinkResult
-): Promise<void> {
-  await WebsiteSignupApplication.deleteOne({ user_id: userId });
-  await rollbackCustomerLink(userId, link);
-  await User.findByIdAndDelete(userId);
-}
-
 async function createWebsiteSignupApplication(opts: {
   userId: mongoose.Types.ObjectId;
   name?: string;
@@ -222,10 +190,11 @@ router.post('/register', registerLimiter, async (req, res) => {
     const verifyHash = plainVerifyToken ? hashToken(plainVerifyToken) : undefined;
     const verifyExp = needsEmailVerify ? new Date(Date.now() + 24 * 60 * 60 * 1000) : undefined;
 
+    // Omit empty phone/email so sparse unique indexes in Atlas do not collide on null.
     const user = await User.create({
       name,
-      email,
-      phone,
+      ...(email ? { email } : {}),
+      ...(phone ? { phone } : {}),
       password_hash,
       email_verified: !needsEmailVerify,
       email_verification_token_hash: verifyHash,
@@ -241,13 +210,11 @@ router.post('/register', registerLimiter, async (req, res) => {
         phone,
       });
     } catch (linkErr) {
+      // Account is already created — CRM link is best-effort so signup is not blocked.
       console.error('Register customer link error:', linkErr);
-      await User.findByIdAndDelete(user._id);
-      return res.status(500).json({ error: 'Registration failed' });
+      link = emptyLinkResult();
     }
 
-    // Application is created after link and before verification email so a failed
-    // insert never yields a successful registration, and email failure can clean it up.
     try {
       await createWebsiteSignupApplication({
         userId: user._id,
@@ -257,13 +224,9 @@ router.post('/register', registerLimiter, async (req, res) => {
         link,
       });
     } catch (appErr) {
+      // Review-queue insert must not undo a completed User. Duplicate user_id means
+      // the application already exists from a parallel request.
       console.error('Register website signup application error:', appErr);
-      await rollbackCustomerLink(user._id, link);
-      await User.findByIdAndDelete(user._id);
-      if (isWebsiteSignupUserDuplicateKey(appErr)) {
-        return res.status(500).json({ error: 'Registration failed' });
-      }
-      return res.status(500).json({ error: 'Registration failed' });
     }
 
     if (needsEmailVerify && plainVerifyToken && email) {
