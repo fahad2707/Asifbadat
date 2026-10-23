@@ -184,12 +184,16 @@ router.post('/register', registerLimiter, async (req, res) => {
 
     const password_hash = await bcrypt.hash(password, BCRYPT_ROUNDS);
 
-    // Omit empty phone/email so sparse unique indexes in Atlas do not collide on null.
-    // Do not block signup on SMTP: admin approval is the access gate, not mailbox verify.
+    // Atlas unique indexes on phone are often NOT sparse. Leaving phone unset
+    // stores null and the second email-only signup then 500s on duplicate key.
+    const uniquePhone =
+      phone ||
+      (email ? `acct:${hashToken(email).slice(0, 20)}` : `acct:${randomToken().slice(0, 20)}`);
+
     const user = await User.create({
       name,
       ...(email ? { email } : {}),
-      ...(phone ? { phone } : {}),
+      phone: uniquePhone,
       password_hash,
       email_verified: true,
     });

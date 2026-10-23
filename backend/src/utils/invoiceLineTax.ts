@@ -141,12 +141,12 @@ export function inheritLineTaxFromProduct(
   }
   const summary = summarizePopulatedTaxType(product.tax_type_id);
   if (!summary || !summary.name) {
-    throw new InvoiceLineTaxError(`"${name}" has an invalid or missing TaxType.`);
+    const none = noTaxLineSnapshot(sub);
+    return opts?.customerExempt ? applyCustomerExemption(none, sub) : none;
   }
   if (summary.rate_type === 'amount') {
-    throw new InvoiceLineTaxError(
-      `"${name}" uses a fixed-amount tax type (${formatTaxTypeLabel(summary)}). Fixed-amount invoice line tax is not supported.`
-    );
+    const none = noTaxLineSnapshot(sub);
+    return opts?.customerExempt ? applyCustomerExemption(none, sub) : none;
   }
   const tax_amount = computePercentLineTax(sub, summary.rate);
   const assigned: InvoiceLineTaxSnapshot = {

@@ -64,30 +64,17 @@ test('Not configured product is treated as No Tax so invoicing can continue', ()
   assert.equal(snap.tax_amount, 0);
 });
 
-test('invalid / missing populated TaxType is rejected', () => {
-  assert.throws(
-    () => inheritLineTaxFromProduct({ name: 'ABC', tax_type_id: '64b1c2d3e4f5a6b7c8d9e0aa' }, 4.99),
-    (err: unknown) => {
-      assert.ok(err instanceof InvoiceLineTaxError);
-      assert.match(err.message, /invalid or missing TaxType/i);
-      return true;
-    }
-  );
+test('invalid / missing populated TaxType is treated as No Tax', () => {
+  const snap = inheritLineTaxFromProduct({ name: 'ABC', tax_type_id: '64b1c2d3e4f5a6b7c8d9e0aa' }, 4.99);
+  assert.deepEqual(snap, { ...noTaxLineSnapshot(4.99) });
 });
 
-test('fixed-amount TaxType is not calculated', () => {
-  assert.throws(
-    () =>
-      inheritLineTaxFromProduct(
-        { name: 'CAST item', tax_type_id: { _id: CAST_ID, name: 'CAST', rate: 2, rate_type: 'amount' } },
-        10
-      ),
-    (err: unknown) => {
-      assert.ok(err instanceof InvoiceLineTaxError);
-      assert.match(err.message, /Fixed-amount/i);
-      return true;
-    }
+test('fixed-amount TaxType is treated as No Tax so invoicing can continue', () => {
+  const snap = inheritLineTaxFromProduct(
+    { name: 'CAST item', tax_type_id: { _id: CAST_ID, name: 'CAST', rate: 2, rate_type: 'amount' } },
+    10
   );
+  assert.deepEqual(snap, { ...noTaxLineSnapshot(10) });
 });
 
 test('mixed GST / VAT / No Tax lines sum independently', () => {

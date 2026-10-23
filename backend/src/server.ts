@@ -159,7 +159,12 @@ app.get('/health', async (req, res) => {
       mongo.categoryCount = undefined;
     }
   }
-  res.json({ status: 'ok', timestamp: new Date().toISOString(), mongo });
+  res.json({
+    status: 'ok',
+    timestamp: new Date().toISOString(),
+    commit: process.env.RAILWAY_GIT_COMMIT_SHA || process.env.VERCEL_GIT_COMMIT_SHA || null,
+    mongo,
+  });
 });
 
 // Serve uploaded files (customer documents, etc.)
