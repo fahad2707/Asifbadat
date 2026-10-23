@@ -30,6 +30,8 @@ export interface IVendor extends Document {
   bank_details?: IBankDetails;
   notes?: string;
   documents?: { name: string; url: string; uploaded_at?: Date }[];
+  // Tracks amount vendor owes (Accounts Payable). Credit memos reduce this balance.
+  outstanding_balance?: number;
   is_active: boolean;
   created_at: Date;
   updated_at: Date;
@@ -77,6 +79,8 @@ const VendorSchema = new Schema<IVendor>(
     bank_details: BankDetailsSchema,
     documents: [VendorDocumentSchema],
     notes: String,
+    // Tracks amount vendor owes (Accounts Payable). Credit memos reduce this balance.
+    outstanding_balance: { type: Number, default: 0 },
     is_active: { type: Boolean, default: true },
   },
   { timestamps: { createdAt: 'created_at', updatedAt: 'updated_at' } }

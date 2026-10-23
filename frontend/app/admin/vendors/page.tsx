@@ -5,7 +5,10 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { Plus, Edit, Search, Trash2, X, MapPin, FolderPlus } from 'lucide-react';
 import adminApi from '@/lib/admin-api';
 import { isAdminAuthRedirectError } from '@/lib/admin-auth-redirect';
+import RegionCombobox from '@/components/RegionCombobox';
+import { STATE_PROVINCE_OPTIONS } from '@/lib/regions';
 import toast from 'react-hot-toast';
+import { moneyOut, moneyPlain } from '@/lib/moneyTone';
 
 interface Vendor {
   id: string;
@@ -70,9 +73,10 @@ export default function VendorsPage() {
   const fetchStates = async () => {
     try {
       const res = await adminApi.get('/vendors/locations/states');
-      setStates(res.data.states || []);
+      const fromApi = (res.data.states || []) as string[];
+      setStates([...new Set([...STATE_PROVINCE_OPTIONS, ...fromApi])].sort((a, b) => a.localeCompare(b)));
     } catch {
-      setStates(['Arizona', 'California', 'Florida', 'Texas']);
+      setStates([...STATE_PROVINCE_OPTIONS]);
     }
   };
 
@@ -189,7 +193,7 @@ export default function VendorsPage() {
         </button>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-3">
+      <div className="grid grid-cols-1 md:grid-cols-3 overflow-hidden rounded-md border border-[#E3E5E8]">
         <div className="px-4 py-3 bg-[#E6F7F8]">
           <p className="text-[28px] font-normal text-[#1A1A1A] tabular-nums">${totalPurchases.toFixed(2)}</p>
           <p className="text-xs text-[#6B6C72]">Unbilled last 365 days</p>
@@ -258,8 +262,8 @@ export default function VendorsPage() {
                       <td className="py-3.5 px-4 text-xs font-mono font-bold text-teal-450">{v.supplier_id || '—'}</td>
                       <td className="py-3.5 px-4 text-xs font-semibold text-slate-205">{v.contact_name || v.name}</td>
                       <td className="py-3.5 px-4 text-xs text-slate-400">{v.name}</td>
-                      <td className="py-3.5 px-4 text-xs text-right font-extrabold text-slate-105 font-mono">${Number(v.open_balance ?? v.balance ?? 0).toLocaleString(undefined, {minimumFractionDigits: 2})}</td>
-                      <td className="py-3.5 px-4 text-xs text-right font-extrabold text-teal-400 font-mono">${Number(v.paid_balance ?? v.payments ?? 0).toLocaleString(undefined, {minimumFractionDigits: 2})}</td>
+                      <td className={`py-3.5 px-4 text-xs text-right font-extrabold font-mono ${Number(v.open_balance ?? v.balance ?? 0) > 0 ? moneyOut : moneyPlain}`}>${Number(v.open_balance ?? v.balance ?? 0).toLocaleString(undefined, {minimumFractionDigits: 2})}</td>
+                      <td className={`py-3.5 px-4 text-xs text-right font-extrabold font-mono ${moneyPlain}`}>${Number(v.paid_balance ?? v.payments ?? 0).toLocaleString(undefined, {minimumFractionDigits: 2})}</td>
                       <td className="py-3.5 px-4 text-right text-xs">
                         <div className="flex items-center justify-end gap-3" onClick={(e) => e.stopPropagation()}>
                           <button
@@ -289,16 +293,16 @@ export default function VendorsPage() {
 
       {showModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-955/80 backdrop-blur-sm p-4">
-          <div className="bg-white border border-[#E2E8F0] rounded-lg text-[#0F172A] max-w-lg w-full max-h-[90vh] overflow-y-auto">
+          <div className="bg-white border border-[#E2E8F0] rounded-lg text-[#0F172A] max-w-lg w-full max-h-[90vh] overflow-hidden flex flex-col">
             <div className="flex items-center justify-between p-5 border-b border-white/5">
               <h2 className="text-lg font-semibold text-[#0F172A]">{editing ? 'Edit Supplier' : 'Register Supplier'}</h2>
               <button type="button" onClick={() => setShowModal(false)} className="p-1.5 hover:bg-white/5 rounded-lg text-slate-400 hover:text-white transition-all">
                 <X className="w-5 h-5" />
               </button>
             </div>
-            <form onSubmit={handleSubmit} className="p-5 space-y-4">
+            <form onSubmit={handleSubmit} className="p-5 space-y-4 overflow-y-auto min-h-0 flex-1">
               <div className="flex gap-2 items-end">
-                <div className="flex-1">
+                <div className="flex-1 min-w-0">
                   <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">Supplier ID *</label>
                   <input
                     type="text"
@@ -307,15 +311,13 @@ export default function VendorsPage() {
                     className="w-full bg-slate-950/60 border border-white/10 rounded-xl px-4 py-2 text-xs text-slate-205 focus:outline-none"
                   />
                 </div>
-                <div>
-                  <button
-                    type="button"
-                    onClick={generateId}
-                    className="px-3.5 py-2.5 bg-slate-800 border border-white/5 text-slate-350 hover:text-white rounded-xl text-xs font-semibold transition-all shadow-sm"
-                  >
-                    Generate
-                  </button>
-                </div>
+                <button
+                  type="button"
+                  onClick={generateId}
+                  className="shrink-0 px-3.5 py-2.5 bg-slate-800 border border-white/5 text-slate-350 hover:text-white rounded-xl text-xs font-semibold transition-all shadow-sm"
+                >
+                  Generate
+                </button>
               </div>
               <div>
                 <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">Supplier business Name *</label>
@@ -358,42 +360,36 @@ export default function VendorsPage() {
                 />
               </div>
               <div>
-                <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">State *</label>
-                <select
+                <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">State / Province *</label>
+                <RegionCombobox
+                  required
                   value={form.state || ''}
-                  onChange={(e) => {
-                    setForm((f) => ({ ...f, state: e.target.value, city: '' }));
-                    fetchCities(e.target.value);
-                  }}
+                  options={states.length ? states : [...STATE_PROVINCE_OPTIONS]}
+                  placeholder="Search state/province or type…"
                   className="w-full bg-slate-955/60 border border-white/10 rounded-xl px-4 py-2 text-xs text-slate-250 focus:outline-none font-semibold"
-                >
-                  <option value="">Select state</option>
-                  {states.map((s) => (
-                    <option key={s} value={s}>{s}</option>
-                  ))}
-                </select>
+                  onChange={(next) => {
+                    setForm((f) => {
+                      const known = (states.length ? states : STATE_PROVINCE_OPTIONS).some(
+                        (s) => s.toLowerCase() === next.trim().toLowerCase()
+                      );
+                      const shouldClearCity = known && (f.state || '') !== next;
+                      return { ...f, state: next, city: shouldClearCity ? '' : f.city };
+                    });
+                  }}
+                />
               </div>
               <div>
                 <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">City *</label>
-                <select
+                <RegionCombobox
+                  required
                   value={form.city || ''}
-                  onChange={(e) => setForm((f) => ({ ...f, city: e.target.value }))}
+                  options={cities}
+                  allowCustom
+                  placeholder={cities.length ? 'Search city or type…' : 'Type city name'}
+                  emptyHint="No saved cities — type the city name"
                   className="w-full bg-slate-955/60 border border-white/10 rounded-xl px-4 py-2 text-xs text-slate-250 focus:outline-none font-semibold"
-                >
-                  <option value="">Select city</option>
-                  {cities.map((c) => (
-                    <option key={c} value={c}>{c}</option>
-                  ))}
-                </select>
-                {cities.length === 0 && (
-                  <input
-                    type="text"
-                    value={form.city || ''}
-                    onChange={(e) => setForm((f) => ({ ...f, city: e.target.value }))}
-                    placeholder="Or type city name"
-                    className="w-full bg-slate-950/60 border border-white/10 rounded-xl px-4 py-2 text-xs text-slate-200 focus:outline-none mt-1.5"
-                  />
-                )}
+                  onChange={(next) => setForm((f) => ({ ...f, city: next }))}
+                />
               </div>
               <div>
                 <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">Full Address</label>

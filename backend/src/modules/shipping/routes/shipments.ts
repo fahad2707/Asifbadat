@@ -1,12 +1,18 @@
 import express from 'express';
 import { z } from 'zod';
 import Shipment from '../models/Shipment';
+import ShipmentPackage from '../models/ShipmentPackage';
 import { authenticateAdmin, AuthRequest } from '../../../middleware/auth';
 import {
   generateShipmentNumber,
   markShipmentDelivered,
   markReturnShipmentReceived,
 } from '../services/shipmentService';
+import {
+  PackageServiceError,
+  createPackagesForShipment,
+  listPackagesForShipment,
+} from '../services/shipmentPackageService';
 
 const router = express.Router();
 
@@ -39,6 +45,39 @@ router.get('/generate-number', authenticateAdmin, (req, res) => {
   res.json({ shipment_number: generateShipmentNumber(type) });
 });
 
+function handlePackageRouteError(res: express.Response, e: unknown, logLabel: string) {
+  if (e instanceof PackageServiceError) {
+    return res.status(e.status).json({ error: e.message });
+  }
+  console.error(logLabel, e);
+  return res.status(500).json({ error: 'Package request failed' });
+}
+
+// List packages for a shipment (before generic /:id)
+router.get('/:id/packages', authenticateAdmin, async (req: AuthRequest, res) => {
+  try {
+    const result = await listPackagesForShipment(req.params.id);
+    res.json(result);
+  } catch (e) {
+    handlePackageRouteError(res, e, 'List shipment packages:');
+  }
+});
+
+/**
+ * Create packages for a shipment.
+ * Body (exactly one form):
+ *   { "count": 2 }
+ *   { "packages": [{ "notes": "fragile" }] }
+ */
+router.post('/:id/packages', authenticateAdmin, async (req: AuthRequest, res) => {
+  try {
+    const result = await createPackagesForShipment(req.params.id, req.body, req.userId);
+    res.status(201).json(result);
+  } catch (e) {
+    handlePackageRouteError(res, e, 'Create shipment packages:');
+  }
+});
+
 // List shipments
 router.get('/', authenticateAdmin, async (req: AuthRequest, res) => {
   try {
@@ -60,6 +99,18 @@ router.get('/', authenticateAdmin, async (req: AuthRequest, res) => {
       Shipment.countDocuments(filter),
     ]);
 
+    const shipmentIds = list.map((s: any) => s._id);
+    const countMap = new Map<string, number>();
+    if (shipmentIds.length > 0) {
+      const packageCounts = await ShipmentPackage.aggregate([
+        { $match: { shipment_id: { $in: shipmentIds } } },
+        { $group: { _id: '$shipment_id', count: { $sum: 1 } } },
+      ]);
+      for (const p of packageCounts) {
+        countMap.set(p._id.toString(), p.count);
+      }
+    }
+
     res.json({
       shipments: list.map((s: any) => ({
         id: s._id.toString(),
@@ -73,6 +124,7 @@ router.get('/', authenticateAdmin, async (req: AuthRequest, res) => {
         expected_delivery_date: s.expected_delivery_date,
         delivered_date: s.delivered_date,
         freight_charge: s.freight_charge,
+        package_count: countMap.get(s._id.toString()) || 0,
         created_at: s.created_at,
         items: s.items,
       })),

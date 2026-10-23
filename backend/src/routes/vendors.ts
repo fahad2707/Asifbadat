@@ -6,7 +6,7 @@ import Vendor from '../models/Vendor';
 import PurchaseOrder from '../models/PurchaseOrder';
 import { authenticateAdmin, AuthRequest } from '../middleware/auth';
 import { z } from 'zod';
-import { getVendorBalance, getVendorStatement, getVendorBalancesBulk } from '../modules/vendors/services/vendorLedgerService';
+import { getVendorStatement } from '../modules/vendors/services/vendorLedgerService';
 import {
   getVendorOutstanding,
   getVendorOverdue,
@@ -14,6 +14,8 @@ import {
   getVendorReturnsAnalytics,
   getLastPurchasePrices,
 } from '../modules/vendors/services/vendorAnalyticsService';
+import { getCreditMemoTotalsByParty } from '../modules/credit-memo/services/creditMemoBalances';
+import { STATE_PROVINCE_OPTIONS } from '../utils/regions';
 
 const router = express.Router();
 
@@ -61,21 +63,40 @@ router.get('/', authenticateAdmin, async (req: AuthRequest, res) => {
       Vendor.countDocuments(query),
     ]);
     const vendorIds = (vendors as any[]).map((v) => v._id);
-    const [poAgg, balanceMap] = await Promise.all([
+    const [poAgg, creditTotals] = await Promise.all([
       PurchaseOrder.aggregate([
-      { $match: { vendor_id: { $in: vendorIds } } },
-      { $group: { _id: '$vendor_id', total: { $sum: '$total_amount' } } },
+        { $match: { vendor_id: { $in: vendorIds }, status: { $ne: 'cancelled' } } },
+        {
+          $group: {
+            _id: '$vendor_id',
+            totalPurchases: { $sum: '$total_amount' },
+            totalPaid: { $sum: { $ifNull: ['$amount_paid', 0] } },
+          },
+        },
       ]),
-      getVendorBalancesBulk(vendorIds),
+      getCreditMemoTotalsByParty('VENDOR', vendorIds),
     ]);
-    const poMap = new Map(poAgg.map((r: any) => [r._id.toString(), r.total]));
+    const poMap = new Map(
+      poAgg.map((r: any) => [
+        r._id.toString(),
+        {
+          purchases: Number(r.totalPurchases || 0),
+          paid: Number(r.totalPaid || 0),
+        },
+      ])
+    );
     res.json({
       vendors: (vendors as any[]).map((v) => {
-        const purchases = Number(poMap.get(v._id.toString()) || 0);
-        const balance = Number(balanceMap.get(v._id.toString()) ?? purchases);
-        const paid = Math.max(0, purchases - balance);
+        const id = v._id.toString();
+        const poData = poMap.get(id) || { purchases: 0, paid: 0 };
+        const purchases = poData.purchases;
+        const paid = poData.paid;
+        const credits = creditTotals.get(id) ?? 0;
+        // Credit memos settle dues like payments: reduce open AP, increase paid dues.
+        const paidBalance = paid + credits;
+        const balance = Math.max(0, purchases - paidBalance);
         return {
-          id: v._id.toString(),
+          id,
           supplier_id: v.supplier_id || v._id.toString().slice(-6).toUpperCase(),
           name: v.name,
           contact_name: v.contact_name,
@@ -92,9 +113,10 @@ router.get('/', authenticateAdmin, async (req: AuthRequest, res) => {
           created_at: v.created_at,
           purchases,
           payments: paid,
+          credit_memo_total: credits,
           balance,
           open_balance: balance,
-          paid_balance: paid,
+          paid_balance: paidBalance,
         };
       }),
       pagination: { page: Number(page), limit: Number(limit), total, totalPages: Math.ceil(total / Number(limit)) },
@@ -105,15 +127,16 @@ router.get('/', authenticateAdmin, async (req: AuthRequest, res) => {
   }
 });
 
-// States and cities for dropdowns (from existing vendors + common list)
-router.get('/locations/states', authenticateAdmin, async (req: AuthRequest, res) => {
+// States/provinces for dropdowns (full US + CA list, plus any custom values already on vendors)
+router.get('/locations/states', authenticateAdmin, async (_req: AuthRequest, res) => {
   try {
-    const states = await Vendor.distinct('state').then((r) => r.filter(Boolean).sort());
-    const common = ['Alabama', 'Arizona', 'California', 'Florida', 'Georgia', 'Texas', 'New York', 'Washington'];
-    const combined = [...new Set([...common, ...states])].sort();
+    const fromVendors = await Vendor.distinct('state').then((r) => r.filter(Boolean) as string[]);
+    const combined = [...new Set([...STATE_PROVINCE_OPTIONS, ...fromVendors])].sort((a, b) =>
+      a.localeCompare(b)
+    );
     res.json({ states: combined });
-  } catch (error) {
-    res.json({ states: ['Arizona', 'California', 'Florida', 'Texas'] });
+  } catch {
+    res.json({ states: [...STATE_PROVINCE_OPTIONS] });
   }
 });
 
@@ -243,9 +266,31 @@ router.get('/:id/balance', authenticateAdmin, async (req: AuthRequest, res) => {
   try {
     const vendor = await Vendor.findById(req.params.id);
     if (!vendor) return res.status(404).json({ error: 'Vendor not found' });
-    const asOf = req.query.as_of ? new Date(req.query.as_of as string) : undefined;
-    const balance = await getVendorBalance(req.params.id, asOf);
-    res.json({ balance });
+    const [poAgg, creditTotals] = await Promise.all([
+      PurchaseOrder.aggregate([
+        { $match: { vendor_id: vendor._id, status: { $ne: 'cancelled' } } },
+        {
+          $group: {
+            _id: null,
+            totalPurchases: { $sum: '$total_amount' },
+            totalPaid: { $sum: { $ifNull: ['$amount_paid', 0] } },
+          },
+        },
+      ]),
+      getCreditMemoTotalsByParty('VENDOR', [vendor._id as any]),
+    ]);
+    const totalPurchases = poAgg[0]?.totalPurchases ?? 0;
+    const totalPaid = poAgg[0]?.totalPaid ?? 0;
+    const creditMemoTotal = creditTotals.get(vendor._id.toString()) ?? 0;
+    const totalSettled = totalPaid + creditMemoTotal;
+    const balance = Math.max(0, totalPurchases - totalSettled);
+    res.json({
+      balance,
+      total_purchases: totalPurchases,
+      total_paid: totalPaid,
+      credit_memo_total: creditMemoTotal,
+      paid_balance: totalSettled,
+    });
   } catch (e) {
     console.error('Vendor balance:', e);
     res.status(500).json({ error: 'Failed to fetch balance' });

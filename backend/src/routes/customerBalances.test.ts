@@ -17,6 +17,7 @@ import mongoose from 'mongoose';
 import request from 'supertest';
 import { createApp } from '../server';
 import Invoice from '../models/Invoice';
+import CreditMemo from '../modules/credit-memo/models/CreditMemo';
 import { DOCUMENT_TYPE_INVOICE, DOCUMENT_TYPE_QUOTATION } from '../utils/documentType';
 import { derivedUnpaidReceivableMatch } from '../utils/invoiceFinancialState';
 
@@ -215,6 +216,7 @@ test('GET /api/customers/balances uses derived unpaid amounts, not stored paymen
     capturedPipeline = pipeline;
     return Promise.resolve(applyBalancesPipeline(fixtures, pipeline));
   });
+  mock.method(CreditMemo, 'aggregate', () => Promise.resolve([]));
 
   const res = await request(createApp())
     .get('/api/customers/balances')
@@ -242,6 +244,42 @@ test('GET /api/customers/balances uses derived unpaid amounts, not stored paymen
   assert.equal(byId[customerA], 260);
   assert.equal(byId[customerB], 60);
   assert.equal(Object.keys(byId).length, 2);
+});
+
+test('GET /api/customers/balances keeps invoice AR in open_balance and nets credits as net_due', async () => {
+  assertNoMongoConnection();
+
+  mock.method(Invoice, 'aggregate', (pipeline: Array<Record<string, unknown>>) =>
+    Promise.resolve(applyBalancesPipeline(fixtures, pipeline))
+  );
+  mock.method(CreditMemo, 'aggregate', () =>
+    Promise.resolve([
+      { _id: customerA, total: 50 },
+      { _id: customerB, total: 100 },
+    ])
+  );
+
+  const res = await request(createApp())
+    .get('/api/customers/balances')
+    .set('Authorization', `Bearer ${adminTestToken()}`);
+
+  assertNoMongoConnection();
+  assert.equal(res.status, 200);
+
+  const byId = Object.fromEntries(
+    (res.body.balances as Array<{
+      customer_id: string;
+      open_balance: number;
+      credit_memo_total?: number;
+      net_due?: number;
+    }>).map((row) => [row.customer_id, row])
+  );
+  assert.equal(byId[customerA].open_balance, 260);
+  assert.equal(byId[customerA].credit_memo_total, 50);
+  assert.equal(byId[customerA].net_due, 210);
+  assert.equal(byId[customerB].open_balance, 60);
+  assert.equal(byId[customerB].credit_memo_total, 100);
+  assert.equal(byId[customerB].net_due, 0);
 });
 
 test('customer balances route source uses derivedUnpaidReceivableMatch', () => {

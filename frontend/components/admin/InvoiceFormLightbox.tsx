@@ -1,14 +1,15 @@
 'use client';
 
 import { useState, useEffect, useCallback, useRef } from 'react';
-import Link from 'next/link';
 import { X, Trash2 } from 'lucide-react';
 import adminApi from '@/lib/admin-api';
 import toast from 'react-hot-toast';
 import { downloadPdfFromResponse, openPdfFromResponse } from '@/lib/download-pdf';
 import { shareDocumentOnWhatsApp, composeEmailWithPdf } from '@/lib/share-document';
 import SearchableProductDropdown from './SearchableProductDropdown';
+import ProductModal from './ProductModal';
 import NumberInput from './NumberInput';
+import RegionCombobox from '@/components/RegionCombobox';
 import {
   customerIsCurrentlyExempt,
   emptyInvoiceLineTax,
@@ -18,7 +19,8 @@ import {
   type InvoiceLineTaxState,
 } from '@/lib/tax-type';
 import { minSellingPrice, sellingBelowMin } from '@/lib/min-selling-price';
-import { toastBarcodeNotFound, toastProductAdded } from '@/lib/barcode-feedback';
+import { notifyBarcodeScanMiss, notifyBarcodeScanSuccess, unlockScanAudio } from '@/lib/barcode-feedback';
+import { moneyIn, moneyPlain } from '@/lib/moneyTone';
 
 const LOCATION_OF_SALE = '511 W Germantown Pike, Plymouth Meeting, PA 19462-1303';
 const INITIAL_LINES = 15;
@@ -35,6 +37,23 @@ function emptyLine(): LineItem {
     subtotal: 0,
     ...emptyInvoiceLineTax(0),
   };
+}
+
+function lineOccupied(line: LineItem): boolean {
+  return !!(line.product_id || line.product_name);
+}
+
+function compactInvoiceLines(rows: LineItem[]): LineItem[] {
+  const filled = rows.filter(lineOccupied);
+  const next = [...filled];
+  const target = Math.max(INITIAL_LINES, filled.length + 1);
+  while (next.length < target) next.push(emptyLine());
+  return next;
+}
+
+function firstEmptyLineIndex(rows: LineItem[]): number {
+  const idx = rows.findIndex((line) => !lineOccupied(line));
+  return idx === -1 ? rows.length : idx;
 }
 
 function lineWithMoney(line: LineItem, quantity: number, price: number): LineItem {
@@ -133,6 +152,10 @@ export default function InvoiceFormLightbox({ isOpen, onClose, onSaved, editId, 
   const [products, setProducts] = useState<Product[]>([]);
   const [productSearch, setProductSearch] = useState('');
   const productSearchRef = useRef<HTMLInputElement>(null);
+  const [activeScanIndex, setActiveScanIndex] = useState(0);
+  const [scanArmed, setScanArmed] = useState(false);
+  const linesRef = useRef<LineItem[]>([]);
+  const activeScanIndexRef = useRef(0);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
 
@@ -151,6 +174,7 @@ export default function InvoiceFormLightbox({ isOpen, onClose, onSaved, editId, 
   const [lines, setLines] = useState<LineItem[]>([]);
   const [customerPrices, setCustomerPrices] = useState<Record<string, number>>({});
   const [customerTaxExempt, setCustomerTaxExempt] = useState(false);
+  const [showAddProduct, setShowAddProduct] = useState(false);
 
   const fetchCustomerPrices = useCallback(async (cid: string) => {
     if (!cid) { setCustomerPrices({}); return; }
@@ -171,13 +195,24 @@ export default function InvoiceFormLightbox({ isOpen, onClose, onSaved, editId, 
   }, []);
 
   useEffect(() => {
+    linesRef.current = lines;
+  }, [lines]);
+
+  useEffect(() => {
+    activeScanIndexRef.current = activeScanIndex;
+  }, [activeScanIndex]);
+
+  useEffect(() => {
     if (!isOpen) return;
     setDirty(false);
     setCustomerTaxExempt(false);
     setExtraBillTax(0);
+    setActiveScanIndex(0);
+    setScanArmed(false);
     if (editId) setCustomerId('');
     adminApi.get('/customers', { params: { limit: 500 } }).then((r) => setCustomers(r.data.customers || [])).catch(() => {});
     adminApi.get('/products', { params: { limit: 5000 } }).then((r) => setProducts(r.data.products || [])).catch(() => {});
+    setShowAddProduct(false);
     if (initialCustomerId && !editId) {
       setCustomerId(initialCustomerId);
       adminApi.get(`/customers/${initialCustomerId}`).then((r) => {
@@ -401,22 +436,64 @@ export default function InvoiceFormLightbox({ isOpen, onClose, onSaved, editId, 
     return p?.cost_price != null ? Number(p.cost_price) : undefined;
   };
 
+  /** Catalog / last-customer selling price shown when the field is cleared. */
+  const getListedSellingPrice = (line: LineItem): number | undefined => {
+    const pid = line.product_id ? String(line.product_id) : '';
+    if (!pid) return undefined;
+    const customerPrice = customerPrices[pid];
+    if (customerPrice != null && Number.isFinite(Number(customerPrice))) return Number(customerPrice);
+    const p = products.find((q) => String(q.id) === pid);
+    const listed = p?.price != null ? Number(p.price) : undefined;
+    return listed != null && Number.isFinite(listed) && listed > 0 ? listed : undefined;
+  };
+
   const warnIfOverStock = (name: string, qty: number, stock: number | undefined) => {
     if (stock != null && qty > stock) {
       toast(`"${name}" has ${stock} in stock. Invoice will take stock to ${stock - qty}.`, { duration: 4000 });
     }
   };
 
-  const selectProductForLine = (index: number, product: Product) => {
-    const newLines = [...lines];
-    const line = newLines[index];
-    if (!line) return;
+  const productFromScan = (p: {
+    id: string;
+    name: string;
+    price?: number;
+    cost_price?: number;
+    category_name?: string;
+    stock_quantity?: number;
+    tax_type_configured?: boolean;
+    tax_type_id?: string | null;
+    tax_type_label?: string;
+    tax_type?: Product['tax_type'];
+    product_id?: string;
+    sku?: string;
+  }): Product => ({
+    id: p.id,
+    name: p.name,
+    price: p.price ?? 0,
+    cost_price: p.cost_price,
+    category_name: p.category_name,
+    stock_quantity: p.stock_quantity,
+    tax_type_configured: p.tax_type_configured,
+    tax_type_id: p.tax_type_id,
+    tax_type_label: p.tax_type_label,
+    tax_type: p.tax_type,
+    product_id: p.product_id,
+    sku: p.sku,
+  });
+
+  const applyProductToLine = (index: number, product: Product, fromScan: boolean) => {
+    let newLines = [...linesRef.current];
+    const line = newLines[index] ?? emptyLine();
+    if (!newLines[index]) {
+      while (newLines.length <= index) newLines.push(emptyLine());
+    }
     const existingIdx = newLines.findIndex((l, i) => i !== index && l.product_id === product.id);
     if (existingIdx !== -1) {
       const existing = newLines[existingIdx];
       newLines[existingIdx] = lineWithMoney(existing, existing.quantity + (line.quantity || 1), existing.price);
       warnIfOverStock(product.name, newLines[existingIdx].quantity, product.stock_quantity);
       newLines[index] = emptyLine();
+      newLines = compactInvoiceLines(newLines);
     } else if (line.product_id === product.id) {
       newLines[index] = lineWithMoney(line, line.quantity + 1, line.price);
       warnIfOverStock(product.name, newLines[index].quantity, product.stock_quantity);
@@ -426,16 +503,28 @@ export default function InvoiceFormLightbox({ isOpen, onClose, onSaved, editId, 
       newLines[index] = lineFromProduct(product, 1, usePrice, undefined, usesLineTax, customerTaxExempt);
       if (usesLineTax && newLines[index].issue === 'amount_unsupported') {
         toast.error(`"${product.name}" uses a fixed-amount tax type, which invoice lines cannot calculate.`, { duration: 5000 });
+      } else if (usesLineTax && newLines[index].issue === 'not_configured') {
+        toast(`"${product.name}" has no tax type. It will be invoiced as No Tax until you assign one.`, { duration: 5000 });
       } else if (customerPrice != null && customerPrice !== product.price) {
         toast.success(`Using last price for ${product.name}: $${customerPrice.toFixed(2)} (default: $${product.price.toFixed(2)})`, { duration: 4000 });
       }
     }
     setLines(newLines);
     setDirty(true);
+    const nextEmpty = firstEmptyLineIndex(newLines);
+    setActiveScanIndex(nextEmpty);
+    if (fromScan) {
+      setScanArmed(true);
+      notifyBarcodeScanSuccess(product.name);
+    }
   };
 
-  const addProductToLine = (product: Product) => {
-    let newLines = [...lines];
+  const selectProductForLine = (index: number, product: Product) => {
+    applyProductToLine(index, product, false);
+  };
+
+  const addProductToLine = (product: Product, opts?: { keepHeaderFocus?: boolean; fromScan?: boolean }) => {
+    let newLines = [...linesRef.current];
     const existingIdx = newLines.findIndex((l) => l.product_id === product.id);
     if (existingIdx !== -1) {
       newLines[existingIdx] = lineWithMoney(newLines[existingIdx], newLines[existingIdx].quantity + 1, newLines[existingIdx].price);
@@ -443,8 +532,9 @@ export default function InvoiceFormLightbox({ isOpen, onClose, onSaved, editId, 
     } else {
       const customerPrice = customerPrices[product.id];
       const usePrice = customerPrice ?? product.price;
-      const emptyIdx = newLines.findIndex((l) => !l.product_id && !l.product_name);
-      let targetIdx = emptyIdx;
+      const preferred = activeScanIndexRef.current;
+      const preferredEmpty = preferred >= 0 && preferred < newLines.length && !lineOccupied(newLines[preferred]);
+      let targetIdx = preferredEmpty ? preferred : newLines.findIndex((l) => !lineOccupied(l));
       if (targetIdx === -1) {
         newLines = [...newLines, ...Array.from({ length: 5 }, () => emptyLine())];
         targetIdx = newLines.length - 5;
@@ -452,6 +542,8 @@ export default function InvoiceFormLightbox({ isOpen, onClose, onSaved, editId, 
       newLines[targetIdx] = lineFromProduct(product, 1, usePrice, undefined, usesLineTax, customerTaxExempt);
       if (usesLineTax && newLines[targetIdx].issue === 'amount_unsupported') {
         toast.error(`"${product.name}" uses a fixed-amount tax type, which invoice lines cannot calculate.`, { duration: 5000 });
+      } else if (usesLineTax && newLines[targetIdx].issue === 'not_configured') {
+        toast(`"${product.name}" has no tax type. It will be invoiced as No Tax until you assign one.`, { duration: 5000 });
       } else if (customerPrice != null && customerPrice !== product.price) {
         toast.success(`Using last price for ${product.name}: $${customerPrice.toFixed(2)} (default: $${product.price.toFixed(2)})`, { duration: 4000 });
       }
@@ -459,7 +551,12 @@ export default function InvoiceFormLightbox({ isOpen, onClose, onSaved, editId, 
     setLines(newLines);
     setDirty(true);
     setProductSearch('');
-    window.setTimeout(() => productSearchRef.current?.focus(), 0);
+    setActiveScanIndex(firstEmptyLineIndex(newLines));
+    if (opts?.fromScan) notifyBarcodeScanSuccess(product.name);
+    if (opts?.keepHeaderFocus !== false) {
+      setScanArmed(false);
+      window.setTimeout(() => productSearchRef.current?.focus(), 0);
+    }
   };
 
   const handleProductSearchKeyDown = (e: React.KeyboardEvent) => {
@@ -471,23 +568,10 @@ export default function InvoiceFormLightbox({ isOpen, onClose, onSaved, editId, 
       .then((r) => {
         const p = r.data;
         if (p && p.id) {
-          const alreadyOnForm = lines.some((l) => l.product_id === p.id);
-          addProductToLine({
-            id: p.id,
-            name: p.name,
-            price: p.price ?? 0,
-            cost_price: p.cost_price,
-            category_name: p.category_name,
-            stock_quantity: p.stock_quantity,
-            tax_type_configured: p.tax_type_configured,
-            tax_type_id: p.tax_type_id,
-            tax_type_label: p.tax_type_label,
-            tax_type: p.tax_type,
-          });
-          if (!alreadyOnForm) toastProductAdded(p.name);
+          addProductToLine(productFromScan(p), { keepHeaderFocus: true, fromScan: true });
         }
       })
-      .catch(() => toastBarcodeNotFound());
+      .catch(() => notifyBarcodeScanMiss());
   };
 
   const updateLine = (index: number, field: keyof LineItem, value: number | string) => {
@@ -512,10 +596,10 @@ export default function InvoiceFormLightbox({ isOpen, onClose, onSaved, editId, 
   };
 
   const removeLine = (index: number) => {
-    const newLines = [...lines];
-    newLines[index] = emptyLine();
+    const newLines = compactInvoiceLines(lines.filter((_, i) => i !== index));
     setLines(newLines);
     setDirty(true);
+    setActiveScanIndex(firstEmptyLineIndex(newLines));
   };
 
   const switchDocumentType = (type: 'invoice' | 'quotation') => {
@@ -564,14 +648,20 @@ export default function InvoiceFormLightbox({ isOpen, onClose, onSaved, editId, 
       toast.error('Add at least one product');
       return false;
     }
-    const blocked = validLines.find((l) => l.issue === 'not_configured' || l.issue === 'amount_unsupported');
-    if (blocked) {
+    const blockedAmount = validLines.find((l) => l.issue === 'amount_unsupported');
+    if (blockedAmount) {
       toast.error(
-        blocked.issue === 'not_configured'
-          ? `"${blocked.product_name}" has no configured tax type. Assign a tax type before invoicing.`
-          : `"${blocked.product_name}" uses a fixed-amount tax type, which invoice lines cannot calculate.`
+        `"${blockedAmount.product_name}" uses a fixed-amount tax type, which invoice lines cannot calculate.`
       );
       return false;
+    }
+    const unconfigured = validLines.filter((l) => l.issue === 'not_configured');
+    if (unconfigured.length > 0) {
+      const names = unconfigured.map((l) => l.product_name).slice(0, 3).join(', ');
+      const more = unconfigured.length > 3 ? ` and ${unconfigured.length - 3} more` : '';
+      toast(`${names}${more} ${unconfigured.length === 1 ? 'has' : 'have'} no tax type. Saving as No Tax.`, {
+        duration: 5000,
+      });
     }
     const belowMin = validLines.find((l) => sellingBelowMin(l.price, getLineCostPrice(l)));
     if (belowMin) {
@@ -681,13 +771,27 @@ export default function InvoiceFormLightbox({ isOpen, onClose, onSaved, editId, 
     }
   };
 
+  const handleCreatedProduct = async (saved?: { id: string }) => {
+    try {
+      const r = await adminApi.get('/products', { params: { limit: 5000 } });
+      const list = (r.data.products || []) as Product[];
+      setProducts(list);
+      const created = saved?.id ? list.find((p) => String(p.id) === String(saved.id)) : undefined;
+      if (created) addProductToLine(created);
+    } catch {
+      toast.error('Product saved, but the invoice list could not refresh. Search for it on a line.');
+    }
+    setShowAddProduct(false);
+  };
+
   if (!isOpen) return null;
 
   return (
+    <>
     <div className="admin-lightbox fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50" onClick={handleClose}>
-      <div className="bg-white rounded-xl shadow-xl max-w-6xl w-full max-h-[90vh] overflow-hidden flex flex-col" onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-center justify-between p-4 border-b border-gray-200">
-          <div className="flex items-center gap-3">
+      <div className="relative bg-white rounded-xl shadow-xl max-w-6xl w-full max-h-[90vh] overflow-hidden flex flex-col" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between gap-3 p-4 border-b border-gray-200 shrink-0 min-w-0">
+          <div className="flex flex-wrap items-center gap-3 min-w-0 flex-1">
             <h2 className="text-xl font-bold text-gray-900">{editId ? (documentType === 'quotation' ? 'Edit Quotation' : 'Edit Invoice') : 'Create document'}</h2>
             {!editId && (
               <div className="flex rounded-lg border border-gray-300 overflow-hidden">
@@ -700,7 +804,7 @@ export default function InvoiceFormLightbox({ isOpen, onClose, onSaved, editId, 
             <X className="w-5 h-5" />
           </button>
         </div>
-        <div className="flex-1 overflow-y-auto p-4 space-y-4">
+        <div className="flex-1 min-h-0 overflow-y-auto p-4 space-y-4">
           {loading ? (
             <div className="flex justify-center py-12">
               <div className="animate-spin rounded-full h-10 w-10 border-2 border-[#0F9F8F] border-t-transparent" />
@@ -788,11 +892,18 @@ export default function InvoiceFormLightbox({ isOpen, onClose, onSaved, editId, 
                       type="text"
                       value={productSearch}
                       onChange={(e) => setProductSearch(e.target.value)}
+                      onFocus={() => unlockScanAudio()}
                       onKeyDown={handleProductSearchKeyDown}
                       placeholder="Scan barcode / item ID and press Enter"
                       className="flex-1 max-w-xs pl-3 py-1.5 border border-gray-300 rounded-lg text-sm"
                     />
-                    <Link href="/admin/products/active" className="text-sm text-[#0F9F8F] font-medium hover:underline">+ Add product</Link>
+                    <button
+                      type="button"
+                      onClick={() => setShowAddProduct(true)}
+                      className="text-sm text-[#0F9F8F] font-medium hover:underline"
+                    >
+                      + Add product
+                    </button>
                   </div>
                 </div>
                 <div className="border border-gray-200 rounded-lg overflow-x-auto">
@@ -815,48 +926,36 @@ export default function InvoiceFormLightbox({ isOpen, onClose, onSaved, editId, 
                         const hasProduct = !!(line.product_id || line.product_name);
                         const lineStock = line.stock_quantity ?? products.find((p) => p.id === line.product_id)?.stock_quantity;
                         const overStock = hasProduct && lineStock != null && line.quantity > lineStock;
+                        const isScanTarget = idx === activeScanIndex;
                         return (
-                          <tr key={idx} className={`border-t border-gray-100 hover:bg-gray-50/50 ${overStock ? 'bg-amber-50' : ''}`}>
+                          <tr
+                            key={idx}
+                            onClick={() => {
+                              unlockScanAudio();
+                              setActiveScanIndex(idx);
+                              if (!hasProduct) setScanArmed(true);
+                            }}
+                            className={`border-t border-gray-100 hover:bg-gray-50/50 ${overStock ? 'bg-amber-50' : ''} ${isScanTarget ? 'bg-teal-50 ring-1 ring-inset ring-teal-400' : ''}`}
+                          >
                             <td className="py-2 px-4">{idx + 1}</td>
                             <td className="py-2 px-4">
                               <SearchableProductDropdown
                                 products={products}
                                 value={line.product_id}
                                 displayName={line.product_name || undefined}
-                                onSelect={(p) => selectProductForLine(idx, {
-                                  id: p.id,
-                                  name: p.name,
-                                  price: p.price ?? 0,
-                                  cost_price: p.cost_price,
-                                  category_name: p.category_name,
-                                  stock_quantity: p.stock_quantity,
-                                  tax_type_configured: p.tax_type_configured,
-                                  tax_type_id: p.tax_type_id,
-                                  tax_type_label: p.tax_type_label,
-                                  tax_type: p.tax_type,
-                                })}
+                                active={scanArmed && isScanTarget && !hasProduct}
+                                onAddProduct={() => setShowAddProduct(true)}
+                                onSelect={(p) => selectProductForLine(idx, productFromScan(p))}
+                                onEnterSelect={(p) => applyProductToLine(idx, productFromScan(p), true)}
                                 onBarcodeScan={(code) => {
                                   adminApi.get(`/products/barcode/${encodeURIComponent(code)}`)
                                     .then((r) => {
                                       const prod = r.data;
                                       if (prod?.id) {
-                                        const alreadyOnForm = lines.some((l) => l.product_id === prod.id);
-                                        addProductToLine({
-                                          id: prod.id,
-                                          name: prod.name,
-                                          price: prod.price ?? 0,
-                                          cost_price: prod.cost_price,
-                                          category_name: prod.category_name,
-                                          stock_quantity: prod.stock_quantity,
-                                          tax_type_configured: prod.tax_type_configured,
-                                          tax_type_id: prod.tax_type_id,
-                                          tax_type_label: prod.tax_type_label,
-                                          tax_type: prod.tax_type,
-                                        });
-                                        if (!alreadyOnForm) toastProductAdded(prod.name);
+                                        applyProductToLine(idx, productFromScan(prod), true);
                                       }
                                     })
-                                    .catch(() => toastBarcodeNotFound());
+                                    .catch(() => notifyBarcodeScanMiss());
                                 }}
                                 placeholder="Search product or scan barcode…"
                               />
@@ -873,6 +972,10 @@ export default function InvoiceFormLightbox({ isOpen, onClose, onSaved, editId, 
                                     min={0}
                                     step={0.01}
                                     value={line.price}
+                                    placeholder={(() => {
+                                      const listed = getListedSellingPrice(line);
+                                      return listed != null ? listed.toFixed(2) : undefined;
+                                    })()}
                                     onValueChange={(n) => updateLine(idx, 'price', n === '' ? 0 : n)}
                                     onBlur={() => {
                                       const cost = getLineCostPrice(line);
@@ -881,7 +984,7 @@ export default function InvoiceFormLightbox({ isOpen, onClose, onSaved, editId, 
                                       updateLine(idx, 'price', min);
                                       toast.error(`Selling price cannot go below 5% above cost. Minimum is $${min.toFixed(2)}.`);
                                     }}
-                                    className="w-20 text-right border border-gray-300 rounded px-2 py-1"
+                                    className="w-20 text-right border border-gray-300 rounded px-2 py-1 placeholder:text-gray-400/70"
                                   />
                                   {line.taxable && (
                                     <span className="text-xs font-semibold text-[#0F9F8F]" title="Tax applies. Selling price is tax-exclusive.">T</span>
@@ -906,10 +1009,17 @@ export default function InvoiceFormLightbox({ isOpen, onClose, onSaved, editId, 
                                 <span className="text-gray-400">{line.quantity || ''}</span>
                               )}
                             </td>
-                            <td className="py-2 px-4 text-right font-medium">{hasProduct ? `$${(line.total ?? line.subtotal + (line.tax_amount || 0)).toFixed(2)}` : ''}</td>
+                            <td className={`py-2 px-4 text-right font-medium ${hasProduct ? moneyIn : moneyPlain}`}>{hasProduct ? `$${(line.total ?? line.subtotal + (line.tax_amount || 0)).toFixed(2)}` : ''}</td>
                             <td className="py-2 px-4">
                               {hasProduct && (
-                                <button type="button" onClick={() => removeLine(idx)} className="text-red-600 hover:bg-red-50 p-1 rounded">
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    removeLine(idx);
+                                  }}
+                                  className="text-red-600 hover:bg-red-50 p-1 rounded"
+                                >
                                   <Trash2 className="w-4 h-4" />
                                 </button>
                               )}
@@ -922,7 +1032,7 @@ export default function InvoiceFormLightbox({ isOpen, onClose, onSaved, editId, 
                 </div>
                 <div className="mt-3 flex items-center justify-between">
                   <p className="text-xs text-gray-500">
-                    Click any empty row to search or scan a barcode. Amount fills automatically.
+                    Click a line to scan into it. After a successful scan it beeps, shows a toast, and the next empty line is ready.
                   </p>
                   <button
                     type="button"
@@ -940,7 +1050,7 @@ export default function InvoiceFormLightbox({ isOpen, onClose, onSaved, editId, 
               <div className="border-t border-gray-200 pt-4">
                 <div className="flex flex-wrap items-start justify-end gap-8">
                   <div className="space-y-2 min-w-[220px]">
-                    <p className="text-sm text-gray-600">Subtotal: <span className="font-medium text-gray-900">${subtotal.toFixed(2)}</span></p>
+                    <p className="text-sm text-gray-600">Subtotal: <span className={`font-medium ${moneyIn}`}>${subtotal.toFixed(2)}</span></p>
                     {usesLineTax && (
                       <p className="text-sm text-gray-600">Product tax: <span className="font-medium text-gray-900">${lineTaxTotal.toFixed(2)}</span></p>
                     )}
@@ -959,8 +1069,8 @@ export default function InvoiceFormLightbox({ isOpen, onClose, onSaved, editId, 
                         className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
                       />
                     </div>
-                    <p className="text-sm text-gray-600">Tax: <span className="font-medium text-gray-900">${displayTax.toFixed(2)}</span></p>
-                    <p className="font-semibold text-gray-900 text-base">Total: ${total.toFixed(2)}</p>
+                    <p className="text-sm text-gray-600">Tax: <span className={`font-medium ${moneyIn}`}>${displayTax.toFixed(2)}</span></p>
+                    <p className={`font-semibold text-base ${moneyIn}`}>Total: ${total.toFixed(2)}</p>
                     <p className="text-xs text-gray-500 max-w-xs">Product tax is inherited from each line. Use Tax on bill for an extra amount on the whole document. T means tax applies.</p>
                   </div>
                 </div>
@@ -988,14 +1098,12 @@ export default function InvoiceFormLightbox({ isOpen, onClose, onSaved, editId, 
                 <label className="block text-sm font-medium text-gray-700 mb-1">Customer name *</label>
                 <input type="text" value={newCustomerForm.name} onChange={(e) => setNewCustomerForm((f) => ({ ...f, name: e.target.value }))} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" required />
               </div>
-              <div className="flex gap-2">
-                <div className="flex-1">
+              <div className="flex items-end gap-2">
+                <div className="flex-1 min-w-0">
                   <label className="block text-sm font-medium text-gray-700 mb-1">Customer ID</label>
                   <input type="text" value={newCustomerForm.customer_code} onChange={(e) => setNewCustomerForm((f) => ({ ...f, customer_code: e.target.value }))} placeholder="Auto-generated" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" />
                 </div>
-                <div className="pt-6">
-                  <button type="button" onClick={generateCustomerCode} className="px-3 py-2 border border-gray-300 rounded-lg text-sm hover:bg-gray-50">Generate</button>
-                </div>
+                <button type="button" onClick={generateCustomerCode} className="shrink-0 px-3 py-2 border border-gray-300 rounded-lg text-sm hover:bg-gray-50">Generate</button>
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Phone *</label>
@@ -1019,8 +1127,13 @@ export default function InvoiceFormLightbox({ isOpen, onClose, onSaved, editId, 
                   <input type="text" value={newCustomerForm.city} onChange={(e) => setNewCustomerForm((f) => ({ ...f, city: e.target.value }))} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">State</label>
-                  <input type="text" value={newCustomerForm.state} onChange={(e) => setNewCustomerForm((f) => ({ ...f, state: e.target.value }))} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" />
+                  <label className="block text-sm font-medium text-gray-700 mb-1">State / Province</label>
+                  <RegionCombobox
+                    value={newCustomerForm.state}
+                    placeholder="Search or type…"
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                    onChange={(next) => setNewCustomerForm((f) => ({ ...f, state: next }))}
+                  />
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">ZIP</label>
@@ -1194,5 +1307,13 @@ export default function InvoiceFormLightbox({ isOpen, onClose, onSaved, editId, 
         </div>
       )}
     </div>
+    {showAddProduct && (
+      <ProductModal
+        product={null}
+        onClose={() => setShowAddProduct(false)}
+        onSuccess={handleCreatedProduct}
+      />
+    )}
+    </>
   );
 }

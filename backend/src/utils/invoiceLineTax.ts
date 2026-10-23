@@ -133,12 +133,9 @@ export function inheritLineTaxFromProduct(
 ): InvoiceLineTaxSnapshot {
   const name = String(product?.name || 'Product').trim() || 'Product';
   const sub = roundMoney(subtotal);
-  if (!hasExplicitTaxTypeField(product)) {
-    throw new InvoiceLineTaxError(
-      `"${name}" has no configured tax type. Assign a tax type before invoicing.`
-    );
-  }
-  if (product.tax_type_id == null) {
+  // Missing assignment (legacy catalog) is treated as No Tax so invoicing is not blocked.
+  // Admin still gets a UI warning; assign a real TaxType when tax should apply.
+  if (!hasExplicitTaxTypeField(product) || product.tax_type_id == null) {
     const none = noTaxLineSnapshot(sub);
     return opts?.customerExempt ? applyCustomerExemption(none, sub) : none;
   }

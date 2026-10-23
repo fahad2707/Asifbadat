@@ -500,9 +500,7 @@ router.post('/', authenticateAdmin, async (req: AuthRequest, res) => {
       tax_rate: data.tax_rate ?? 0,
       ...(taxAssignment.kind === 'assigned'
         ? { tax_type_id: taxAssignment.id }
-        : taxAssignment.kind === 'no_tax'
-          ? { tax_type_id: null }
-          : {}),
+        : { tax_type_id: null }),
       image_url: data.image_url || undefined,
       barcode: data.barcode || undefined,
       stock_quantity: openingQty,

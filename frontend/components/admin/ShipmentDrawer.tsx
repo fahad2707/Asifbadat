@@ -5,6 +5,7 @@ import { X } from 'lucide-react';
 import adminApi from '@/lib/admin-api';
 import toast from 'react-hot-toast';
 import { adminUi } from '@/lib/admin-ui';
+import ShipmentPackagesSection from '@/components/admin/ShipmentPackagesSection';
 
 export type ShipmentStatus =
   | 'PENDING'
@@ -248,6 +249,8 @@ export default function ShipmentDrawer({
                 <p className="mt-2 text-sm text-[#1A1A1A]">{shipment.notes}</p>
               </section>
             )}
+
+            <ShipmentPackagesSection shipmentId={shipment.id} onChanged={onChanged} />
           </div>
         )}
 

@@ -32,6 +32,9 @@ interface PurchaseOrder {
   state?: string;
   city?: string;
   status: string;
+  amount_paid?: number;
+  payment_status?: 'unpaid' | 'partial' | 'paid';
+  balance_due?: number;
   items: POItem[];
   subtotal: number;
   tax_amount: number;
@@ -328,6 +331,20 @@ export default function PurchaseOrdersPage() {
     return 'bg-slate-800 text-slate-400 border-white/10';
   };
 
+  const poPaymentLabel = (po: PurchaseOrder) => {
+    if (po.payment_status === 'paid') return 'Paid in Full';
+    if (po.payment_status === 'partial') {
+      return `Partial ($${Number(po.amount_paid || 0).toFixed(0)}/$${Number(po.total_amount || 0).toFixed(0)})`;
+    }
+    return 'Payment Pending';
+  };
+
+  const poPaymentBadgeClass = (status?: string) => {
+    if (status === 'paid') return 'bg-emerald-500/10 text-emerald-450 border-emerald-500/20';
+    if (status === 'partial') return 'bg-blue-500/10 text-blue-400 border-blue-500/20';
+    return 'bg-amber-500/10 text-amber-400 border-amber-500/20';
+  };
+
   const receivePoStock = async (po: PurchaseOrder) => {
     if (receiveInFlightRef.current) return;
     receiveInFlightRef.current = true;
@@ -458,14 +475,15 @@ export default function PurchaseOrdersPage() {
                   <th className="text-left py-3.5 px-4 text-[10px] font-bold uppercase tracking-wider">State</th>
                   <th className="text-left py-3.5 px-4 text-[10px] font-bold uppercase tracking-wider">City</th>
                   <th className="text-right py-3.5 px-4 text-[10px] font-bold uppercase tracking-wider">Total Amount</th>
-                  <th className="text-left py-3.5 px-4 text-[10px] font-bold uppercase tracking-wider">PO Status</th>
+                  <th className="text-left py-3.5 px-4 text-[10px] font-bold uppercase tracking-wider">Stock Status</th>
+                  <th className="text-left py-3.5 px-4 text-[10px] font-bold uppercase tracking-wider">Payment Status</th>
                   <th className="text-right py-3.5 px-4 text-[10px] font-bold uppercase tracking-wider">Actions</th>
                 </tr>
               </thead>
               <tbody>
                 {pos.length === 0 ? (
                   <tr>
-                    <td colSpan={11} className="py-16 text-center text-slate-500 text-xs font-semibold">
+                    <td colSpan={12} className="py-16 text-center text-slate-500 text-xs font-semibold">
                       No purchase orders yet. Click Draft PO to register imports.
                     </td>
                   </tr>
@@ -505,11 +523,26 @@ export default function PurchaseOrdersPage() {
                             {statusLabel}
                           </span>
                         </td>
+                        <td className="py-3 px-4 text-xs">
+                          <span className={`inline-flex px-2 py-0.5 rounded text-[10px] font-bold border ${poPaymentBadgeClass(po.payment_status)}`}>
+                            {poPaymentLabel(po)}
+                          </span>
+                        </td>
                         <td className="py-3 px-4 text-right text-xs" onClick={(e) => e.stopPropagation()}>
                           <div className="flex items-center justify-end gap-2.5 flex-wrap">
                             <button type="button" onClick={() => setDetailId(po.id)} className="text-[#0077C5] hover:underline font-medium">
                               View
                             </button>
+                            {po.payment_status !== 'paid' && po.status !== 'cancelled' && (
+                              <button
+                                type="button"
+                                onClick={() => setDetailId(po.id)}
+                                className="text-[#2CA01C] hover:underline font-semibold"
+                                title="Record full or partial payment to vendor"
+                              >
+                                Pay
+                              </button>
+                            )}
                             {po.status === 'draft' && (
                               <Link href={`/admin/purchase-orders/${po.id}?edit=1`} className="text-[#0077C5] hover:underline font-medium">
                                 Edit Draft
@@ -614,9 +647,9 @@ export default function PurchaseOrdersPage() {
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">PO no.</label>
-                    <div className="flex gap-2">
-                      <input type="text" value={poNumber} onChange={(e) => setPoNumber(e.target.value)} className="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm bg-gray-50" placeholder="e.g. P087684" />
-                      <button type="button" onClick={generatePoId} className="px-3 py-2 border border-gray-300 rounded-lg text-sm hover:bg-gray-50">
+                    <div className="flex items-end gap-2">
+                      <input type="text" value={poNumber} onChange={(e) => setPoNumber(e.target.value)} className="flex-1 min-w-0 border border-gray-300 rounded-lg px-3 py-2 text-sm bg-gray-50" placeholder="e.g. P087684" />
+                      <button type="button" onClick={generatePoId} className="shrink-0 px-3 py-2 border border-gray-300 rounded-lg text-sm hover:bg-gray-50">
                         Generate
                       </button>
                     </div>

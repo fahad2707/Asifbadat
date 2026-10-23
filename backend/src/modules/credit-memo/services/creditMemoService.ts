@@ -271,6 +271,12 @@ export async function approveCreditMemo(
         adminId,
         session
       );
+      // Decrease vendor's outstanding balance (Accounts Payable) by the credit memo amount
+      await Vendor.findByIdAndUpdate(
+        claimed.vendor_id,
+        { $inc: { outstanding_balance: -claimed.total_amount } },
+        { session }
+      );
     } else {
       if (!claimed.customer_id) {
         await session.abortTransaction();

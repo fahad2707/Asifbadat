@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Plus, Search, X } from 'lucide-react';
+import { Package, Plus, Printer, Search, X } from 'lucide-react';
 import adminApi from '@/lib/admin-api';
 import toast from 'react-hot-toast';
 import { adminUi } from '@/lib/admin-ui';
@@ -9,6 +9,7 @@ import NumberInput from '@/components/admin/NumberInput';
 import SearchableProductDropdown, { type ProductOption } from '@/components/admin/SearchableProductDropdown';
 import ShipmentDrawer from '@/components/admin/ShipmentDrawer';
 import { toastBarcodeNotFound, toastProductAdded } from '@/lib/barcode-feedback';
+import { openPdfFromResponse } from '@/lib/download-pdf';
 
 interface ShipmentRow {
   id: string;
@@ -22,6 +23,7 @@ interface ShipmentRow {
   expected_delivery_date?: string;
   delivered_date?: string;
   freight_charge?: number;
+  package_count?: number;
   created_at: string;
 }
 
@@ -66,6 +68,7 @@ export default function ShipmentsPage() {
   const [products, setProducts] = useState<ProductOption[]>([]);
   const [invoices, setInvoices] = useState<InvoiceOption[]>([]);
   const [previewNumber, setPreviewNumber] = useState('');
+  const [printingId, setPrintingId] = useState<string | null>(null);
 
   const [form, setForm] = useState({
     shipment_type: 'GROUND' as 'GROUND' | 'GROUND_RG',
@@ -141,6 +144,33 @@ export default function ShipmentsPage() {
   useEffect(() => {
     loadLookups();
   }, [loadLookups]);
+
+  const quickPrintLabels = async (s: ShipmentRow) => {
+    if (printingId) return;
+    setPrintingId(s.id);
+    try {
+      const res = await adminApi.get(`/shipments/${s.id}/packages`);
+      const pkgs = (res.data?.packages || []) as Array<{ id: string; package_code: string }>;
+      if (!Array.isArray(pkgs) || pkgs.length === 0) {
+        toast.error('No packages found for this shipment. Create packages first.');
+        setDetailId(s.id);
+        return;
+      }
+      const pdfRes = await adminApi.post(
+        `/packages/labels/pdf`,
+        { items: pkgs.map((p) => ({ package_id: p.id, quantity: 1 })) },
+        { responseType: 'arraybuffer' }
+      );
+      const ok = await openPdfFromResponse(pdfRes.data, pdfRes.headers?.['content-type']);
+      if (ok) {
+        toast.success(`Opened ${pkgs.length} barcode label(s) for ${s.shipment_number}`);
+      }
+    } catch (err) {
+      toast.error(apiError(err, 'Failed to print package labels'));
+    } finally {
+      setPrintingId(null);
+    }
+  };
 
   const openCreate = async () => {
     setForm({
@@ -300,6 +330,7 @@ export default function ShipmentsPage() {
                   <th className="text-left py-3 px-4">Shipment #</th>
                   <th className="text-left py-3 px-4">Type</th>
                   <th className="text-left py-3 px-4">Status</th>
+                  <th className="text-left py-3 px-4">Packages</th>
                   <th className="text-left py-3 px-4">Invoice</th>
                   <th className="text-left py-3 px-4">Transporter</th>
                   <th className="text-left py-3 px-4">Vehicle</th>
@@ -310,7 +341,7 @@ export default function ShipmentsPage() {
               <tbody>
                 {list.length === 0 ? (
                   <tr>
-                    <td colSpan={8} className="py-16 text-center text-[#8D9096] text-sm">
+                    <td colSpan={9} className="py-16 text-center text-[#8D9096] text-sm">
                       No shipments yet. Create one to start tracking dispatch or returns.
                     </td>
                   </tr>
@@ -329,6 +360,45 @@ export default function ShipmentsPage() {
                       </td>
                       <td className={adminUi.tableCell}>
                         <span className={statusBadge(s.status)}>{s.status}</span>
+                      </td>
+                      <td className={adminUi.tableCell} onClick={(e) => e.stopPropagation()}>
+                        {typeof s.package_count === 'number' && s.package_count > 0 ? (
+                          <div className="flex items-center gap-1.5 flex-nowrap">
+                            <button
+                              type="button"
+                              onClick={() => setDetailId(s.id)}
+                              className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium bg-[#E6F4FB] text-[#0077C5] hover:bg-[#D4EBF7] transition-colors"
+                              title="Click to view packages in drawer"
+                            >
+                              <Package className="w-3 h-3" />
+                              <span>{s.package_count} {s.package_count === 1 ? 'pkg' : 'pkgs'}</span>
+                            </button>
+                            <button
+                              type="button"
+                              disabled={printingId === s.id}
+                              onClick={() => quickPrintLabels(s)}
+                              className="inline-flex items-center gap-1 px-2 py-0.5 text-xs font-medium text-[#1A1A1A] bg-white border border-[#E3E5E8] rounded hover:bg-[#F3F4F6] transition-colors disabled:opacity-50"
+                              title="Print Code 128 barcode labels for all packages"
+                            >
+                              {printingId === s.id ? (
+                                <span className="animate-spin inline-block w-3 h-3 border border-current border-t-transparent rounded-full" />
+                              ) : (
+                                <Printer className="w-3 h-3 text-[#6B6C72]" />
+                              )}
+                              <span>Print</span>
+                            </button>
+                          </div>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => setDetailId(s.id)}
+                            className="inline-flex items-center gap-1 px-2 py-0.5 text-xs text-[#6B6C72] hover:text-[#1A1A1A] hover:bg-[#F3F4F6] border border-dashed border-[#D1D5DB] rounded transition-colors"
+                            title="Open drawer to create packages"
+                          >
+                            <Plus className="w-3 h-3" />
+                            <span>Add packages</span>
+                          </button>
+                        )}
                       </td>
                       <td className={adminUi.tableCell}>
                         {s.linked_invoice_id

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import api from '@/lib/api';
@@ -55,8 +55,13 @@ export default function LoginPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const preferredRedirect = searchParams.get('redirect');
+  const requestedMode: Mode = searchParams.get('mode') === 'signup' ? 'signup' : 'login';
   const { setAuth } = useAuthStore();
-  const [mode, setMode] = useState<Mode>('login');
+  const [mode, setMode] = useState<Mode>(requestedMode);
+
+  useEffect(() => {
+    setMode(requestedMode);
+  }, [requestedMode]);
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');

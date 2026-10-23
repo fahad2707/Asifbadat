@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { Pencil, Check, X } from 'lucide-react';
 import NumberInput from './NumberInput';
+import RegionCombobox from '@/components/RegionCombobox';
 
 export function displayValue(value?: string | number | null): string {
   if (value === undefined || value === null || String(value).trim() === '') return '—';
@@ -216,7 +217,12 @@ export function EditableAddress({
           />
           <div className="grid grid-cols-3 gap-2">
             <input type="text" placeholder="City" value={draft.city} onChange={(e) => setDraft((d) => ({ ...d, city: e.target.value }))} className={fieldInputClass} />
-            <input type="text" placeholder="State" value={draft.state} onChange={(e) => setDraft((d) => ({ ...d, state: e.target.value }))} className={fieldInputClass} />
+            <RegionCombobox
+              value={draft.state}
+              placeholder="State / Province"
+              className={fieldInputClass}
+              onChange={(next) => setDraft((d) => ({ ...d, state: next }))}
+            />
             <input type="text" placeholder="ZIP" value={draft.zip} onChange={(e) => setDraft((d) => ({ ...d, zip: e.target.value }))} className={fieldInputClass} />
           </div>
           <div className="flex items-center gap-1">

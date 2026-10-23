@@ -266,6 +266,9 @@ function stubRegisterUserCreate() {
   mock.method(User, 'create', async (doc: Record<string, unknown>) => ({
     _id: new mongoose.Types.ObjectId(USER_ID),
     ...doc,
+    save: async function save() {
+      return this;
+    },
   }));
 }
 
@@ -499,7 +502,7 @@ test('register matching non-approved unlinked CRM stays unlinked and records app
   assert.equal(String((apps.created[0].matched_customer_ids as mongoose.Types.ObjectId[])[0]), CUSTOMER_ID);
 });
 
-test('email failure after unlinked non-approved CRM match deletes User/application without modifying CRM', async () => {
+test('email failure after unlinked non-approved CRM match still completes registration', async () => {
   assertNoMongoConnection();
   stubVerificationEmailFailure();
   stubRegisterUserCreate();
@@ -549,19 +552,19 @@ test('email failure after unlinked non-approved CRM match deletes User/applicati
       password: 'password12',
     });
 
-  assert.equal(res.status, 500);
-  assert.match(String(res.body.error), /verification email/i);
-  assert.equal(userDeleted, true);
+  assert.equal(res.status, 201);
+  assert.ok(res.body.token);
+  assert.equal(userDeleted, false);
   assert.equal(existing.deleted, false);
   assert.equal(existing.account_status, ACCOUNT_STATUS_PENDING);
   assert.equal(existing.is_active, true);
   assert.equal(apps.created.length, 1);
   assert.equal(apps.created[0].link_outcome, 'unlinked');
   assert.equal(apps.created[0].match_kind, 'non_approved_crm');
-  assert.deepEqual(apps.deletedUserIds, [USER_ID]);
+  assert.deepEqual(apps.deletedUserIds, []);
 });
 
-test('email failure after created Customer deletes Customer, application, and User', async () => {
+test('email failure after created Customer still completes registration', async () => {
   assertNoMongoConnection();
   stubVerificationEmailFailure();
   stubRegisterUserCreate();
@@ -572,10 +575,8 @@ test('email failure after created Customer deletes Customer, application, and Us
     ...doc,
   }));
 
-  let deletedCustomerFilter: unknown;
-  mock.method(Customer, 'deleteOne', async (filter: unknown) => {
-    deletedCustomerFilter = filter;
-    return { deletedCount: 1 };
+  mock.method(Customer, 'deleteOne', async () => {
+    throw new Error('must not roll back Customer after SMTP failure');
   });
   mock.method(Customer, 'updateOne', async () => {
     throw new Error('must not $unset on a Customer created by this registration');
@@ -596,15 +597,14 @@ test('email failure after created Customer deletes Customer, application, and Us
       password: 'password12',
     });
 
-  assert.equal(res.status, 500);
-  assert.match(String(res.body.error), /verification email/i);
-  assert.equal(userDeleted, true);
-  assert.equal(String((deletedCustomerFilter as { user_id?: { toString(): string } }).user_id), USER_ID);
+  assert.equal(res.status, 201);
+  assert.ok(res.body.token);
+  assert.equal(userDeleted, false);
   assert.equal(apps.created.length, 1);
-  assert.deepEqual(apps.deletedUserIds, [USER_ID]);
+  assert.deepEqual(apps.deletedUserIds, []);
 });
 
-test('email failure after unlinked match deletes User and application without modifying Customer', async () => {
+test('email failure after unlinked match still completes registration', async () => {
   assertNoMongoConnection();
   stubVerificationEmailFailure();
   stubRegisterUserCreate();
@@ -642,11 +642,11 @@ test('email failure after unlinked match deletes User and application without mo
       password: 'password12',
     });
 
-  assert.equal(res.status, 500);
-  assert.match(String(res.body.error), /verification email/i);
-  assert.equal(userDeleted, true);
+  assert.equal(res.status, 201);
+  assert.ok(res.body.token);
+  assert.equal(userDeleted, false);
   assert.equal(apps.created.length, 1);
-  assert.deepEqual(apps.deletedUserIds, [USER_ID]);
+  assert.deepEqual(apps.deletedUserIds, []);
 });
 
 test('application insert failure rolls back User/Customer and does not succeed', async () => {

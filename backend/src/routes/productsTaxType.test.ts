@@ -228,7 +228,7 @@ test('POST /api/products/bulk-assign-tax-type rejects an invalid TaxType', async
   assert.equal(res.status, 400);
 });
 
-test('POST /api/products without tax_type_id leaves assignment unconfigured', async () => {
+test('POST /api/products without tax_type_id defaults to No Tax', async () => {
   assertNoMongoConnection();
   stubTaxTypeLookup();
   stubGenerateId();
@@ -245,7 +245,7 @@ test('POST /api/products without tax_type_id leaves assignment unconfigured', as
     .send({ name: 'Legacy Create', price: 9.99 });
 
   assert.equal(res.status, 201);
-  assert.equal(Object.prototype.hasOwnProperty.call(created, 'tax_type_id'), false);
+  assert.equal(created?.tax_type_id, null);
   assert.equal(created?.price, 9.99);
   assert.equal(created?.tax_rate, 0);
 });

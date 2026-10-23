@@ -205,21 +205,35 @@ export async function linkOrCreateCustomerForNewUser(opts: {
     };
   }
 
-  const created = await Customer.create({
-    name: (opts.name && opts.name.trim()) || email || phone || 'Online account',
-    phone: phone || `account:${String(opts.userId)}`,
-    email,
-    user_id: opts.userId,
-    account_status: ACCOUNT_STATUS_PENDING,
-    website_signup: true,
-    is_active: true,
-    notes: 'Created from storefront registration',
-  });
+  try {
+    const created = await Customer.create({
+      name: (opts.name && opts.name.trim()) || email || phone || 'Online account',
+      phone: phone || `account:${String(opts.userId)}`,
+      email,
+      user_id: opts.userId,
+      account_status: ACCOUNT_STATUS_PENDING,
+      website_signup: true,
+      is_active: true,
+      notes: 'Created from storefront registration',
+    });
 
-  return {
-    action: 'created',
-    customerId: created._id.toString(),
-    matchedCustomerIds: [],
-    matchKind: 'none',
-  };
+    return {
+      action: 'created',
+      customerId: created._id.toString(),
+      matchedCustomerIds: [],
+      matchKind: 'none',
+    };
+  } catch (err) {
+    const code = (err as { code?: number })?.code;
+    // Unique phone/email/user_id in Atlas must not abort website registration.
+    if (code === 11000) {
+      return {
+        action: 'unlinked',
+        customerId: null,
+        matchedCustomerIds: [],
+        matchKind: 'none',
+      };
+    }
+    throw err;
+  }
 }

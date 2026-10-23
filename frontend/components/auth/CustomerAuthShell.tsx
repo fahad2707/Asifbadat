@@ -34,7 +34,7 @@ export default function CustomerAuthShell({
         }}
       >
         <div className={customerAuthUi.brandMark}>
-          <Link href="/" className="inline-block focus:outline-none focus-visible:ring-2 focus-visible:ring-[#BFA06A] rounded-sm">
+          <Link href="/site" className="inline-block focus:outline-none focus-visible:ring-2 focus-visible:ring-[#BFA06A] rounded-sm">
             <h1 className={customerAuthUi.brandTitle} style={{ fontFamily: customerAuthTheme.serif }}>
               Express <span className={customerAuthUi.brandAccent}>Distributors</span>
             </h1>

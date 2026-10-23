@@ -57,15 +57,11 @@ test('explicit No Tax product is non-taxable', () => {
   assert.equal(snap.total, 7.5);
 });
 
-test('Not configured product is rejected, not treated as No Tax', () => {
-  assert.throws(
-    () => inheritLineTaxFromProduct({ name: 'Bare' }, 4.99),
-    (err: unknown) => {
-      assert.ok(err instanceof InvoiceLineTaxError);
-      assert.match(err.message, /no configured tax type/i);
-      return true;
-    }
-  );
+test('Not configured product is treated as No Tax so invoicing can continue', () => {
+  const snap = inheritLineTaxFromProduct({ name: 'Bare' }, 4.99);
+  assert.deepEqual(snap, { ...noTaxLineSnapshot(4.99) });
+  assert.equal(snap.taxable, false);
+  assert.equal(snap.tax_amount, 0);
 });
 
 test('invalid / missing populated TaxType is rejected', () => {

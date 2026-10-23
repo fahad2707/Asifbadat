@@ -720,11 +720,11 @@ function ReceiptsPageInner() {
                 </div>
               </div>
               <div className="flex gap-2 items-end">
-                <div className="flex-1">
+                <div className="flex-1 min-w-0">
                   <label className={adminUi.label}>Transaction ID</label>
                   <input type="text" value={form.trx_id} onChange={(e) => setForm((f) => ({ ...f, trx_id: e.target.value }))} className={`${adminUi.field} mt-1`} required />
                 </div>
-                <button type="button" onClick={generateTrxId} className={adminUi.btnSecondary}>Generate</button>
+                <button type="button" onClick={generateTrxId} className={`${adminUi.btnSecondary} shrink-0`}>Generate</button>
               </div>
               <div>
                 <label className={adminUi.label}>Bank (optional — skip to leave in Pending)</label>

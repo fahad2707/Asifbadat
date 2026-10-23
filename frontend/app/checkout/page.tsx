@@ -6,6 +6,7 @@ import { ShoppingBag, CreditCard, Truck, ArrowLeft, Lock } from 'lucide-react';
 import { useCartStore } from '@/lib/store';
 import CheckoutAccessGate from '@/components/auth/CheckoutAccessGate';
 import { fetchProfileAccountStatus } from '@/lib/account-status';
+import RegionCombobox from '@/components/RegionCombobox';
 
 const CHECKOUT_SUBMISSION_KEY = 'checkout_submission_id';
 
@@ -322,12 +323,14 @@ export default function CheckoutPage() {
                   <input value={city} onChange={(e) => setCity(e.target.value)} className={inputClass} placeholder="New York" />
                 </div>
                 <div>
-                  <label className={labelClass}>State *</label>
-                  <input
+                  <label className={labelClass}>State / Province *</label>
+                  <RegionCombobox
+                    required
                     value={state}
-                    onChange={(e) => setState(e.target.value)}
+                    onChange={setState}
                     className={inputClass}
-                    placeholder="e.g. New York"
+                    placeholder="Search or type…"
+                    listClassName="absolute z-50 left-0 right-0 mt-1 max-h-56 overflow-y-auto bg-[#1A1A1D] border border-[rgba(191,160,106,.22)] rounded-lg shadow-lg text-sm text-[#F5F0E8] [&_button:hover]:bg-white/10 [&_button]:text-[#F5F0E8]"
                   />
                 </div>
                 <div>

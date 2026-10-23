@@ -7,6 +7,7 @@ import { ArrowLeft, FileText, UploadCloud } from 'lucide-react';
 import adminApi, { uploadApi } from '@/lib/admin-api';
 import toast from 'react-hot-toast';
 import { EditableAddress, EditableField } from '@/components/admin/EditableField';
+import { moneyOut, moneyPlain } from '@/lib/moneyTone';
 
 interface Supplier {
   id: string;
@@ -134,8 +135,8 @@ export default function SupplierDetailPage() {
         </Link>
       </div>
 
-      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-6">
-        <div>
+      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-6 min-w-0">
+        <div className="min-w-0">
           <EditableField
             label=""
             heading
@@ -155,7 +156,7 @@ export default function SupplierDetailPage() {
         </div>
         <div className="bg-white border border-[#E2E8F0] rounded-lg px-4 py-3 min-w-[220px]">
           <p className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">Outstanding Dues Payable</p>
-          <p className="text-2xl font-extrabold text-amber-600 mt-1 font-mono">${openBalance.toFixed(2)}</p>
+          <p className={`text-2xl font-extrabold mt-1 font-mono ${openBalance > 0 ? moneyOut : moneyPlain}`}>${openBalance.toFixed(2)}</p>
           <div className="mt-2">
             <EditableField
               label="Credit limit"

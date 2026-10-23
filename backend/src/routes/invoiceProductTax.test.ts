@@ -194,18 +194,24 @@ test('POST invoice inherits GST / VAT / No Tax per line and sums tax', async () 
   }
 });
 
-test('POST invoice rejects a Not configured product', async () => {
+test('POST invoice treats a Not configured product as No Tax', async () => {
   assertNoMongoConnection();
   stubProducts();
-  mock.method(Invoice, 'create', async () => {
-    throw new Error('create must not run for unconfigured tax');
+  let created: Record<string, unknown> | undefined;
+  mock.method(Invoice, 'create', async (docs: unknown) => {
+    created = firstCreateDoc(docs);
+    const inv = createdInvoice(created);
+    return Array.isArray(docs) ? [inv] : inv;
   });
   const res = await postInvoice({
     invoice_number: 'INV#BARE',
     items: [{ product_id: PRODUCT_NC, product_name: 'Bare', quantity: 1, price: 3, subtotal: 3 }],
   });
-  assert.equal(res.status, 400);
-  assert.match(String(res.body.error), /no configured tax type/i);
+  assert.equal(res.status, 201);
+  const items = created?.items as Array<{ taxable?: boolean; tax_amount?: number; tax_type_label?: string }>;
+  assert.equal(items[0].taxable, false);
+  assert.equal(items[0].tax_amount, 0);
+  assert.equal(items[0].tax_type_label, 'No Tax');
 });
 
 test('POST quotation inherits line tax and does not touch stock', async () => {

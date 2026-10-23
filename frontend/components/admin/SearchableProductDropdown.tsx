@@ -25,8 +25,14 @@ interface Props {
   displayName?: string;
   onSelect: (product: ProductOption) => void;
   onBarcodeScan?: (code: string) => void;
+  /** Enter/scanner exact match. Falls back to onSelect when omitted. */
+  onEnterSelect?: (product: ProductOption) => void;
+  /** When set, “Add a product” stays on this screen instead of navigating away. */
+  onAddProduct?: () => void;
   placeholder?: string;
   showPrice?: boolean;
+  /** Focus this input so a keyboard-wedge scanner types into this line. */
+  active?: boolean;
 }
 
 export default function SearchableProductDropdown({
@@ -35,8 +41,11 @@ export default function SearchableProductDropdown({
   displayName,
   onSelect,
   onBarcodeScan,
+  onEnterSelect,
+  onAddProduct,
   placeholder = 'Search product or scan barcode…',
   showPrice = true,
+  active = false,
 }: Props) {
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState('');
@@ -53,6 +62,14 @@ export default function SearchableProductDropdown({
     document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
   }, []);
+
+  useEffect(() => {
+    if (!active) return;
+    setOpen(true);
+    setSearch('');
+    const t = window.setTimeout(() => inputRef.current?.focus(), 0);
+    return () => window.clearTimeout(t);
+  }, [active]);
 
   const selected = products.find((p) => p.id === value);
   const label = displayName || selected?.name;
@@ -81,8 +98,7 @@ export default function SearchableProductDropdown({
           p.name.toLowerCase() === code.toLowerCase(),
       );
       if (exact) {
-        // Ordinary Enter selection — no "Product added" toast (cannot distinguish scan vs typed).
-        onSelect(exact);
+        (onEnterSelect || onSelect)(exact);
         setSearch('');
         setOpen(false);
         return;
@@ -142,13 +158,26 @@ export default function SearchableProductDropdown({
       )}
       {open && (
         <div data-admin-menu className="absolute z-50 left-0 right-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-lg max-h-60 overflow-y-auto text-[#1A1A1A]">
-          <Link
-            href="/admin/products/new"
-            className="flex items-center gap-2 px-3 py-2 text-sm text-[#0F9F8F] font-medium hover:bg-teal-50 border-b border-gray-100 sticky top-0 bg-white"
-            onClick={() => setOpen(false)}
-          >
-            + Add a product
-          </Link>
+          {onAddProduct ? (
+            <button
+              type="button"
+              className="flex items-center gap-2 w-full px-3 py-2 text-sm text-[#0F9F8F] font-medium hover:bg-teal-50 border-b border-gray-100 sticky top-0 bg-white text-left"
+              onClick={() => {
+                setOpen(false);
+                onAddProduct();
+              }}
+            >
+              + Add a product
+            </button>
+          ) : (
+            <Link
+              href="/admin/products/new"
+              className="flex items-center gap-2 px-3 py-2 text-sm text-[#0F9F8F] font-medium hover:bg-teal-50 border-b border-gray-100 sticky top-0 bg-white"
+              onClick={() => setOpen(false)}
+            >
+              + Add a product
+            </Link>
+          )}
           {filtered.length === 0 ? (
             <div className="px-3 py-3 text-sm text-gray-400 text-center">No products found</div>
           ) : (

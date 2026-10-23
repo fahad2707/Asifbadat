@@ -45,12 +45,5 @@ export function getBackendBaseForProxy(): string {
     const stripped = apiUrl.replace(/\/+$/, '').replace(/\/api\/?$/i, '');
     return ensureFetchOriginForBackend(stripped);
   }
-  // Vercel Services (root vercel.json): Express is mounted at /express even when env was not set.
-  if (process.env.VERCEL === '1') {
-    const vercelHost = process.env.VERCEL_URL?.trim();
-    if (vercelHost) {
-      return `https://${vercelHost.replace(/\/+$/, '')}/express`.replace(/\/+$/, '');
-    }
-  }
   return 'http://localhost:5001';
 }

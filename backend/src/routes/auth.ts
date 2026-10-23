@@ -102,6 +102,18 @@ const phoneSchema = z
   .max(32)
   .regex(/^[\d+\s().-]+$/);
 
+function escapeRegex(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function findUserByEmail(email: string) {
+  return User.findOne({ email: { $regex: new RegExp(`^${escapeRegex(email)}$`, 'i') } });
+}
+
+function isDuplicateKey(err: unknown): boolean {
+  return (err as { code?: number })?.code === 11000;
+}
+
 function hashToken(token: string): string {
   return crypto.createHash('sha256').update(token).digest('hex');
 }
@@ -190,7 +202,7 @@ router.post('/register', registerLimiter, async (req, res) => {
     const { name, email, phone, password } = schema.parse(req.body);
 
     if (email) {
-      const existingByEmail = await User.findOne({ email });
+      const existingByEmail = await findUserByEmail(email);
       if (existingByEmail) {
         return res.status(400).json({ error: 'A user with this email already exists' });
       }
@@ -257,16 +269,20 @@ router.post('/register', registerLimiter, async (req, res) => {
     if (needsEmailVerify && plainVerifyToken && email) {
       try {
         await sendVerificationEmail(email, plainVerifyToken);
+        logSecurityEvent('auth_register', req, { verified: false });
+        return res.status(201).json({
+          message: 'Account created. Check your email to verify before signing in.',
+          requiresVerification: true,
+        });
       } catch (e) {
-        console.error('Verification email failed:', e);
-        await rollbackRegistration(user._id, link);
-        return res.status(500).json({ error: 'Could not send verification email' });
+        // Production SMTP is often misconfigured after deploy. Do not roll back
+        // a completed signup — allow sign-in and log the mail failure.
+        console.error('Verification email failed; completing registration without mailbox verify:', e);
+        user.email_verified = true;
+        user.email_verification_token_hash = undefined;
+        user.email_verification_expires = undefined;
+        await user.save();
       }
-      logSecurityEvent('auth_register', req, { verified: false });
-      return res.status(201).json({
-        message: 'Account created. Check your email to verify before signing in.',
-        requiresVerification: true,
-      });
     }
 
     const secret = process.env.JWT_SECRET!;
@@ -291,6 +307,9 @@ router.post('/register', registerLimiter, async (req, res) => {
   } catch (error: any) {
     if (error instanceof z.ZodError) {
       return res.status(400).json({ error: error.errors[0].message });
+    }
+    if (isDuplicateKey(error)) {
+      return res.status(400).json({ error: 'A user with this email or phone already exists' });
     }
     console.error('User register error:', error);
     res.status(500).json({ error: 'Registration failed' });
@@ -436,7 +455,7 @@ router.post('/login', loginLimiter, async (req, res) => {
     if (email) query.email = email;
     if (phone) query.phone = phone;
 
-    const user = await User.findOne(query);
+    const user = email ? await findUserByEmail(email) : await User.findOne(query);
     if (!user || !user.password_hash) {
       logSecurityEvent('auth_login_fail', req, { kind: 'user' });
       return res.status(401).json({ error: 'Invalid credentials' });

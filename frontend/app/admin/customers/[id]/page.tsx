@@ -32,7 +32,9 @@ import ReceivePaymentLightbox from '@/components/admin/ReceivePaymentLightbox';
 import {
   buildCustomerTallyCsvStatement,
   buildCustomerTallyLedgerItems,
+  withTallyRunningBalances,
 } from '@/lib/customerTallyLedger';
+import { MONEY_IN_HEX, MONEY_OUT_HEX, MONEY_PLAIN_HEX, moneyIn, moneyNet, moneyNetHex, moneyOut, moneyPlain } from '@/lib/moneyTone';
 
 type TabId =
   | 'overview'
@@ -85,6 +87,17 @@ export default function Customer360Page() {
   const [invoices, setInvoices] = useState<any[]>([]);
   const [receipts, setReceipts] = useState<any[]>([]);
   const [rfqs, setRfqs] = useState<any[]>([]);
+  const [approvedCreditTotal, setApprovedCreditTotal] = useState(0);
+  const [creditMemos, setCreditMemos] = useState<any[]>([]);
+  const [negotiatedPrices, setNegotiatedPrices] = useState<Array<{
+    product_id: string;
+    product_name: string;
+    sku?: string;
+    catalog_code?: string;
+    catalog_price: number | null;
+    last_price: number;
+    last_invoice_date?: string | null;
+  }>>([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<TabId>('overview');
 
@@ -103,11 +116,13 @@ export default function Customer360Page() {
   const fetchCustomerData = async () => {
     if (!id) return;
     try {
-      const [custRes, invRes, receiptsRes, rfqRes] = await Promise.all([
+      const [custRes, invRes, receiptsRes, rfqRes, cmRes, pricesRes] = await Promise.all([
         adminApi.get(`/customers/${id}`),
         adminApi.get('/invoices', { params: { customer_id: id, type: 'invoice', limit: 1000 } }),
         adminApi.get('/receipts'),
         adminApi.get('/rfq', { params: { limit: 100 } }),
+        adminApi.get('/credit-memos', { params: { type: 'CUSTOMER', customer_id: id, limit: 500 } }),
+        adminApi.get(`/customers/${id}/product-prices`).catch(() => ({ data: { prices: [] } })),
       ]);
 
       setCustomer(custRes.data);
@@ -121,6 +136,14 @@ export default function Customer360Page() {
       const quotes = rfqRes.data?.rfqs || [];
       // RFQ matching by customer name/email/phone
       setRfqs(quotes.filter((q: any) => q.customer_phone === custRes.data.phone || q.customer_name === custRes.data.name));
+
+      const memos = cmRes.data?.credit_memos || [];
+      setCreditMemos(Array.isArray(memos) ? memos : []);
+      const creditTotal = memos
+        .filter((cm: { status?: string }) => ['APPROVED', 'ADJUSTED', 'CLOSED'].includes(String(cm.status || '').toUpperCase()))
+        .reduce((s: number, cm: { total_amount?: number }) => s + (Number(cm.total_amount) || 0), 0);
+      setApprovedCreditTotal(creditTotal);
+      setNegotiatedPrices(Array.isArray(pricesRes.data?.prices) ? pricesRes.data.prices : []);
     } catch (e) {
       toast.error('Failed to load customer profiles');
     } finally {
@@ -136,9 +159,11 @@ export default function Customer360Page() {
   }, [id]);
 
   const saleInvoices = invoices.filter((i) => i.invoice_type !== 'quotation');
-  const openBalance = saleInvoices
+  const invoiceOpenBalance = saleInvoices
     .filter((i) => (i.payment_status || '').toLowerCase() !== 'paid')
     .reduce((s, i) => s + ((i.total_amount || 0) - (i.amount_paid || 0)), 0);
+  const netDue = Math.max(0, invoiceOpenBalance - approvedCreditTotal);
+  const money = (n: number) => n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
   const lifetimeSpent = saleInvoices
     .filter((i) => (i.payment_status || '').toLowerCase() === 'paid')
@@ -227,7 +252,7 @@ export default function Customer360Page() {
   const glassButtonClass = `inline-flex items-center gap-2 px-3.5 py-2.5 bg-white border border-[#CBD5E1] hover:bg-[#F1F5F9] rounded-md text-sm font-medium text-[#334155] transition-all cursor-pointer`;
 
   return (
-    <div className="max-w-[1400px] mx-auto space-y-6">
+    <div className="max-w-[1400px] mx-auto space-y-6 min-w-0">
       
       {/* Top Breadcrumb & Quick Edit Buttons */}
       <div className="flex items-center justify-between">
@@ -251,13 +276,13 @@ export default function Customer360Page() {
       </div>
 
       {/* Customer 360° Header Card (Liquid Glass Layout) */}
-      <div className={glassPanelClass}>
-        <div className="flex flex-col lg:flex-row justify-between gap-6">
-          <div className="flex items-start gap-4">
+      <div className={`${glassPanelClass} overflow-hidden`}>
+        <div className="flex flex-col xl:flex-row justify-between gap-6 min-w-0">
+          <div className="flex items-start gap-4 min-w-0 flex-1">
             <div className="w-16 h-16 rounded-2xl bg-gradient-to-tr from-teal-500/20 to-emerald-400/10 border border-teal-500/30 flex items-center justify-center text-2xl font-black text-teal-400 shrink-0 shadow-lg shadow-teal-500/5">
               {customer.name.slice(0, 2).toUpperCase()}
             </div>
-            <div>
+            <div className="min-w-0">
               <div className="flex items-center gap-2 flex-wrap">
                 <EditableField
                   label=""
@@ -321,14 +346,20 @@ export default function Customer360Page() {
           </div>
 
           {/* ERP CRM KPIs */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 p-4 bg-slate-950/40 rounded-2xl border border-white/5 shrink-0 min-w-full lg:min-w-[650px] shadow-sm">
+          <div className="grid grid-cols-2 xl:grid-cols-4 gap-4 p-4 bg-slate-950/40 rounded-2xl border border-white/5 w-full xl:w-auto xl:flex-1 min-w-0 shadow-sm">
             <div>
               <span className="text-[10px] font-bold text-slate-500 tracking-wider block uppercase">Lifetime Revenue</span>
-              <span className="text-lg font-black text-white block mt-1">${lifetimeSpent.toLocaleString('en-US', { maximumFractionDigits: 0 })}</span>
+              <span className={`text-lg font-black block mt-1 ${moneyIn}`}>${lifetimeSpent.toLocaleString('en-US', { maximumFractionDigits: 0 })}</span>
             </div>
             <div>
-              <span className="text-[10px] font-bold text-slate-500 tracking-wider block uppercase">Outstanding</span>
-              <span className="text-lg font-black text-rose-400 block mt-1">${openBalance.toLocaleString('en-US', { maximumFractionDigits: 0 })}</span>
+              <span className="text-[10px] font-bold text-slate-500 tracking-wider block uppercase">Open invoices</span>
+              <span className={`text-lg font-black block mt-1 ${moneyIn}`}>${money(invoiceOpenBalance)}</span>
+              {approvedCreditTotal > 0 && (
+                <span className="text-[10px] text-slate-500 block mt-0.5">
+                  <span className={moneyOut}>− ${money(approvedCreditTotal)}</span> credit memos →{' '}
+                  <span className={moneyNet(netDue)}>${money(netDue)} due</span>
+                </span>
+              )}
             </div>
             <div>
               <EditableField
@@ -357,7 +388,8 @@ export default function Customer360Page() {
       </div>
 
       {/* Tabs Menu Selection (iOS Glass pills navigation) */}
-      <div className="flex flex-wrap gap-1.5 p-1 bg-slate-950/60 rounded-2xl border border-white/5 backdrop-blur-md">
+      <div className="w-full min-w-0 overflow-x-auto">
+      <div className="flex flex-nowrap sm:flex-wrap gap-1.5 p-1 bg-slate-950/60 rounded-2xl border border-white/5 backdrop-blur-md min-w-0">
         {(
           [
             { id: 'overview', label: 'Overview' },
@@ -386,9 +418,10 @@ export default function Customer360Page() {
           </button>
         ))}
       </div>
+      </div>
 
       {/* Dynamic Tab Panes */}
-      <div className={glassPanelClass}>
+      <div className={`${glassPanelClass} overflow-hidden min-w-0`}>
         
         {/* Tab 1: Overview */}
         {activeTab === 'overview' && (
@@ -541,9 +574,9 @@ export default function Customer360Page() {
                             {status.toUpperCase()}
                           </span>
                         </td>
-                        <td className="py-3 text-right text-slate-200">${Number(inv.amount_paid || 0).toFixed(2)}</td>
-                        <td className="py-3 text-right font-black text-rose-400">${balance.toFixed(2)}</td>
-                        <td className="py-3 text-right font-bold text-slate-200">${Number(inv.total_amount || 0).toFixed(2)}</td>
+                        <td className={`py-3 text-right ${Number(inv.amount_paid || 0) > 0 ? moneyIn : moneyPlain}`}>${Number(inv.amount_paid || 0).toFixed(2)}</td>
+                        <td className={`py-3 text-right font-black ${moneyNet(balance)}`}>${balance.toFixed(2)}</td>
+                        <td className={`py-3 text-right font-bold ${moneyIn}`}>${Number(inv.total_amount || 0).toFixed(2)}</td>
                         <td className="py-3 text-right" onClick={(e) => e.stopPropagation()}>
                           {balance > 0 && (
                             <button
@@ -584,7 +617,7 @@ export default function Customer360Page() {
                     <td className="py-3 font-mono text-white">{rec.trx_id}</td>
                     <td className="py-3 text-slate-300">{rec.invoice_num || 'Deposit Advance'}</td>
                     <td className="py-3 font-bold text-slate-200">{rec.pmt_mode || 'Bank Wire'}</td>
-                    <td className="py-3 text-right font-black text-teal-400">${rec.amount_received.toFixed(2)}</td>
+                    <td className={`py-3 text-right font-black ${moneyIn}`}>${rec.amount_received.toFixed(2)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -600,8 +633,8 @@ export default function Customer360Page() {
               <button
                 type="button"
                 onClick={() => {
-                  const headers = ['Date', 'Particulars (Voucher)', 'Debit (Product Sales)', 'Credit (Client Payments)', 'Running Balance'];
-                  const statement = buildCustomerTallyCsvStatement(saleInvoices, receipts);
+                  const headers = ['Date', 'Particulars (Voucher)', 'Debit (Product Sales)', 'Credit (Payments / Credit memos)', 'Running Balance'];
+                  const statement = buildCustomerTallyCsvStatement(saleInvoices, receipts, creditMemos);
                   const csvRows = [headers.join(','), ...statement.map(row => row.join(','))];
                   const blob = new Blob([csvRows.join('\n')], { type: 'text/csv;charset=utf-8;' });
                   const url = URL.createObjectURL(blob);
@@ -617,44 +650,66 @@ export default function Customer360Page() {
               </button>
             </div>
 
-            <div className="overflow-x-auto font-mono text-[11px]">
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
+              <div className="rounded-lg border border-white/5 bg-slate-950/40 px-3 py-2">
+                <span className="block text-[10px] uppercase tracking-wider text-slate-500">Invoices (debit)</span>
+                <span className={`font-mono font-bold ${moneyIn}`}>${money(saleInvoices.reduce((s, i) => s + (Number(i.total_amount) || 0), 0))}</span>
+              </div>
+              <div className="rounded-lg border border-white/5 bg-slate-950/40 px-3 py-2">
+                <span className="block text-[10px] uppercase tracking-wider text-slate-500">Payments (credit)</span>
+                <span className={`font-mono font-bold ${moneyIn}`}>${money(receipts.reduce((s, r) => s + (Number(r.amount_received) || 0), 0))}</span>
+              </div>
+              <div className="rounded-lg border border-white/5 bg-slate-950/40 px-3 py-2">
+                <span className="block text-[10px] uppercase tracking-wider text-slate-500">Credit memos (credit)</span>
+                <span className={`font-mono font-bold ${moneyOut}`}>${money(approvedCreditTotal)}</span>
+              </div>
+              <div className="rounded-lg border border-white/5 bg-slate-950/40 px-3 py-2">
+                <span className="block text-[10px] uppercase tracking-wider text-slate-500">Closing / net due</span>
+                <span className={`font-mono font-bold ${moneyNet(netDue)}`}>${money(netDue)}</span>
+              </div>
+            </div>
+
+            <div className="overflow-x-auto font-mono text-[11px] text-[#1A1A1A]">
               <table className="w-full text-left">
-                <thead className="bg-slate-950/60 text-slate-400">
-                  <tr className="border-b border-white/10">
+                <thead className="bg-[#F4F5F8] text-[#6B6C72]">
+                  <tr className="border-b border-[#E3E5E8]">
                     <th className="py-2 px-2">Date</th>
                     <th className="py-2 px-2">Particulars (Voucher Voucher Class)</th>
                     <th className="py-2 px-2 text-right">Debit (Sales Total)</th>
-                    <th className="py-2 px-2 text-right">Credit (Receipt Total)</th>
+                    <th className="py-2 px-2 text-right">Credit (Receipt / Memo)</th>
                     <th className="py-2 px-2 text-right">Balance</th>
                   </tr>
                 </thead>
                 <tbody>
-                  <tr className="border-b border-white/5 font-semibold text-slate-400">
+                  <tr className="border-b border-[#E3E5E8] font-semibold">
                     <td className="py-2 px-2">—</td>
                     <td className="py-2 px-2">Opening balance carry forward</td>
-                    <td className="py-2 px-2 text-right">0.00</td>
-                    <td className="py-2 px-2 text-right">0.00</td>
-                    <td className="py-2 px-2 text-right">0.00 CR</td>
+                    <td className="py-2 px-2 text-right"><span style={{ color: MONEY_PLAIN_HEX }}>0.00</span></td>
+                    <td className="py-2 px-2 text-right"><span style={{ color: MONEY_PLAIN_HEX }}>0.00</span></td>
+                    <td className="py-2 px-2 text-right"><span style={{ color: MONEY_PLAIN_HEX }}>0.00 CR</span></td>
                   </tr>
                   
-                  {/* Ledger math loop */}
-                  {(() => {
-                    let runningBalance = 0;
-                    const items = buildCustomerTallyLedgerItems(saleInvoices, receipts);
-
-                    return items.map((it, idx) => {
-                      runningBalance += it.debit - it.credit;
-                      return (
-                        <tr key={idx} className="border-b border-white/5 hover:bg-white/[0.01]">
-                          <td className="py-2.5 px-2 text-slate-500">{new Date(it.date || 0).toLocaleDateString()}</td>
-                          <td className="py-2.5 px-2 text-slate-200">{it.memo}</td>
-                          <td className="py-2.5 px-2 text-right text-rose-400 font-bold">${it.debit > 0 ? it.debit.toFixed(2) : '-'}</td>
-                          <td className="py-2.5 px-2 text-right text-teal-400 font-bold">${it.credit > 0 ? it.credit.toFixed(2) : '-'}</td>
-                          <td className="py-2.5 px-2 text-right text-white font-heavy">{Math.abs(runningBalance).toFixed(2)} {runningBalance >= 0 ? 'DR' : 'CR'}</td>
-                        </tr>
-                      );
-                    });
-                  })()}
+                  {withTallyRunningBalances(buildCustomerTallyLedgerItems(saleInvoices, receipts, creditMemos)).map((it, idx) => {
+                    const giveCredit = it.kind === 'credit_memo' || /credit memo/i.test(it.memo);
+                    const debitColor = it.debit > 0 ? MONEY_IN_HEX : MONEY_PLAIN_HEX;
+                    const creditColor = it.credit > 0 ? (giveCredit ? MONEY_OUT_HEX : MONEY_IN_HEX) : MONEY_PLAIN_HEX;
+                    const balColor = moneyNetHex(it.runningBalance);
+                    return (
+                    <tr key={idx} className="border-b border-[#E3E5E8] hover:bg-[#F4F5F8]">
+                      <td className="py-2.5 px-2 text-[#6B6C72]">{new Date(it.date || 0).toLocaleDateString()}</td>
+                      <td className="py-2.5 px-2 text-[#1A1A1A]">{it.memo}</td>
+                      <td className="py-2.5 px-2 text-right font-bold">
+                        <span style={{ color: debitColor }}>{it.debit > 0 ? `$${it.debit.toFixed(2)}` : '-'}</span>
+                      </td>
+                      <td className="py-2.5 px-2 text-right font-bold">
+                        <span style={{ color: creditColor }}>{it.credit > 0 ? `$${it.credit.toFixed(2)}` : '-'}</span>
+                      </td>
+                      <td className="py-2.5 px-2 text-right font-bold">
+                        <span style={{ color: balColor }}>{Math.abs(it.runningBalance).toFixed(2)} {it.runningBalance >= 0 ? 'DR' : 'CR'}</span>
+                      </td>
+                    </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -715,9 +770,40 @@ export default function Customer360Page() {
         {activeTab === 'products' && (
           <div className="space-y-4">
             <div className="flex justify-between items-center text-xs pb-1 border-b border-white/5">
-              <span className="text-slate-400">Negotiated prices</span>
+              <span className="text-slate-400">Last selling price charged on this customer’s invoices</span>
             </div>
-            <p className="text-center py-6 text-slate-500">No negotiated prices recorded for this customer yet.</p>
+            {negotiatedPrices.length === 0 ? (
+              <p className="text-center py-6 text-slate-500">No negotiated prices recorded for this customer yet.</p>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs text-left">
+                  <thead>
+                    <tr className="border-b border-white/5 text-slate-400">
+                      <th className="py-2.5">Product</th>
+                      <th className="py-2.5">SKU / code</th>
+                      <th className="py-2.5 text-right">Catalog price</th>
+                      <th className="py-2.5 text-right">Negotiated price</th>
+                      <th className="py-2.5 text-right">Last invoiced</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {negotiatedPrices.map((row) => (
+                      <tr key={row.product_id} className="border-b border-white/5">
+                        <td className="py-3 font-semibold text-slate-200">{row.product_name}</td>
+                        <td className="py-3 text-slate-400 font-mono">{row.catalog_code || row.sku || '—'}</td>
+                        <td className="py-3 text-right text-slate-400">
+                          {row.catalog_price != null ? `$${money(row.catalog_price)}` : '—'}
+                        </td>
+                        <td className={`py-3 text-right font-black ${moneyPlain}`}>${money(row.last_price)}</td>
+                        <td className="py-3 text-right text-slate-400">
+                          {row.last_invoice_date ? new Date(row.last_invoice_date).toLocaleDateString() : '—'}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
         )}
 

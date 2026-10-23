@@ -9,6 +9,8 @@ import adminApi from '@/lib/admin-api';
 import { adminMenuItemClass, adminMenuPanel, adminUi } from '@/lib/admin-ui';
 import toast from 'react-hot-toast';
 import ReceivePaymentLightbox from '@/components/admin/ReceivePaymentLightbox';
+import RegionCombobox from '@/components/RegionCombobox';
+import { moneyIn, moneyNet } from '@/lib/moneyTone';
 
 interface CustomerDoc {
   name: string;
@@ -149,6 +151,14 @@ export default function CustomersPage() {
   useEffect(() => {
     fetchSummary();
     fetchBalances();
+    const onVis = () => {
+      if (document.visibilityState === 'visible') {
+        fetchSummary();
+        fetchBalances();
+      }
+    };
+    document.addEventListener('visibilitychange', onVis);
+    return () => document.removeEventListener('visibilitychange', onVis);
   }, []);
 
   // Quick command: /admin/customers?create=1 opens a blank customer form.
@@ -355,7 +365,7 @@ export default function CustomersPage() {
     <div className="space-y-6">
       
       {/* Title block */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className={adminUi.pageTitle}>Customers</h1>
           <p className={`${adminUi.meta} mt-1`}>Manage B2B Customer Profiles, credit accounts, and statements.</p>
@@ -389,15 +399,15 @@ export default function CustomersPage() {
               <p className={`${adminUi.label} mt-1`}>Unbilled income</p>
             </div>
             <button type="button" onClick={() => router.push('/admin/invoices?unpaid_only=1')} className={`text-center p-3 ${adminUi.panel} hover:bg-[#F1F5F9]`}>
-              <p className="text-2xl font-semibold tabular-nums text-[#DC2626]">${Number(summary.overdueTotal ?? 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}</p>
+              <p className={`text-2xl font-semibold tabular-nums ${moneyIn}`}>${Number(summary.overdueTotal ?? 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}</p>
               <p className={`${adminUi.label} mt-1`}>{(summary.overdueCount ?? 0)} overdue invoices</p>
             </button>
             <button type="button" onClick={() => router.push('/admin/invoices?unpaid_only=1')} className={`text-center p-3 ${adminUi.panel} hover:bg-[#F1F5F9]`}>
-              <p className="text-2xl font-semibold tabular-nums text-[#D97706]">${Number(summary.openTotal ?? 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}</p>
+              <p className={`text-2xl font-semibold tabular-nums ${moneyIn}`}>${Number(summary.openTotal ?? 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}</p>
               <p className={`${adminUi.label} mt-1`}>{(summary.openCount ?? 0)} open invoices</p>
             </button>
             <div className={`text-center p-3 ${adminUi.panel}`}>
-              <p className="text-2xl font-semibold tabular-nums text-[#16A34A]">${Number(summary.recentlyPaidTotal ?? 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}</p>
+              <p className={`text-2xl font-semibold tabular-nums ${moneyIn}`}>${Number(summary.recentlyPaidTotal ?? 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}</p>
               <p className={`${adminUi.label} mt-1`}>{(summary.paidCount ?? 0)} recently paid</p>
             </div>
           </div>
@@ -491,7 +501,7 @@ export default function CustomersPage() {
                           <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wide bg-slate-800 text-slate-400">Pending</span>
                         )}
                       </td>
-                      <td className="py-3 px-4 text-right font-bold text-slate-200">${openBal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                      <td className={`py-3 px-4 text-right font-bold ${moneyNet(openBal)}`}>${openBal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
                       <td className="py-3 px-4 text-right" onClick={(e) => e.stopPropagation()}>
                         <div className="relative inline-block">
                           <button
@@ -587,8 +597,8 @@ export default function CustomersPage() {
                 />
               </div>
               {!editing && (
-                <div className="flex gap-2">
-                  <div className="flex-1">
+                <div className="flex items-end gap-2">
+                  <div className="flex-1 min-w-0">
                     <label className="block text-slate-400 mb-1.5 uppercase font-bold tracking-wider">Customer ID</label>
                     <input
                       type="text"
@@ -598,9 +608,7 @@ export default function CustomersPage() {
                       className={glassInputClass}
                     />
                   </div>
-                  <div className="pt-5.5">
-                    <button type="button" onClick={generateCustomerCode} className={glassButtonClass}>Generate</button>
-                  </div>
+                  <button type="button" onClick={generateCustomerCode} className={`${glassButtonClass} shrink-0`}>Generate</button>
                 </div>
               )}
               <div className="grid grid-cols-2 gap-4">
@@ -651,7 +659,7 @@ export default function CustomersPage() {
                   className={glassInputClass}
                 />
               </div>
-              <div className="grid grid-cols-3 gap-2">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                 <div>
                   <label className="block text-slate-400 mb-1.5 uppercase font-bold tracking-wider">City</label>
                   <input
@@ -662,12 +670,12 @@ export default function CustomersPage() {
                   />
                 </div>
                 <div>
-                  <label className="block text-slate-400 mb-1.5 uppercase font-bold tracking-wider">State</label>
-                  <input
-                    type="text"
+                  <label className="block text-slate-400 mb-1.5 uppercase font-bold tracking-wider">State / Province</label>
+                  <RegionCombobox
                     value={form.state || ''}
-                    onChange={(e) => { setForm({ ...form, state: e.target.value }); setCustomerFormDirty(true); }}
+                    placeholder="Search or type…"
                     className={glassInputClass}
+                    onChange={(next) => { setForm({ ...form, state: next }); setCustomerFormDirty(true); }}
                   />
                 </div>
                 <div>
@@ -760,11 +768,11 @@ export default function CustomersPage() {
               <div className="flex gap-4 py-2 border-t border-b border-white/5">
                 <div className="flex items-center gap-2">
                   <DollarSign className="w-4 h-4 text-teal-400" />
-                  <span className="text-slate-350">Paid Spending: <strong className="text-teal-400">${detailPaid.toFixed(2)}</strong></span>
+                  <span className="text-slate-350">Paid Spending: <strong className={moneyIn}>${detailPaid.toFixed(2)}</strong></span>
                 </div>
                 <div className="flex items-center gap-2">
                   <DollarSign className="w-4 h-4 text-rose-455" />
-                  <span className="text-slate-350">Unpaid Ledger: <strong className="text-rose-400">${detailUnpaid.toFixed(2)}</strong></span>
+                  <span className="text-slate-350">Unpaid Ledger: <strong className={moneyIn}>${detailUnpaid.toFixed(2)}</strong></span>
                 </div>
               </div>
               <div>

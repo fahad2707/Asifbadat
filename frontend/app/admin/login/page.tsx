@@ -106,12 +106,6 @@ export default function AdminLoginPage() {
             {loading ? 'Authenticating...' : 'Sign In'}
           </button>
         </form>
-        <p className="mt-6 text-center text-xs text-slate-500 font-medium">
-          Default: <span className="font-mono text-slate-400">admin@edinc.com</span> / <span className="font-mono text-slate-400">Admin1234</span>
-        </p>
-        <p className="mt-1.5 text-center text-[10px] text-slate-650 font-medium">
-          Production: configure <span className="font-mono text-slate-600">BACKEND_URL</span> on Vercel deployment variables.
-        </p>
       </div>
     </div>
   );

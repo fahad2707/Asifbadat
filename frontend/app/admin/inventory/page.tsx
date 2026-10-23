@@ -1528,15 +1528,13 @@ function InventoryPageInner() {
             </div>
             <form onSubmit={handleSaveItem} className="p-5 space-y-4 text-xs">
               <div className="flex gap-2 items-end">
-                <div className="flex-1">
+                <div className="flex-1 min-w-0">
                   <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">Item ID *</label>
                   <input type="text" value={form.item_id} onChange={(e) => setForm((f) => ({ ...f, item_id: e.target.value }))} className="w-full bg-slate-950/60 border border-white/10 rounded-xl px-4 py-2 text-xs text-slate-205 focus:outline-none" />
                 </div>
-                <div>
-                  <button type="button" onClick={generateItemId} className="px-3.5 py-2.5 bg-slate-800 border border-white/5 text-slate-350 hover:text-white rounded-xl text-xs font-semibold transition-all">
-                    Generate
-                  </button>
-                </div>
+                <button type="button" onClick={generateItemId} className="shrink-0 px-3.5 py-2.5 bg-slate-800 border border-white/5 text-slate-350 hover:text-white rounded-xl text-xs font-semibold transition-all">
+                  Generate
+                </button>
               </div>
               <div>
                 <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">Item Type *</label>

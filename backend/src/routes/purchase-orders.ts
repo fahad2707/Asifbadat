@@ -11,6 +11,7 @@ import { buildBusinessDocumentPdf } from '../utils/businessDocPdf';
 import { sendPdfResponse } from '../utils/pdfHelpers';
 import { z } from 'zod';
 import { receivePurchaseOrder, PurchaseOrderReceiveError } from '../services/purchaseOrderReceiveService';
+import { postVendorLedger } from '../modules/vendors/services/vendorLedgerService';
 
 const router = express.Router();
 
@@ -199,6 +200,10 @@ router.get('/', authenticateAdmin, async (req: AuthRequest, res) => {
         subtotal: po.subtotal,
         tax_amount: po.tax_amount,
         total_amount: po.total_amount,
+        amount_paid: po.amount_paid || 0,
+        payment_status: po.payment_status || ((po.amount_paid || 0) >= po.total_amount && po.total_amount > 0 ? 'paid' : ((po.amount_paid || 0) > 0 ? 'partial' : 'unpaid')),
+        balance_due: Math.max(0, Math.round(((po.total_amount || 0) - (po.amount_paid || 0)) * 100) / 100),
+        payments: po.payments || [],
         expected_date: po.expected_date,
         received_at: po.received_at,
         notes: po.notes,
@@ -295,6 +300,10 @@ router.get('/:id', authenticateAdmin, async (req: AuthRequest, res) => {
       subtotal: p.subtotal,
       tax_amount: p.tax_amount,
       total_amount: p.total_amount,
+      amount_paid: p.amount_paid || 0,
+      payment_status: p.payment_status || ((p.amount_paid || 0) >= p.total_amount && p.total_amount > 0 ? 'paid' : ((p.amount_paid || 0) > 0 ? 'partial' : 'unpaid')),
+      balance_due: Math.max(0, Math.round(((p.total_amount || 0) - (p.amount_paid || 0)) * 100) / 100),
+      payments: p.payments || [],
       expected_date: p.expected_date,
       received_at: p.received_at,
       notes: p.notes,
@@ -535,6 +544,104 @@ router.delete('/:id', authenticateAdmin, async (req: AuthRequest, res) => {
   } catch (error) {
     console.error('Delete PO error:', error);
     res.status(500).json({ error: 'Failed to delete purchase order' });
+  }
+});
+
+// Record payment for PO (full or partial amount)
+router.post('/:id/payments', authenticateAdmin, async (req: AuthRequest, res) => {
+  try {
+    if (!mongoose.Types.ObjectId.isValid(String(req.params.id))) {
+      return res.status(404).json({ error: 'Purchase order not found' });
+    }
+    const schema = z.object({
+      amount: z.coerce.number().positive('Payment amount must be greater than zero'),
+      payment_method: z.string().optional().default('Cash'),
+      payment_date: z.string().optional(),
+      reference: z.string().optional(),
+      notes: z.string().optional(),
+    });
+    const data = schema.parse(req.body);
+
+    const po = await PurchaseOrder.findById(req.params.id);
+    if (!po) return res.status(404).json({ error: 'Purchase order not found' });
+    if (po.status === 'cancelled') {
+      return res.status(400).json({ error: 'Cannot record payment for a cancelled purchase order' });
+    }
+
+    const currentPaid = Math.round((Number(po.amount_paid) || 0) * 100) / 100;
+    const totalAmount = Math.round((Number(po.total_amount) || 0) * 100) / 100;
+    const remaining = Math.max(0, Math.round((totalAmount - currentPaid) * 100) / 100);
+
+    if (remaining <= 0) {
+      return res.status(400).json({ error: 'This purchase order is already paid in full' });
+    }
+
+    const payAmount = Math.round(Number(data.amount) * 100) / 100;
+    if (payAmount > remaining) {
+      return res.status(400).json({
+        error: `Payment amount ($${payAmount.toFixed(2)}) exceeds remaining balance ($${remaining.toFixed(2)})`,
+      });
+    }
+
+    const newAmountPaid = Math.round((currentPaid + payAmount) * 100) / 100;
+    const newPaymentStatus: 'unpaid' | 'partial' | 'paid' =
+      newAmountPaid >= totalAmount ? 'paid' : 'partial';
+
+    const paymentDate = data.payment_date ? new Date(data.payment_date) : new Date();
+    const paymentEntry = {
+      amount: payAmount,
+      payment_date: paymentDate,
+      payment_method: data.payment_method || 'Cash',
+      reference: data.reference,
+      notes: data.notes,
+      created_at: new Date(),
+    };
+
+    if (!Array.isArray(po.payments)) {
+      po.payments = [];
+    }
+    po.payments.push(paymentEntry as any);
+    po.amount_paid = newAmountPaid;
+    po.payment_status = newPaymentStatus;
+    await po.save();
+
+    // Post to vendor ledger
+    if (po.vendor_id) {
+      try {
+        await postVendorLedger(
+          po.vendor_id,
+          [
+            {
+              account_type: 'VENDOR_PAYMENT',
+              debit: 0,
+              credit: payAmount,
+              reference_type: 'PURCHASE_ORDER_PAYMENT',
+              reference_id: po._id as mongoose.Types.ObjectId,
+              description: `Payment for PO ${po.po_number} (${data.payment_method || 'Cash'}${data.reference ? ` Ref: ${data.reference}` : ''})`,
+            },
+          ],
+          req.userId ? new mongoose.Types.ObjectId(req.userId) : undefined
+        );
+      } catch (ledgerErr) {
+        console.error('Failed to post payment to vendor ledger:', ledgerErr);
+      }
+    }
+
+    res.json({
+      success: true,
+      id: po._id.toString(),
+      po_number: po.po_number,
+      total_amount: po.total_amount,
+      amount_paid: po.amount_paid,
+      payment_status: po.payment_status,
+      balance_due: Math.max(0, Math.round((po.total_amount - po.amount_paid) * 100) / 100),
+      payment: paymentEntry,
+      payments: po.payments,
+    });
+  } catch (error: any) {
+    if (error instanceof z.ZodError) return res.status(400).json({ error: error.errors[0].message });
+    console.error('Record PO payment error:', error);
+    res.status(500).json({ error: 'Failed to record payment' });
   }
 });
 

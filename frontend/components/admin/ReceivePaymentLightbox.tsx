@@ -6,6 +6,7 @@ import adminApi from '@/lib/admin-api';
 import { formatApiError } from '@/lib/format-api-error';
 import toast from 'react-hot-toast';
 import NumberInput from './NumberInput';
+import { moneyIn } from '@/lib/moneyTone';
 
 interface Customer {
   id: string;
@@ -192,13 +193,13 @@ export default function ReceivePaymentLightbox({ isOpen, onClose, onRecorded, pr
   return (
     <div className="admin-lightbox fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50" onClick={handleClose}>
       <div className="bg-white rounded-xl shadow-xl max-w-2xl w-full max-h-[90vh] overflow-hidden flex flex-col" onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-center justify-between p-4 border-b border-gray-200">
+        <div className="flex items-center justify-between gap-3 p-4 border-b border-gray-200 shrink-0">
           <h2 className="text-xl font-bold text-gray-900">Receive Payment</h2>
           <button type="button" onClick={handleClose} className="p-2 rounded-lg hover:bg-gray-100 text-gray-600" aria-label="Close">
             <X className="w-5 h-5" />
           </button>
         </div>
-        <div className="flex-1 overflow-y-auto p-4 space-y-4">
+        <div className="flex-1 min-h-0 overflow-y-auto p-4 space-y-4">
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Customer</label>
             <select value={customerId} onChange={(e) => { setCustomerId(e.target.value); setDirty(true); }} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm">
@@ -212,7 +213,7 @@ export default function ReceivePaymentLightbox({ isOpen, onClose, onRecorded, pr
             <>
               <div className="flex justify-between items-center p-3 bg-gray-50 rounded-lg">
                 <span className="text-sm text-gray-600">Customer balance (unpaid)</span>
-                <span className="font-semibold text-gray-900">${customerBalance.toFixed(2)}</span>
+                <span className={`font-semibold ${moneyIn}`}>${customerBalance.toFixed(2)}</span>
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Amount received</label>
@@ -324,7 +325,7 @@ export default function ReceivePaymentLightbox({ isOpen, onClose, onRecorded, pr
                           return (
                             <tr key={inv.id} className="border-t border-gray-100">
                               <td className="py-2 px-2">{inv.invoice_number}</td>
-                              <td className="py-2 px-2 text-right">${openBal.toFixed(2)}</td>
+                              <td className={`py-2 px-2 text-right ${moneyIn}`}>${openBal.toFixed(2)}</td>
                               <td className="py-2 px-2">
                                 <NumberInput min={0} max={openBal} step={0.01} value={allocations[inv.id] ?? ''} onValueChange={(n) => setAllocation(inv.id, n === '' ? '' : String(n))} className="w-full text-right border border-gray-300 rounded px-2 py-1" />
                               </td>

@@ -115,9 +115,9 @@ export default function Product360Page() {
       </div>
 
       {/* Product Header Card (iOS glassmorphism) */}
-      <div className={glassPanelClass}>
-        <div className="flex flex-col lg:flex-row justify-between gap-6">
-          <div className="flex items-start gap-4">
+      <div className={`${glassPanelClass} overflow-hidden`}>
+        <div className="flex flex-col xl:flex-row justify-between gap-6 min-w-0">
+          <div className="flex items-start gap-4 min-w-0 flex-1">
             <div className="w-16 h-16 rounded-2xl bg-gradient-to-tr from-teal-500/10 to-teal-500/5 border border-white/10 overflow-hidden flex items-center justify-center shrink-0 shadow-lg shadow-teal-500/5">
               {product.image_url ? (
                 <img src={product.image_url} alt={product.name} className="w-full h-full object-cover" />
@@ -182,7 +182,7 @@ export default function Product360Page() {
           </div>
 
           {/* Product metrics counters */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 p-4 bg-slate-950/40 rounded-2xl border border-white/5 shrink-0 min-w-full lg:min-w-[650px] shadow-sm">
+          <div className="grid grid-cols-2 xl:grid-cols-4 gap-4 p-4 bg-slate-950/40 rounded-2xl border border-white/5 w-full xl:w-auto xl:flex-1 min-w-0 shadow-sm">
             <div>
               <span className="text-[10px] font-bold text-slate-500 tracking-wider block uppercase">Warehouse Stock</span>
               <span className="text-lg font-black text-white block mt-1">{product.stock_quantity.toLocaleString()} units</span>

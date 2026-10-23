@@ -16,12 +16,24 @@ interface POItem {
   subtotal: number;
 }
 
+export interface POPayment {
+  amount: number;
+  payment_date: string;
+  payment_method: string;
+  reference?: string;
+  notes?: string;
+}
+
 interface PO {
   id: string;
   po_number: string;
   vendor?: { name?: string };
   vendor_name?: string;
   status: string;
+  amount_paid?: number;
+  payment_status?: 'unpaid' | 'partial' | 'paid';
+  balance_due?: number;
+  payments?: POPayment[];
   items: POItem[];
   subtotal: number;
   tax_amount: number;
@@ -69,6 +81,49 @@ export default function PurchaseOrderDrawer({
   const [acting, setActing] = useState(false);
   const [uploadingInvoice, setUploadingInvoice] = useState(false);
   const vendorInvoiceInputRef = useRef<HTMLInputElement>(null);
+
+  const [paying, setPaying] = useState(false);
+  const [payAmount, setPayAmount] = useState<number | ''>('');
+  const [payMethod, setPayMethod] = useState('Cash');
+  const [payReference, setPayReference] = useState('');
+  const [payNotes, setPayNotes] = useState('');
+  const [showPayForm, setShowPayForm] = useState(false);
+
+  const balanceDue = Math.max(0, Math.round(((po?.total_amount || 0) - (po?.amount_paid || 0)) * 100) / 100);
+
+  const submitPayment = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!po || paying) return;
+    const n = Number(payAmount);
+    if (!Number.isFinite(n) || n <= 0) {
+      toast.error('Enter a valid payment amount greater than zero');
+      return;
+    }
+    if (n > balanceDue) {
+      toast.error(`Payment cannot exceed remaining balance of ${money(balanceDue)}`);
+      return;
+    }
+    setPaying(true);
+    try {
+      const res = await adminApi.post(`/purchase-orders/${po.id}/payments`, {
+        amount: n,
+        payment_method: payMethod,
+        reference: payReference.trim() || undefined,
+        notes: payNotes.trim() || undefined,
+      });
+      toast.success(`Payment of ${money(n)} recorded successfully`);
+      setPayAmount('');
+      setPayReference('');
+      setPayNotes('');
+      setShowPayForm(false);
+      onChanged();
+      await load(po.id);
+    } catch (err: any) {
+      toast.error(err.response?.data?.error || 'Failed to record payment');
+    } finally {
+      setPaying(false);
+    }
+  };
 
   const load = async (id: string) => {
     setLoading(true);
@@ -180,13 +235,13 @@ export default function PurchaseOrderDrawer({
           </div>
         ) : (
           <div className="flex-1 overflow-y-auto px-5 py-4 space-y-6">
-            <div className="grid grid-cols-3 gap-2">
+            <div className="grid grid-cols-2 gap-2">
               <div className="rounded-md border border-[#E3E5E8] px-3 py-2">
-                <p className={adminUi.helper}>Total</p>
-                <p className="text-sm font-medium tabular-nums">{money(po.total_amount)}</p>
+                <p className={adminUi.helper}>Total Amount</p>
+                <p className="text-sm font-semibold tabular-nums text-[#1A1A1A]">{money(po.total_amount)}</p>
               </div>
               <div className="rounded-md border border-[#E3E5E8] px-3 py-2">
-                <p className={adminUi.helper}>Status</p>
+                <p className={adminUi.helper}>Stock Status</p>
                 <p className="text-sm font-medium">
                   {po.status === 'received'
                     ? 'Fully Received'
@@ -200,8 +255,14 @@ export default function PurchaseOrderDrawer({
                 </p>
               </div>
               <div className="rounded-md border border-[#E3E5E8] px-3 py-2">
-                <p className={adminUi.helper}>Received</p>
-                <p className="text-sm font-medium">{fmtDate(po.received_at)}</p>
+                <p className={adminUi.helper}>Paid to Vendor</p>
+                <p className="text-sm font-semibold tabular-nums text-[#2CA01C]">{money(po.amount_paid || 0)}</p>
+              </div>
+              <div className="rounded-md border border-[#E3E5E8] px-3 py-2">
+                <p className={adminUi.helper}>Balance Due</p>
+                <p className={`text-sm font-semibold tabular-nums ${balanceDue > 0 ? 'text-[#8A100E]' : 'text-[#6B6C72]'}`}>
+                  {money(balanceDue)}
+                </p>
               </div>
             </div>
             <section>
@@ -212,6 +273,167 @@ export default function PurchaseOrderDrawer({
                 <div className="flex justify-between gap-4"><dt className="text-[#6B6C72]">Subtotal</dt><dd className="tabular-nums">{money(po.subtotal)}</dd></div>
                 <div className="flex justify-between gap-4"><dt className="text-[#6B6C72]">Tax</dt><dd className="tabular-nums">{money(po.tax_amount)}</dd></div>
               </dl>
+            </section>
+
+            <section className="rounded-md border border-[#E3E5E8] p-3.5 space-y-3">
+              <div className="flex items-center justify-between gap-2">
+                <div>
+                  <h3 className={adminUi.sectionTitle}>Vendor Payment</h3>
+                  <p className={adminUi.helper}>
+                    Stock receipt is separate from vendor payment. Pay in full or partial amounts.
+                  </p>
+                </div>
+                <span
+                  className={`inline-flex px-2 py-0.5 rounded text-xs font-semibold ${
+                    po.payment_status === 'paid'
+                      ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                      : po.payment_status === 'partial'
+                      ? 'bg-blue-50 text-blue-700 border border-blue-200'
+                      : 'bg-amber-50 text-amber-700 border border-amber-200'
+                  }`}
+                >
+                  {po.payment_status === 'paid'
+                    ? 'Paid in Full'
+                    : po.payment_status === 'partial'
+                    ? 'Partially Paid'
+                    : 'Payment Pending'}
+                </span>
+              </div>
+
+              <div className="space-y-1">
+                <div className="flex justify-between text-xs text-[#6B6C72]">
+                  <span>Paid: {money(po.amount_paid || 0)}</span>
+                  <span>Due: {money(balanceDue)}</span>
+                </div>
+                <div className="h-2 w-full bg-[#E3E5E8] rounded-full overflow-hidden">
+                  <div
+                    className="h-full bg-[#2CA01C] rounded-full transition-all duration-300"
+                    style={{
+                      width: `${po.total_amount > 0 ? Math.min(100, Math.round(((po.amount_paid || 0) / po.total_amount) * 100)) : 0}%`,
+                    }}
+                  />
+                </div>
+              </div>
+
+              {po.payments && po.payments.length > 0 && (
+                <div className="border border-[#E3E5E8] rounded overflow-hidden">
+                  <div className="bg-[#FAFAFA] px-2.5 py-1 text-[11px] font-medium text-[#6B6C72]">
+                    Payment history ({po.payments.length})
+                  </div>
+                  <table className="w-full text-xs">
+                    <tbody>
+                      {po.payments.map((pmt, idx) => (
+                        <tr key={idx} className="border-t border-[#E3E5E8]">
+                          <td className="px-2.5 py-1.5 text-[#6B6C72]">{fmtDate(pmt.payment_date)}</td>
+                          <td className="px-2.5 py-1.5 font-medium">{pmt.payment_method}</td>
+                          <td className="px-2.5 py-1.5 text-[#6B6C72] truncate max-w-[100px]">{pmt.reference || pmt.notes || '—'}</td>
+                          <td className="px-2.5 py-1.5 text-right font-semibold text-[#1A1A1A] tabular-nums">{money(pmt.amount)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+
+              {balanceDue > 0 && po.status !== 'cancelled' && (
+                <div>
+                  {!showPayForm ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setPayAmount(balanceDue);
+                        setShowPayForm(true);
+                      }}
+                      className="w-full py-1.5 px-3 text-xs font-medium text-[#0077C5] bg-[#E6F4FB] border border-[#BCE1F5] rounded hover:bg-[#D4EBF7] transition-colors"
+                    >
+                      + Record Payment / Partial Amount
+                    </button>
+                  ) : (
+                    <form onSubmit={submitPayment} className="space-y-2.5 bg-[#FAFAFA] p-3 rounded border border-[#E3E5E8]">
+                      <div className="flex items-center justify-between">
+                        <p className="text-xs font-semibold text-[#1A1A1A]">Record payment to vendor</p>
+                        <button
+                          type="button"
+                          onClick={() => setShowPayForm(false)}
+                          className="text-xs text-[#6B6C72] hover:underline"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-2">
+                        <label className="block text-xs text-[#6B6C72]">
+                          Amount ($)
+                          <input
+                            type="number"
+                            step="0.01"
+                            min="0.01"
+                            max={balanceDue}
+                            required
+                            value={payAmount}
+                            onChange={(e) => setPayAmount(e.target.value === '' ? '' : Number(e.target.value))}
+                            className="mt-0.5 block w-full rounded border border-[#C7C7C7] px-2 py-1 text-sm bg-white"
+                          />
+                        </label>
+                        <label className="block text-xs text-[#6B6C72]">
+                          Method
+                          <select
+                            value={payMethod}
+                            onChange={(e) => setPayMethod(e.target.value)}
+                            className="mt-0.5 block w-full rounded border border-[#C7C7C7] px-2 py-1 text-sm bg-white"
+                          >
+                            <option value="Cash">Cash</option>
+                            <option value="Bank Transfer">Bank Transfer</option>
+                            <option value="Check">Check</option>
+                            <option value="Credit Card">Credit Card</option>
+                            <option value="Other">Other</option>
+                          </select>
+                        </label>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-2">
+                        <label className="block text-xs text-[#6B6C72]">
+                          Ref / Check # (optional)
+                          <input
+                            type="text"
+                            placeholder="e.g. CHK-1092"
+                            value={payReference}
+                            onChange={(e) => setPayReference(e.target.value)}
+                            className="mt-0.5 block w-full rounded border border-[#C7C7C7] px-2 py-1 text-sm bg-white"
+                          />
+                        </label>
+                        <label className="block text-xs text-[#6B6C72]">
+                          Notes (optional)
+                          <input
+                            type="text"
+                            placeholder="e.g. Part 1 payment"
+                            value={payNotes}
+                            onChange={(e) => setPayNotes(e.target.value)}
+                            className="mt-0.5 block w-full rounded border border-[#C7C7C7] px-2 py-1 text-sm bg-white"
+                          />
+                        </label>
+                      </div>
+
+                      <div className="flex justify-end gap-2 pt-1">
+                        <button
+                          type="button"
+                          onClick={() => setShowPayForm(false)}
+                          className={adminUi.btnSecondary}
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          type="submit"
+                          disabled={paying}
+                          className={`${adminUi.btnPrimary} disabled:opacity-50`}
+                        >
+                          {paying ? 'Saving…' : `Pay ${payAmount ? money(Number(payAmount)) : ''}`}
+                        </button>
+                      </div>
+                    </form>
+                  )}
+                </div>
+              )}
             </section>
             {po.items && po.items.length > 0 && (
               <section>

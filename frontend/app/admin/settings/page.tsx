@@ -5,6 +5,7 @@ import { Settings, Save } from 'lucide-react';
 import adminApi from '@/lib/admin-api';
 import toast from 'react-hot-toast';
 import NumberInput from '@/components/admin/NumberInput';
+import RegionCombobox from '@/components/RegionCombobox';
 
 interface StoreSettings {
   business_name: string;
@@ -117,12 +118,12 @@ export default function SettingsPage() {
             />
           </div>
           <div>
-            <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">State</label>
-            <input
-              type="text"
+            <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">State / Province</label>
+            <RegionCombobox
               value={settings.state || ''}
-              onChange={(e) => setSettings({ ...settings, state: e.target.value })}
+              placeholder="Search or type…"
               className="w-full bg-slate-955/65 border border-white/10 rounded-xl px-4 py-2 text-xs text-slate-205 focus:outline-none focus:ring-1 focus:ring-teal-500"
+              onChange={(next) => setSettings({ ...settings, state: next })}
             />
           </div>
           <div>

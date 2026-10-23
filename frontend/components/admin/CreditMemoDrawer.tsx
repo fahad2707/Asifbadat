@@ -6,6 +6,7 @@ import adminApi from '@/lib/admin-api';
 import toast from 'react-hot-toast';
 import { adminUi } from '@/lib/admin-ui';
 import { downloadPdfFromResponse } from '@/lib/download-pdf';
+import { moneyOut } from '@/lib/moneyTone';
 
 export interface CreditMemoDrawerRecord {
   id: string;
@@ -106,7 +107,7 @@ export default function CreditMemoDrawer({
             <div className="grid grid-cols-3 gap-2">
               <div className="rounded-md border border-[#E3E5E8] px-3 py-2">
                 <p className={adminUi.helper}>Total</p>
-                <p className="text-sm font-medium tabular-nums">{money(memo.total_amount)}</p>
+                <p className={`text-sm font-medium tabular-nums ${moneyOut}`}>{money(memo.total_amount)}</p>
               </div>
               <div className="rounded-md border border-[#E3E5E8] px-3 py-2">
                 <p className={adminUi.helper}>Status</p>

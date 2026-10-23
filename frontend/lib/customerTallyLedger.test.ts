@@ -84,6 +84,34 @@ test('invoice and receipt rows keep existing memo semantics', () => {
   assert.equal(csv[1]?.[1], 'RT001 Payment Recv');
 });
 
+test('approved credit memos credit the ledger; drafts do not', () => {
+  const approved = {
+    credit_memo_number: 'CM-1',
+    total_amount: 30,
+    status: 'APPROVED',
+    reason: 'RETURN',
+    approved_at: '2026-01-05',
+  };
+  const draft = {
+    credit_memo_number: 'CM-DRAFT',
+    total_amount: 99,
+    status: 'DRAFT',
+    created_at: '2026-01-05',
+  };
+  const rows = withTallyRunningBalances(
+    buildCustomerTallyLedgerItems([invoice100], [receipt40], [approved, draft])
+  );
+  assert.equal(rows.some((row) => row.memo.includes('CM-1')), true);
+  assert.equal(rows.some((row) => row.memo.includes('CM-DRAFT')), false);
+  assert.equal(rows.reduce((s, row) => s + row.credit, 0), 70);
+  assert.equal(rows[rows.length - 1]?.runningBalance, 30);
+
+  const csv = buildCustomerTallyCsvStatement([invoice100], [receipt40], [approved, draft]);
+  assert.equal(csv.some((row) => row[1].includes('CM-1')), true);
+  assert.equal(csv.some((row) => row[1].includes('CM-DRAFT')), false);
+  assert.equal(csv[csv.length - 1]?.[4], '30.00');
+});
+
 test('customer detail page ledger and CSV use saleInvoices', () => {
   const here = dirname(fileURLToPath(import.meta.url));
   const page = readFileSync(join(here, '../app/admin/customers/[id]/page.tsx'), 'utf8');

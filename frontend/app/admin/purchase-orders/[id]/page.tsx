@@ -24,6 +24,16 @@ interface PO {
   vendor_id: string;
   vendor: { name: string; contact_name?: string; phone?: string };
   status: string;
+  amount_paid?: number;
+  payment_status?: 'unpaid' | 'partial' | 'paid';
+  balance_due?: number;
+  payments?: Array<{
+    amount: number;
+    payment_date: string;
+    payment_method: string;
+    reference?: string;
+    notes?: string;
+  }>;
   items: POItem[];
   subtotal: number;
   tax_amount: number;
@@ -509,6 +519,56 @@ export default function PurchaseOrderDetailPage() {
             <div className="flex justify-between border-t border-dashed border-white/10 pt-2 text-xs font-bold text-slate-200">
               <span className="text-[10px] uppercase font-bold tracking-wider">Grand Total</span>
               <span className="text-teal-400 font-mono font-extrabold">${Number(po.total_amount).toFixed(2)}</span>
+            </div>
+          </div>
+
+          {/* Summary and Payment Details */}
+          <div className="flex flex-col sm:flex-row sm:justify-between gap-4">
+            <div className="bg-slate-900/40 backdrop-blur-lg border border-white/[0.06] border-t-white/[0.18] p-5 max-w-xs ml-auto shadow-[0_12px_40px_rgba(0,0,0,0.25)] rounded-2xl space-y-2 text-xs text-slate-350">
+              <div className="flex justify-between">
+                <span className="text-slate-500 font-bold uppercase text-[9px] tracking-wider">Subtotal</span>
+                <span className="font-mono text-slate-200 font-bold">{Number(po.subtotal).toFixed(2)}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-500 font-bold uppercase text-[9px] tracking-wider">Tax</span>
+                <span className="font-mono text-slate-200 font-bold">{Number(po.tax_amount).toFixed(2)}</span>
+              </div>
+              <div className="flex justify-between border-t border-dashed border-white/10 pt-2 text-xs font-bold text-slate-200">
+                <span className="text-[10px] uppercase font-bold tracking-wider">Grand Total</span>
+                <span className="text-teal-400 font-mono font-extrabold">{Number(po.total_amount).toFixed(2)}</span>
+              </div>
+              <div className="flex justify-between mt-2">
+                <span className="text-slate-500 font-bold uppercase text-[9px] tracking-wider">Paid</span>
+                <span className="font-mono text-slate-200">{Number(po.amount_paid ?? 0).toFixed(2)}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-500 font-bold uppercase text-[9px] tracking-wider">Balance Due</span>
+                <span className="font-mono text-teal-400 font-bold">{Number(po.balance_due ?? (po.total_amount - (po.amount_paid ?? 0))).toFixed(2)}</span>
+              </div>
+              {po.payment_status && (
+                <div className="flex justify-between">
+                  <span className="text-slate-500 font-bold uppercase text-[9px] tracking-wider">Payment Status</span>
+                  <span className={`px-2 py-0.5 rounded text-[10px] font-bold border uppercase tracking-wider ${
+                    po.payment_status === 'paid'
+                      ? 'bg-teal-500/10 text-teal-400 border-teal-500/20'
+                      : po.payment_status === 'partial'
+                      ? 'bg-amber-500/10 text-amber-400 border-amber-500/20'
+                      : 'bg-red-500/10 text-red-400 border-red-500/20'
+                  }`}>{po.payment_status}</span>
+                </div>
+              )}
+              {po.payment_status !== 'paid' && (
+                <button
+                  type="button"
+                  className="mt-2 w-full bg-[#0F9F8F] hover:bg-[#0B8275] text-white py-1 rounded-md text-sm"
+                  onClick={() => {
+                    // TODO: open a payment modal or drawer similar to the one in the drawer component
+                    toast.success('Payment flow not yet implemented');
+                  }}
+                >
+                  Record Payment
+                </button>
+              )}
             </div>
           </div>
 

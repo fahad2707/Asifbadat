@@ -13,6 +13,7 @@ import InvoiceFormLightbox from '@/components/admin/InvoiceFormLightbox';
 import ReceivePaymentLightbox from '@/components/admin/ReceivePaymentLightbox';
 import InvoiceHistoryDrawer from '@/components/admin/InvoiceHistoryDrawer';
 import { adminUi } from '@/lib/admin-ui';
+import { moneyIn, moneyOut, moneyPlain } from '@/lib/moneyTone';
 
 interface InvoiceItem {
   product_name: string;
@@ -341,7 +342,7 @@ function InvoicesPageInner() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between gap-4">
+      <div className="flex flex-wrap items-center justify-between gap-4">
         <h1 className={adminUi.pageTitle}>{docTypeFilter === 'quotation' ? 'Quotations' : 'Invoices'}</h1>
         <div className="flex items-center gap-2">
           <button type="button" onClick={() => openCreate('quotation')} className={adminUi.btnSecondary}>
@@ -375,12 +376,12 @@ function InvoicesPageInner() {
       {summary && docTypeFilter !== 'quotation' && (
         <div className="grid grid-cols-1 md:grid-cols-2 rounded-md overflow-hidden border border-[#E3E5E8]">
           <div className="px-5 py-4 bg-[#FFF4E5]">
-            <p className="text-[26px] leading-tight font-normal text-[#1A1A1A] tabular-nums break-words">{money(summary.totalUnpaid)}</p>
+            <p className={`text-[26px] leading-tight font-normal tabular-nums break-words ${moneyIn}`}>{money(summary.totalUnpaid)}</p>
             <p className="text-xs text-[#6B6C72] mt-1">Unpaid</p>
             <div className="mt-3 h-1.5 bg-[#F5A623] rounded-full" />
           </div>
           <div className="px-5 py-4 bg-[#E5F6E3]">
-            <p className="text-[26px] leading-tight font-normal text-[#1A1A1A] tabular-nums break-words">{money(summary.totalPaid)}</p>
+            <p className={`text-[26px] leading-tight font-normal tabular-nums break-words ${moneyIn}`}>{money(summary.totalPaid)}</p>
             <p className="text-xs text-[#6B6C72] mt-1">Paid</p>
             <div className="mt-3 h-1.5 bg-[#2CA01C] rounded-full" />
           </div>
@@ -497,18 +498,18 @@ function InvoicesPageInner() {
                         <p className="text-[#1A1A1A]">{inv.customer_name || '—'}</p>
                         {inv.customer_phone && <p className={adminUi.helper}>{inv.customer_phone}</p>}
                       </td>
-                      <td className="px-4 py-3 text-right text-[#1A1A1A] tabular-nums whitespace-nowrap">{money(inv.total_amount)}</td>
+                      <td className={`px-4 py-3 text-right tabular-nums whitespace-nowrap ${quote ? moneyPlain : moneyIn}`}>{money(inv.total_amount)}</td>
                       {docTypeFilter !== 'quotation' && (
-                        <td className="px-4 py-3 text-right text-[#6B6C72] tabular-nums whitespace-nowrap">{quote ? '—' : money(inv.amount_paid ?? 0)}</td>
+                        <td className={`px-4 py-3 text-right tabular-nums whitespace-nowrap ${quote || !(inv.amount_paid ?? 0) ? moneyPlain : moneyIn}`}>{quote ? '—' : money(inv.amount_paid ?? 0)}</td>
                       )}
                       {docTypeFilter !== 'quotation' && (
                         <td className="px-4 py-3 text-right tabular-nums whitespace-nowrap">
                           {quote ? (
                             <span className="text-[#8D9096]">—</span>
                           ) : bal <= 0 ? (
-                            <span className="text-[#6B6C72]">{bal < 0 ? `Over ${money(Math.abs(bal))}` : '—'}</span>
+                            <span className={bal < 0 ? moneyOut : moneyPlain}>{bal < 0 ? `Over ${money(Math.abs(bal))}` : '—'}</span>
                           ) : (
-                            <span className="text-[#8A4500]">{money(bal)}</span>
+                            <span className={moneyIn}>{money(bal)}</span>
                           )}
                         </td>
                       )}

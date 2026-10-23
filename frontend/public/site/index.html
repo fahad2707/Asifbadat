@@ -284,7 +284,8 @@ html.use-custom-cursor .hl-foot:hover{opacity:.95}
 .pc-qty .pc-qb{width:28px;height:28px;border:1px solid var(--line2);font-size:15px;line-height:1;display:inline-flex;align-items:center;justify-content:center;color:var(--cream2);background:rgba(18,18,21,.45);border-radius:6px;padding:0;transition:border-color .2s,color .2s}
 .pc-qty .pc-qb:hover{border-color:var(--gold);color:var(--gold)}
 .pc-qty .pc-qn{min-width:20px;text-align:center;font-size:12px;font-weight:700;color:var(--cream);font-variant-numeric:tabular-nums}
-.load-row{display:flex;justify-content:space-between;align-items:center;gap:14px;text-align:center;padding-top:44px}
+.load-row{display:flex;justify-content:space-between;align-items:center;gap:14px;text-align:center;padding-top:44px;overflow-anchor:none}
+.pgrid .pc{overflow-anchor:auto}
 .browse-top{opacity:.9}
 .browse-top:hover{opacity:1}
 /* Permanent product ID badge — pinned above the product image */
@@ -535,7 +536,7 @@ body.category-mode #homeContent{display:none}
 <div id="wishlist"><div class="wl-hd"><button type="button" class="cart-back-mob" onclick="closeWl()">← Back</button><h3>♡ Wishlist</h3><button type="button" class="cart-cls" onclick="closeWl()" aria-label="Close wishlist">×</button></div><div class="wl-list" id="wlList"><div class="cart-mt"><div class="cart-mt-ico">♡</div><p style="font-size:13px">Your wishlist is empty</p></div></div></div>
 <div id="toast"><span class="ti">✓</span><span id="toastTxt"></span></div>
 <div class="nav-backdrop" id="navBg" onclick="closeMobNav()"></div>
-<div id="mob-nav"><div class="mob-nav-top"><h2>Menu</h2><button type="button" class="mob-nav-close" onclick="closeMobNav()" aria-label="Close menu">×</button></div><div class="mob-nav-links"><a class="mob-link" href="/site#highlights" onclick="closeMobNav()">Highlights</a><a class="mob-link" href="/site#shop" onclick="closeMobNav()">Shop</a><a class="mob-link" href="/site#about" onclick="closeMobNav()">About</a><a class="mob-link" href="/site#story" onclick="closeMobNav()">Our Story</a><a class="mob-link" href="/site#testi" onclick="closeMobNav()">Clients</a><a class="mob-link" id="mobAuthLink" href="/login" onclick="closeMobNav();return onAccountNavClick(event)">Login</a></div><div class="mob-nav-actions"><button type="button" class="mob-act" onclick="closeMobNav();openWl();">♡ Wishlist<span class="dot" id="mobWlN">0</span></button><button type="button" class="mob-act primary" onclick="closeMobNav();openCart();">🛒 Cart<span class="dot" id="mobCartActN">0</span></button></div></div>
+<div id="mob-nav"><div class="mob-nav-top"><h2>Menu</h2><button type="button" class="mob-nav-close" onclick="closeMobNav()" aria-label="Close menu">×</button></div><div class="mob-nav-links"><a class="mob-link" href="/site#highlights" onclick="closeMobNav()">Highlights</a><a class="mob-link" href="/site#shop" onclick="closeMobNav()">Shop</a><a class="mob-link" href="/site#about" onclick="closeMobNav()">About</a><a class="mob-link" href="/site#story" onclick="closeMobNav()">Our Story</a><a class="mob-link" href="/site#testi" onclick="closeMobNav()">Clients</a><a class="mob-link" id="mobAuthLink" href="/login" onclick="closeMobNav();return onAccountNavClick(event)">Login</a><a class="mob-link" id="mobSignupLink" href="/login?mode=signup" onclick="closeMobNav()">Sign up</a></div><div class="mob-nav-actions"><button type="button" class="mob-act" onclick="closeMobNav();openWl();">♡ Wishlist<span class="dot" id="mobWlN">0</span></button><button type="button" class="mob-act primary" onclick="closeMobNav();openCart();">🛒 Cart<span class="dot" id="mobCartActN">0</span></button></div></div>
 <nav id="nav">
   <a href="/site" class="logo" aria-label="Express Distributors Inc">
     <img src="/logo.png" alt="Express Distributors Inc"/>
@@ -724,13 +725,15 @@ function onAccountNavClick(e){
 function updateNavAuthLink(){
   const loggedIn=!!storefrontUserToken();
   const href=accountNavHref();
-  const label=loggedIn?(accountApproved?'Account':'Account'):'Login';
+  const label=loggedIn?'Account':'Login';
   ['navAuthLink','mobAuthLink'].forEach(function(id){
     const el=document.getElementById(id);
     if(!el) return;
     el.setAttribute('href',href);
     el.textContent=label;
   });
+  const signup=document.getElementById('mobSignupLink');
+  if(signup) signup.style.display=loggedIn?'none':'';
 }
 function catalogHeaders(){
   const headers={'Accept':'application/json'};
@@ -751,11 +754,20 @@ function productPriceFootHtml(p){
 }
 function rerenderCatalogForPricing(){
   try{
-    if(typeof isCategoryPage!=='undefined'&&isCategoryPage&&typeof renderCategoryPage==='function'){
-      renderCategoryPage();
-    }else if(typeof renderShop==='function'){
-      renderShop();
-    }
+    document.querySelectorAll('#pgrid .pc-cart-slot,#catPageGrid .pc-cart-slot').forEach(function(slot){
+      var pid=slot.getAttribute('data-pid');
+      if(pid==null||pid==='')return;
+      var p=typeof PRODS!=='undefined'?PRODS.find(function(x){return String(x.id)===String(pid);}):null;
+      if(!p)return;
+      var foot=slot.closest('.pc-foot');
+      if(!foot)return;
+      var priceEl=foot.querySelector('.pc-price,.pc-rfq-tag');
+      var wrap=document.createElement('div');
+      wrap.innerHTML=productPriceFootHtml(p);
+      var next=wrap.firstElementChild;
+      if(priceEl&&next) priceEl.replaceWith(next);
+      else if(next) foot.insertBefore(next,slot);
+    });
     if(typeof syncShopCardCartSlots==='function') syncShopCardCartSlots();
   }catch(err){}
 }
@@ -1092,8 +1104,16 @@ function buildProductCardHtml(p,pi){
   const priceFoot=productPriceFootHtml(p);
   return '<div class="pc pc-click" onclick="openProductModal(\''+p.id+'\')"><div class="pc-img"><div class="pc-glow" style="background:radial-gradient(circle,'+glow+'44,transparent 70%)"></div>'+idBadge+'<button type="button" class="pc-wl" onclick="event.stopPropagation();addToWl(\''+p.id+'\',\''+safeNC+'\',\''+safeC.replace(/'/g,"\\'")+'\',0)">♡</button>'+imgHtml+'</div><div class="pc-body"><div class="pc-cat">'+safeC+'</div><div class="pc-stars">★★★★★</div><div class="pc-name">'+p.n+'</div><div class="pc-desc">'+(p.d||'')+'</div><div class="pc-foot">'+priceFoot+'<div class="pc-cart-slot" data-pid="'+pidAttr+'">'+htmlPcCartSlot(p)+'</div></div></div></div>';
 }
+function keepWindowScroll(y){
+  const html=document.documentElement;
+  const prev=html.style.scrollBehavior;
+  html.style.scrollBehavior='auto';
+  const restore=()=>{window.scrollTo({top:y,left:0,behavior:'auto'});};
+  restore();
+  requestAnimationFrame(()=>{restore();html.style.scrollBehavior=prev;});
+}
 function renderShop(opts){
-  const append=opts&&opts.append;
+  const append=!!(opts&&opts.append);
   const grid=document.getElementById('pgrid');
   const loadBtn=document.getElementById('loadBtn');
   if(!grid) return;
@@ -1105,13 +1125,17 @@ function renderShop(opts){
     if(loadBtn) loadBtn.style.display='none';
     return;
   }
-  if(append&&shopRenderedCount>0&&shopRenderedCount<totalToShow){
+  if(append){
     const scrollY=window.scrollY;
-    const chunk=filtered.slice(shopRenderedCount,totalToShow);
-    grid.insertAdjacentHTML('beforeend',chunk.map((p,pi)=>buildProductCardHtml(p,shopRenderedCount+pi)).join(''));
-    shopRenderedCount=totalToShow;
+    if(shopRenderedCount<totalToShow){
+      const chunk=filtered.slice(shopRenderedCount,totalToShow);
+      if(chunk.length){
+        grid.insertAdjacentHTML('beforeend',chunk.map((p,pi)=>buildProductCardHtml(p,shopRenderedCount+pi)).join(''));
+      }
+      shopRenderedCount=totalToShow;
+    }
     if(loadBtn) loadBtn.style.display=filtered.length>visCount?'block':'none';
-    window.scrollTo(0,scrollY);
+    keepWindowScroll(scrollY);
     syncShopCardCartSlots();
     return;
   }
@@ -1160,19 +1184,23 @@ function getCategoryPageProducts(){
 let catPageRenderedCount=0;
 function renderProductCardsIntoGrid(grid,products,visibleCount,opts){
   if(!grid)return;
-  const append=opts&&opts.append;
+  const append=!!(opts&&opts.append);
   const totalToShow=Math.min(visibleCount,products.length);
   if(totalToShow===0){
     catPageRenderedCount=0;
     grid.innerHTML='<div style="grid-column:1/-1;text-align:center;padding:60px 20px;color:var(--fog)"><p style="font-size:16px;margin-bottom:8px">No products in this category</p><p style="font-size:12px">Check back soon or browse another category above.</p></div>';
     return;
   }
-  if(append&&catPageRenderedCount>0&&catPageRenderedCount<totalToShow){
+  if(append){
     const scrollY=window.scrollY;
-    const chunk=products.slice(catPageRenderedCount,totalToShow);
-    grid.insertAdjacentHTML('beforeend',chunk.map((p,pi)=>buildProductCardHtml(p,catPageRenderedCount+pi)).join(''));
-    catPageRenderedCount=totalToShow;
-    window.scrollTo(0,scrollY);
+    if(catPageRenderedCount<totalToShow){
+      const chunk=products.slice(catPageRenderedCount,totalToShow);
+      if(chunk.length){
+        grid.insertAdjacentHTML('beforeend',chunk.map((p,pi)=>buildProductCardHtml(p,catPageRenderedCount+pi)).join(''));
+      }
+      catPageRenderedCount=totalToShow;
+    }
+    keepWindowScroll(scrollY);
     syncShopCardCartSlots();
     return;
   }
@@ -1226,9 +1254,8 @@ function renderCategoryPage(opts){
   if(loadRow&&loadBtn){
     const showMore=products.length>catPageVisCount;
     loadRow.style.display=showMore?'flex':'none';
-    loadBtn.onclick=(e)=>{e.preventDefault();catPageVisCount+=24;renderCategoryPage({append:true});};
   }
-  renderCatPageSlider();
+  if(!(opts&&opts.append)) renderCatPageSlider();
   syncShopCardCartSlots();
 }
 const catPageFiltBarEl=document.getElementById('catPageFiltBar');
@@ -1292,7 +1319,11 @@ if(filtPrevBtn)filtPrevBtn.addEventListener('click',()=>scrollFiltStep(-FILT_SCR
 if(filtNextBtn)filtNextBtn.addEventListener('click',()=>scrollFiltStep(FILT_SCROLL));
 if(filtBarEl)filtBarEl.addEventListener('scroll',updateFiltScrollBtns,{passive:true});
 window.addEventListener('resize',()=>{window.requestAnimationFrame(updateFiltScrollBtns);});
-document.getElementById('loadBtn').addEventListener('click',(e)=>{e.preventDefault();visCount+=12;renderShop({append:true});});
+document.getElementById('loadBtn').addEventListener('click',(e)=>{e.preventDefault();e.stopPropagation();visCount+=12;renderShop({append:true});});
+const catPageLoadBtnEl=document.getElementById('catPageLoadBtn');
+if(catPageLoadBtnEl){
+  catPageLoadBtnEl.addEventListener('click',(e)=>{e.preventDefault();e.stopPropagation();catPageVisCount+=24;renderCategoryPage({append:true});});
+}
 const browseTopBtn=document.getElementById('browseTopBtn');
 if(browseTopBtn){
   browseTopBtn.addEventListener('click',()=>{

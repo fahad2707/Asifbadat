@@ -61,7 +61,7 @@ interface Vendor {
 interface ProductModalProps {
   product: Product | null;
   onClose: () => void;
-  onSuccess: () => void;
+  onSuccess: (saved?: { id: string }) => void;
 }
 
 function AddCategoryModal({ onClose, onSaved }: { onClose: () => void; onSaved: (id: string, name: string) => void }) {
@@ -108,7 +108,7 @@ function AddCategoryModal({ onClose, onSaved }: { onClose: () => void; onSaved: 
     }
   };
   return (
-    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[60] p-4">
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[90] p-4">
       <div className="bg-white border border-[#E2E8F0] text-[#0F172A] rounded-lg max-w-sm w-full p-6">
         <h3 className="text-sm font-semibold text-[#0F172A] mb-4">+ Add new category</h3>
         <form onSubmit={handleSubmit}>
@@ -207,7 +207,7 @@ function AddSubCategoryModal({ categoryId, categoryName, onClose, onSaved }: { c
     }
   };
   return (
-    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[60] p-4">
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[90] p-4">
       <div className="bg-white border border-[#E2E8F0] text-[#0F172A] rounded-lg max-w-sm w-full p-6">
         <h3 className="text-sm font-black text-white mb-1">+ Add new sub-category</h3>
         <p className="text-xs text-slate-400 mb-4">Under: {categoryName}</p>
@@ -253,7 +253,7 @@ function AddTaxTypeModal({ onClose, onSaved }: { onClose: () => void; onSaved: (
     }
   };
   return (
-    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[60] p-4">
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[90] p-4">
       <div className="bg-white border border-[#E2E8F0] text-[#0F172A] rounded-lg max-w-sm w-full p-6">
         <h3 className="text-sm font-semibold text-[#0F172A] mb-4">+ Add tax type</h3>
         <form onSubmit={handleSubmit}>
@@ -306,7 +306,7 @@ function AddVendorModal({ onClose, onSaved }: { onClose: () => void; onSaved: (i
     }
   };
   return (
-    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[60] p-4">
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[90] p-4">
       <div className="bg-white border border-[#E2E8F0] text-[#0F172A] rounded-lg max-w-sm w-full p-6">
         <h3 className="text-sm font-semibold text-[#0F172A] mb-4">+ Add new supplier</h3>
         <form onSubmit={handleSubmit}>
@@ -358,7 +358,7 @@ export default function ProductModal({ product, onClose, onSuccess }: ProductMod
   const [showAddVendor, setShowAddVendor] = useState(false);
   const [marginPct, setMarginPct] = useState<string>('');
   const [marginUsd, setMarginUsd] = useState<string>('');
-  const [taxTypeId, setTaxTypeId] = useState<string | null | undefined>(undefined);
+  const [taxTypeId, setTaxTypeId] = useState<string | null | undefined>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Defensive: never call .map/.find on a non-array (e.g. error object from a bad response).
@@ -434,7 +434,7 @@ export default function ProductModal({ product, onClose, onSuccess }: ProductMod
       setTaxTypeId(assigned);
       if (product.image_url) setImagePreview(product.image_url);
     } else {
-      setTaxTypeId(undefined);
+      setTaxTypeId(null);
     }
   }, [product]);
 
@@ -516,10 +516,14 @@ export default function ProductModal({ product, onClose, onSuccess }: ProductMod
         low_stock_threshold: Number(formData.low_stock_threshold) || 10,
       };
       delete payload.product_id;
-      if (taxTypeId === undefined) {
-        delete payload.tax_type_id;
+      if (product?.id) {
+        if (taxTypeId === undefined) {
+          delete payload.tax_type_id;
+        } else {
+          payload.tax_type_id = taxTypeId;
+        }
       } else {
-        payload.tax_type_id = taxTypeId;
+        payload.tax_type_id = taxTypeId ?? null;
       }
       if (product?.id) {
         const { data } = await adminApi.put(`/products/${product.id}`, payload);
@@ -535,6 +539,11 @@ export default function ProductModal({ product, onClose, onSuccess }: ProductMod
           setFormData((f) => ({ ...f, product_id: assigned }));
         }
         toast.success(assigned ? `Product created (ID ${assigned})` : 'Product created');
+        if (data?.id) {
+          onSuccess({ id: String(data.id) });
+          onClose();
+          return;
+        }
       }
       onSuccess();
       onClose();
@@ -575,7 +584,7 @@ export default function ProductModal({ product, onClose, onSuccess }: ProductMod
   };
 
   return (
-    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[80] p-4">
       <div className="bg-white border border-[#E2E8F0] text-[#0F172A] rounded-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto">
         <div className="flex items-center justify-between p-6 border-b border-white/10">
           <h2 className="text-lg font-semibold text-[#0F172A]">{product?.id ? 'Edit Product Specification' : 'Create Catalog Product'}</h2>

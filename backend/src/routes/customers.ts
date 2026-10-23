@@ -1,11 +1,14 @@
 import express from 'express';
+import mongoose from 'mongoose';
 import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
 import Customer from '../models/Customer';
 import Invoice from '../models/Invoice';
+import CustomerProductPrice from '../models/CustomerProductPrice';
 import { authenticateAdmin, AuthRequest } from '../middleware/auth';
 import { derivedUnpaidReceivableMatch } from '../utils/invoiceFinancialState';
+import { getCreditMemoTotalsByParty } from '../modules/credit-memo/services/creditMemoBalances';
 import User from '../models/User';
 import {
   ACCOUNT_STATUS_APPROVED,
@@ -115,19 +118,38 @@ router.get('/', authenticateAdmin, async (req: AuthRequest, res) => {
   }
 });
 
-// Open balances per customer (unpaid invoice balance)
+// Open balances: unpaid invoice remaining. Credits are returned separately (not netted into open_balance).
 router.get('/balances', authenticateAdmin, async (_req, res) => {
   try {
-    const balances = await Invoice.aggregate([
-      { $match: { ...derivedUnpaidReceivableMatch, customer_id: { $exists: true, $ne: null } } },
-      { $project: { customer_id: 1, balance: { $subtract: ['$total_amount', { $ifNull: ['$amount_paid', 0] }] } } },
-      { $group: { _id: '$customer_id', open_balance: { $sum: '$balance' } } },
+    const [balances, creditTotals] = await Promise.all([
+      Invoice.aggregate([
+        { $match: { ...derivedUnpaidReceivableMatch, customer_id: { $exists: true, $ne: null } } },
+        { $project: { customer_id: 1, balance: { $subtract: ['$total_amount', { $ifNull: ['$amount_paid', 0] }] } } },
+        { $group: { _id: '$customer_id', open_balance: { $sum: '$balance' } } },
+      ]),
+      getCreditMemoTotalsByParty('CUSTOMER'),
     ]);
+
+    const byCustomer = new Map<string, number>();
+    for (const b of balances as Array<{ _id?: { toString(): string }; open_balance?: number }>) {
+      const id = b._id?.toString();
+      if (!id) continue;
+      byCustomer.set(id, Number(b.open_balance) || 0);
+    }
+    for (const id of creditTotals.keys()) {
+      if (!byCustomer.has(id)) byCustomer.set(id, 0);
+    }
+
     res.json({
-      balances: balances.map((b: any) => ({
-        customer_id: b._id?.toString(),
-        open_balance: b.open_balance ?? 0,
-      })),
+      balances: Array.from(byCustomer.entries()).map(([customer_id, open_balance]) => {
+        const credit_memo_total = creditTotals.get(customer_id) ?? 0;
+        return {
+          customer_id,
+          open_balance,
+          credit_memo_total,
+          net_due: Math.max(0, open_balance - credit_memo_total),
+        };
+      }),
     });
   } catch (error) {
     console.error('Customers balances error:', error);
@@ -210,6 +232,43 @@ router.get('/website-signups', authenticateAdmin, async (req: AuthRequest, res) 
   } catch (error) {
     console.error('List website signups error:', error);
     res.status(500).json({ error: 'Failed to fetch website signups' });
+  }
+});
+
+// Last invoice selling prices for this customer (negotiated / last-charged).
+router.get('/:id/product-prices', authenticateAdmin, async (req: AuthRequest, res) => {
+  try {
+    const { id } = req.params;
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ error: 'Invalid customer' });
+    }
+    const rows = await CustomerProductPrice.find({ customer_id: new mongoose.Types.ObjectId(id) })
+      .populate('product_id', 'name price sku product_id')
+      .sort({ last_invoice_date: -1, updated_at: -1 })
+      .lean();
+    res.json({
+      prices: rows.map((row) => {
+        const product = row.product_id && typeof row.product_id === 'object' ? (row.product_id as {
+          _id?: { toString(): string };
+          name?: string;
+          price?: number;
+          sku?: string;
+          product_id?: string;
+        }) : null;
+        return {
+          product_id: product?._id?.toString() || String(row.product_id || ''),
+          product_name: product?.name || 'Product',
+          sku: product?.sku || '',
+          catalog_code: product?.product_id || '',
+          catalog_price: product?.price != null ? Number(product.price) : null,
+          last_price: Number(row.last_price) || 0,
+          last_invoice_date: row.last_invoice_date || null,
+        };
+      }),
+    });
+  } catch (error) {
+    console.error('Customer product prices error:', error);
+    res.status(500).json({ error: 'Failed to fetch negotiated prices' });
   }
 });
 
