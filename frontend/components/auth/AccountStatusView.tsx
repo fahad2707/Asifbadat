@@ -159,9 +159,6 @@ export default function AccountStatusView({ expected }: { expected: ExpectedStat
           <button type="button" onClick={handleLogout} className={`${customerAuthUi.btnGhost} py-2`}>
             Sign out
           </button>
-          <Link href="/login" className={`${customerAuthUi.btnGhost} text-center`}>
-            Back to login
-          </Link>
         </div>
       </div>
     </CustomerAuthShell>

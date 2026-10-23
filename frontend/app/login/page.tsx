@@ -120,8 +120,8 @@ export default function LoginPage() {
       setFieldError('Email is required');
       return;
     }
-    if (password.length < 8) {
-      setFieldError('Password must be at least 8 characters');
+    if (!password) {
+      setFieldError('Password is required');
       return;
     }
     if (password !== confirmPassword) {
@@ -232,10 +232,9 @@ export default function LoginPage() {
           label="Password"
           value={password}
           onChange={setPassword}
-          placeholder={isLogin ? 'Your password' : 'At least 8 characters'}
+          placeholder={isLogin ? 'Your password' : 'Create a password'}
           required
           autoComplete={isLogin ? 'current-password' : 'new-password'}
-          minLength={isLogin ? undefined : 8}
         />
 
         {!isLogin && (

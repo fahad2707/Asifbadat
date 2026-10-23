@@ -13,7 +13,7 @@ import {
   linkOrCreateCustomerForNewUser,
   type CustomerLinkResult,
 } from '../utils/customerAccount';
-import { isSmtpConfigured, sendVerificationEmail, sendPasswordResetEmail } from '../utils/mail';
+import { isSmtpConfigured, sendPasswordResetEmail } from '../utils/mail';
 import { logSecurityEvent } from '../utils/securityLog';
 import {
   loginLimiter,
@@ -160,7 +160,7 @@ router.post('/register', registerLimiter, async (req, res) => {
         name: z.string().trim().max(200).optional(),
         email: emailSchema.optional(),
         phone: phoneSchema.optional(),
-        password: z.string().min(8).max(128),
+        password: z.string().min(1).max(128),
       })
       .refine((data) => data.email || data.phone, {
         message: 'Either email or phone is required',
@@ -183,22 +183,15 @@ router.post('/register', registerLimiter, async (req, res) => {
     }
 
     const password_hash = await bcrypt.hash(password, BCRYPT_ROUNDS);
-    const smtpOn = isSmtpConfigured();
-    const needsEmailVerify = Boolean(email && smtpOn);
-
-    const plainVerifyToken = needsEmailVerify ? randomToken() : undefined;
-    const verifyHash = plainVerifyToken ? hashToken(plainVerifyToken) : undefined;
-    const verifyExp = needsEmailVerify ? new Date(Date.now() + 24 * 60 * 60 * 1000) : undefined;
 
     // Omit empty phone/email so sparse unique indexes in Atlas do not collide on null.
+    // Do not block signup on SMTP: admin approval is the access gate, not mailbox verify.
     const user = await User.create({
       name,
       ...(email ? { email } : {}),
       ...(phone ? { phone } : {}),
       password_hash,
-      email_verified: !needsEmailVerify,
-      email_verification_token_hash: verifyHash,
-      email_verification_expires: verifyExp,
+      email_verified: true,
     });
 
     let link: CustomerLinkResult = emptyLinkResult();
@@ -229,32 +222,23 @@ router.post('/register', registerLimiter, async (req, res) => {
       console.error('Register website signup application error:', appErr);
     }
 
-    if (needsEmailVerify && plainVerifyToken && email) {
-      try {
-        await sendVerificationEmail(email, plainVerifyToken);
-        logSecurityEvent('auth_register', req, { verified: false });
-        return res.status(201).json({
-          message: 'Account created. Check your email to verify before signing in.',
-          requiresVerification: true,
-        });
-      } catch (e) {
-        // Production SMTP is often misconfigured after deploy. Do not roll back
-        // a completed signup — allow sign-in and log the mail failure.
-        console.error('Verification email failed; completing registration without mailbox verify:', e);
-        user.email_verified = true;
-        user.email_verification_token_hash = undefined;
-        user.email_verification_expires = undefined;
-        await user.save();
-      }
+    const secret = process.env.JWT_SECRET!.trim();
+    const expiresIn = String(process.env.JWT_EXPIRES_IN || '8h').trim() || '8h';
+    let token: string;
+    try {
+      token = (jwt as any).sign(
+        { userId: user._id.toString(), email: user.email, phone: user.phone },
+        secret,
+        { expiresIn }
+      );
+    } catch (signErr) {
+      console.error('Register JWT sign failed, retrying with 8h expiry:', signErr);
+      token = (jwt as any).sign(
+        { userId: user._id.toString(), email: user.email, phone: user.phone },
+        secret,
+        { expiresIn: '8h' }
+      );
     }
-
-    const secret = process.env.JWT_SECRET!;
-    const expiresIn = process.env.JWT_EXPIRES_IN || '8h';
-    const token = (jwt as any).sign(
-      { userId: user._id.toString(), email: user.email, phone: user.phone },
-      secret,
-      { expiresIn }
-    );
 
     logSecurityEvent('auth_register', req, { verified: true });
 
@@ -273,6 +257,9 @@ router.post('/register', registerLimiter, async (req, res) => {
     }
     if (isDuplicateKey(error)) {
       return res.status(400).json({ error: 'A user with this email or phone already exists' });
+    }
+    if (error?.name === 'ValidationError') {
+      return res.status(400).json({ error: error.message || 'Invalid registration data' });
     }
     console.error('User register error:', error);
     res.status(500).json({ error: 'Registration failed' });
