@@ -107,17 +107,11 @@ export function inheritInvoiceLineTax(
 ): InvoiceLineTaxState {
   const sub = roundMoney(subtotal);
   const configured = product.tax_type_configured === true;
-  if (!configured) {
-    return {
-      ...emptyInvoiceLineTax(sub),
-      tax_type_label: 'Not configured',
-      issue: 'not_configured',
-    };
-  }
-  if (!product.tax_type_id) {
+  // Missing catalog assignment is invoiced as No Tax so POS/admin billing is not blocked.
+  if (!configured || !product.tax_type_id) {
     const none: InvoiceLineTaxState = {
       taxable: false,
-      tax_type_configured: true,
+      tax_type_configured: configured,
       tax_type_id: null,
       tax_type_name: 'No Tax',
       tax_rate_type: null,

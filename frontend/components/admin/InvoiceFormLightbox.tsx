@@ -503,8 +503,6 @@ export default function InvoiceFormLightbox({ isOpen, onClose, onSaved, editId, 
       newLines[index] = lineFromProduct(product, 1, usePrice, undefined, usesLineTax, customerTaxExempt);
       if (usesLineTax && newLines[index].issue === 'amount_unsupported') {
         toast.error(`"${product.name}" uses a fixed-amount tax type, which invoice lines cannot calculate.`, { duration: 5000 });
-      } else if (usesLineTax && newLines[index].issue === 'not_configured') {
-        toast(`"${product.name}" has no tax type. It will be invoiced as No Tax until you assign one.`, { duration: 5000 });
       } else if (customerPrice != null && customerPrice !== product.price) {
         toast.success(`Using last price for ${product.name}: $${customerPrice.toFixed(2)} (default: $${product.price.toFixed(2)})`, { duration: 4000 });
       }
@@ -542,8 +540,6 @@ export default function InvoiceFormLightbox({ isOpen, onClose, onSaved, editId, 
       newLines[targetIdx] = lineFromProduct(product, 1, usePrice, undefined, usesLineTax, customerTaxExempt);
       if (usesLineTax && newLines[targetIdx].issue === 'amount_unsupported') {
         toast.error(`"${product.name}" uses a fixed-amount tax type, which invoice lines cannot calculate.`, { duration: 5000 });
-      } else if (usesLineTax && newLines[targetIdx].issue === 'not_configured') {
-        toast(`"${product.name}" has no tax type. It will be invoiced as No Tax until you assign one.`, { duration: 5000 });
       } else if (customerPrice != null && customerPrice !== product.price) {
         toast.success(`Using last price for ${product.name}: $${customerPrice.toFixed(2)} (default: $${product.price.toFixed(2)})`, { duration: 4000 });
       }
@@ -654,14 +650,6 @@ export default function InvoiceFormLightbox({ isOpen, onClose, onSaved, editId, 
         `"${blockedAmount.product_name}" uses a fixed-amount tax type, which invoice lines cannot calculate.`
       );
       return false;
-    }
-    const unconfigured = validLines.filter((l) => l.issue === 'not_configured');
-    if (unconfigured.length > 0) {
-      const names = unconfigured.map((l) => l.product_name).slice(0, 3).join(', ');
-      const more = unconfigured.length > 3 ? ` and ${unconfigured.length - 3} more` : '';
-      toast(`${names}${more} ${unconfigured.length === 1 ? 'has' : 'have'} no tax type. Saving as No Tax.`, {
-        duration: 5000,
-      });
     }
     const belowMin = validLines.find((l) => sellingBelowMin(l.price, getLineCostPrice(l)));
     if (belowMin) {

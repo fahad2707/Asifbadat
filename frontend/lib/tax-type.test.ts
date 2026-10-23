@@ -57,6 +57,14 @@ test('2 — non-exempt customer previews GST 18%', () => {
   assert.equal(snap.tax_type_label, 'GST — 18%');
 });
 
+test('unconfigured product is invoiced as No Tax', () => {
+  const snap = inheritInvoiceLineTax({ name: 'BLACK & MILD CASINO WOOD TIP 25 CT' }, 10, false);
+  assert.equal(snap.issue, null);
+  assert.equal(snap.taxable, false);
+  assert.equal(snap.tax_amount, 0);
+  assert.equal(snap.tax_type_label, 'No Tax');
+});
+
 test('3/4 — stored snapshot recalculation is independent of live exemption helper', () => {
   assert.equal(customerIsCurrentlyExempt({ tax_exempt: true }), true);
   const gstSnap = inheritInvoiceLineTax(gst, 100, false);
@@ -75,5 +83,6 @@ test('invoice editor keeps edit-mode snapshot lines and syncs live exemption for
   assert.match(src, /lineFromProduct\(product, 1, usePrice, undefined, usesLineTax, customerTaxExempt\)/);
   assert.match(src, /Existing lines keep their stored tax/);
   assert.equal(src.includes('!editId && customerTaxExempt'), false);
-  assert.equal(src.includes('has no configured tax type.`, { duration: 5000 }'), false);
+  assert.equal(src.includes('Assign a tax type before invoicing'), false);
+  assert.equal(src.includes('has no configured tax type'), false);
 });
