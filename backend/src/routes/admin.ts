@@ -87,6 +87,32 @@ const websiteSignupReviewBodySchema = z.object({
   review_note: z.string().trim().max(2000).optional(),
 });
 
+const websiteSignupResolveBindBodySchema = websiteSignupReviewBodySchema.extend({
+  customer_id: z.string().trim().min(1).optional(),
+  confirmed_same_person: z.literal(true),
+});
+
+function websiteSignupMatchedIdStrings(app: { matched_customer_ids?: unknown; customer_id?: unknown }): string[] {
+  const ids: string[] = [];
+  const seen = new Set<string>();
+  const push = (value: unknown) => {
+    if (!value) return;
+    const id = String(value);
+    if (!mongoose.Types.ObjectId.isValid(id) || seen.has(id)) return;
+    seen.add(id);
+    ids.push(id);
+  };
+  if (Array.isArray(app.matched_customer_ids)) {
+    for (const value of app.matched_customer_ids) push(value);
+  }
+  push(app.customer_id);
+  return ids;
+}
+
+function isBindableCrmMatchKind(kind: unknown): boolean {
+  return kind === 'non_approved_crm' || kind === 'approved_crm' || kind === 'ambiguous';
+}
+
 function serializeWebsiteSignupApplication(row: any) {
   return {
     id: row._id.toString(),
@@ -1184,6 +1210,198 @@ router.post(
       }
       console.error('Reject website signup application error:', error);
       res.status(500).json({ error: 'Failed to reject website signup application' });
+    }
+  }
+);
+
+/**
+ * Manual identity resolution: bind this signup User to a matched CRM Customer
+ * after admin confirmation, then approve commercial access.
+ * Approve stays limited to the safe created+none path.
+ */
+router.post(
+  '/website-signup-applications/:id/resolve-bind',
+  authenticateAdmin,
+  async (req: AuthRequest, res) => {
+    try {
+      const appId = req.params.id;
+      if (!mongoose.Types.ObjectId.isValid(appId)) {
+        return res.status(404).json({ error: 'Application not found' });
+      }
+
+      const body = websiteSignupResolveBindBodySchema.parse(req.body ?? {});
+      const adminId = typeof req.userId === 'string' ? req.userId.trim() : '';
+      if (!adminId || !mongoose.Types.ObjectId.isValid(adminId)) {
+        return res.status(401).json({ error: 'Authentication required' });
+      }
+
+      const app = await WebsiteSignupApplication.findById(appId).lean();
+      if (!app) {
+        return res.status(404).json({ error: 'Application not found' });
+      }
+
+      if (app.status !== WEBSITE_SIGNUP_STATUS_PENDING) {
+        return res.status(409).json({ error: 'Application is not pending' });
+      }
+      if (isSafeCreatedWebsiteSignupPath(app)) {
+        return res.status(409).json({
+          error: 'Use Approve for new customers with no CRM match',
+        });
+      }
+      if (app.match_kind === 'already_linked') {
+        return res.status(409).json({
+          error:
+            'Matched CRM customer is already linked to another website login and cannot be bound here',
+        });
+      }
+      if (!isBindableCrmMatchKind(app.match_kind)) {
+        return res.status(409).json({
+          error: 'Application is not a bindable CRM match',
+        });
+      }
+
+      const userId = app.user_id ? String(app.user_id) : '';
+      if (!userId || !mongoose.Types.ObjectId.isValid(userId)) {
+        return res.status(404).json({ error: 'User not found' });
+      }
+      const user = await User.findById(userId).select('_id').lean();
+      if (!user) {
+        return res.status(404).json({ error: 'User not found' });
+      }
+
+      const candidates = websiteSignupMatchedIdStrings(app);
+      if (candidates.length === 0) {
+        return res.status(409).json({ error: 'No matched CRM customer to bind' });
+      }
+
+      let customerId = body.customer_id?.trim() || '';
+      if (!customerId) {
+        if (candidates.length !== 1) {
+          return res.status(400).json({
+            error: 'Select which matched CRM customer this signup belongs to',
+          });
+        }
+        customerId = candidates[0];
+      }
+      if (!mongoose.Types.ObjectId.isValid(customerId)) {
+        return res.status(400).json({ error: 'Invalid customer_id' });
+      }
+      if (!candidates.includes(customerId)) {
+        return res.status(400).json({
+          error: 'customer_id must be one of the matched CRM customers for this application',
+        });
+      }
+
+      const customerOid = new mongoose.Types.ObjectId(customerId);
+      const userOid = new mongoose.Types.ObjectId(userId);
+
+      const otherBound = await Customer.findOne({
+        user_id: userOid,
+        _id: { $ne: customerOid },
+      })
+        .select('_id')
+        .lean();
+      if (otherBound) {
+        return res.status(409).json({
+          error: 'This website login is already linked to a different customer',
+        });
+      }
+
+      const customer = await Customer.findById(customerId)
+        .select('_id user_id account_status')
+        .lean();
+      if (!customer) {
+        return res.status(404).json({ error: 'Customer not found' });
+      }
+
+      const existingUserId = customer.user_id ? String(customer.user_id) : '';
+      if (existingUserId && existingUserId !== userId) {
+        return res.status(409).json({
+          error: 'Matched CRM customer is already linked to another website login',
+        });
+      }
+
+      const bindFilter: Record<string, unknown> = {
+        _id: customerOid,
+        $or: [{ user_id: { $exists: false } }, { user_id: null }, { user_id: userOid }],
+      };
+      const bindResult = await Customer.updateOne(bindFilter, {
+        $set: { user_id: userOid, account_status: ACCOUNT_STATUS_APPROVED },
+      });
+      if (!updateMatched(bindResult)) {
+        return res.status(409).json({
+          error: 'Customer bind conflict; another reviewer may have acted',
+        });
+      }
+
+      const reviewedBy = new mongoose.Types.ObjectId(adminId);
+      const reviewedAt = new Date();
+      const reviewSet: Record<string, unknown> = {
+        status: WEBSITE_SIGNUP_STATUS_APPROVED,
+        customer_id: customerOid,
+        link_outcome: 'linked',
+        reviewed_by: reviewedBy,
+        reviewed_at: reviewedAt,
+      };
+      if (body.review_note !== undefined) {
+        reviewSet.review_note = body.review_note;
+      }
+
+      let approvedApp;
+      try {
+        approvedApp = await WebsiteSignupApplication.findOneAndUpdate(
+          { _id: new mongoose.Types.ObjectId(appId), status: WEBSITE_SIGNUP_STATUS_PENDING },
+          { $set: reviewSet },
+          { new: true }
+        ).lean();
+      } catch (appErr: any) {
+        logWebsiteSignupApprovalIssue({
+          stage: 'resolve_bind_application_transition_threw',
+          applicationId: appId,
+          customerId,
+          userId,
+          compensation: 'not_attempted',
+          errorMessage: appErr?.message ? String(appErr.message) : undefined,
+        });
+        return res.status(500).json({
+          error: 'Customer was bound but application update failed; requires investigation',
+        });
+      }
+
+      if (!approvedApp) {
+        return res.status(409).json({
+          error: 'Application approval conflict; another reviewer may have acted',
+        });
+      }
+
+      const audit = await createWebsiteSignupReviewAudit({
+        adminId,
+        applicationId: appId,
+        action: WEBSITE_SIGNUP_AUDIT_APPROVE,
+        customerId,
+        reviewNote: body.review_note,
+        ip: req.ip,
+      });
+      if (audit === 'failed') {
+        logWebsiteSignupApprovalIssue({
+          stage: 'audit_write_failed_after_resolve_bind',
+          applicationId: appId,
+          customerId,
+          userId,
+          compensation: 'not_attempted',
+        });
+        return res.status(500).json({
+          error: 'Application approved but audit logging failed; requires investigation',
+        });
+      }
+
+      return res.json({ application: serializeWebsiteSignupApplication(approvedApp) });
+    } catch (error: any) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: error.errors[0]?.message || 'Invalid request' });
+      }
+      console.error('Resolve-bind website signup application error:', error);
+      res.status(500).json({ error: 'Failed to resolve website signup application' });
     }
   }
 );

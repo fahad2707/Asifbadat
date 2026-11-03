@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
+import Link from 'next/link';
 import {
   Check,
   ChevronLeft,
@@ -15,15 +16,17 @@ import { isAdminAuthRedirectError } from '@/lib/admin-auth-redirect';
 import { formatApiError } from '@/lib/format-api-error';
 import { adminUi } from '@/lib/admin-ui';
 import toast from 'react-hot-toast';
+import {
+  canApproveApplication,
+  canBindMatchedCustomer,
+  candidateCustomerIds,
+  manualResolutionReason,
+  needsManualResolution,
+  type WebsiteSignupMatchKind as MatchKind,
+} from '@/lib/websiteSignupResolution';
 
 type ApplicationStatus = 'pending' | 'approved' | 'rejected';
 type LinkOutcome = 'created' | 'linked' | 'unlinked';
-type MatchKind =
-  | 'none'
-  | 'approved_crm'
-  | 'already_linked'
-  | 'ambiguous'
-  | 'non_approved_crm';
 
 interface WebsiteSignupApplication {
   id: string;
@@ -63,26 +66,6 @@ const STATUS_BADGE: Record<ApplicationStatus, string> = {
   approved: adminUi.badgePaid,
   rejected: 'inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-[#FDECEC] text-[#8A100E]',
 };
-
-function isObjectIdString(value: string | null | undefined): boolean {
-  return typeof value === 'string' && /^[a-fA-F0-9]{24}$/.test(value);
-}
-
-/** UX safeguard mirroring backend safe-path eligibility. Backend remains authoritative. */
-function canApproveApplication(app: WebsiteSignupApplication): boolean {
-  return (
-    app.status === 'pending' &&
-    app.link_outcome === 'created' &&
-    app.match_kind === 'none' &&
-    isObjectIdString(app.user_id) &&
-    isObjectIdString(app.customer_id)
-  );
-}
-
-function needsManualResolution(app: WebsiteSignupApplication): boolean {
-  if (app.status !== 'pending') return false;
-  return !canApproveApplication(app);
-}
 
 function matchKindLabel(kind: MatchKind): string {
   switch (kind) {
@@ -148,6 +131,9 @@ export default function WebsiteSignupsPage() {
   const [rejectTarget, setRejectTarget] = useState<WebsiteSignupApplication | null>(null);
   const [rejectNote, setRejectNote] = useState('');
   const [approveNote, setApproveNote] = useState('');
+  const [bindNote, setBindNote] = useState('');
+  const [bindCustomerId, setBindCustomerId] = useState('');
+  const [bindConfirmed, setBindConfirmed] = useState(false);
 
   const fetchApplications = useCallback(async (opts?: { quiet?: boolean }) => {
     if (!opts?.quiet) setLoading(true);
@@ -187,6 +173,19 @@ export default function WebsiteSignupsPage() {
     setPage(1);
   }, [statusTab]);
 
+  useEffect(() => {
+    if (!selected) {
+      setBindConfirmed(false);
+      setBindCustomerId('');
+      setBindNote('');
+      return;
+    }
+    const candidates = candidateCustomerIds(selected);
+    setBindConfirmed(false);
+    setBindCustomerId(candidates.length === 1 ? candidates[0] : '');
+    setBindNote('');
+  }, [selected?.id]);
+
   const handleApprove = async (app: WebsiteSignupApplication) => {
     if (!canApproveApplication(app) || decisionBusyId) return;
     const note = approveNote.trim();
@@ -213,6 +212,57 @@ export default function WebsiteSignupsPage() {
       if (isAdminAuthRedirectError(error)) return;
       const status = axiosStatus(error);
       const message = formatApiError(error, 'Failed to approve application');
+      if (status === 409) {
+        toast.error(`Conflict: ${message}. Refreshing the queue.`);
+        await fetchApplications({ quiet: true });
+      } else if (isPotentiallyAppliedDecisionError(status, message)) {
+        toast.error(
+          `${message} The decision may already be applied — refresh and verify before retrying.`
+        );
+        await fetchApplications({ quiet: true });
+      } else {
+        toast.error(message);
+        await fetchApplications({ quiet: true });
+      }
+    } finally {
+      setDecisionBusyId(null);
+    }
+  };
+
+  const handleResolveBind = async (app: WebsiteSignupApplication) => {
+    if (!canBindMatchedCustomer(app) || decisionBusyId) return;
+    const candidates = candidateCustomerIds(app);
+    const customerId = bindCustomerId || (candidates.length === 1 ? candidates[0] : '');
+    if (!customerId || !candidates.includes(customerId)) {
+      toast.error('Select the matched CRM customer this person belongs to.');
+      return;
+    }
+    if (!bindConfirmed) {
+      toast.error('Confirm this is the same person as the CRM customer before binding.');
+      return;
+    }
+    const note = bindNote.trim();
+    if (note.length > REVIEW_NOTE_MAX) {
+      toast.error(`Review note must be at most ${REVIEW_NOTE_MAX} characters`);
+      return;
+    }
+
+    setDecisionBusyId(app.id);
+    try {
+      const body: Record<string, unknown> = {
+        confirmed_same_person: true,
+        customer_id: customerId,
+      };
+      if (note) body.review_note = note;
+      await adminApi.post(`/admin/website-signup-applications/${app.id}/resolve-bind`, body);
+      toast.success('Login linked to the CRM customer and approved for ordering.');
+      setBindConfirmed(false);
+      setBindNote('');
+      await fetchApplications({ quiet: true });
+    } catch (error) {
+      if (isAdminAuthRedirectError(error)) return;
+      const status = axiosStatus(error);
+      const message = formatApiError(error, 'Failed to resolve application');
       if (status === 409) {
         toast.error(`Conflict: ${message}. Refreshing the queue.`);
         await fetchApplications({ quiet: true });
@@ -288,8 +338,8 @@ export default function WebsiteSignupsPage() {
           <h1 className={adminUi.pageTitle}>Website signups</h1>
           <p className={`${adminUi.meta} mt-1 max-w-2xl`}>
             Review storefront registration applications. Approve only new customers with no CRM
-            collision. Matches that need identity resolution stay pending until handled separately.
-            Rejection does not change existing CRM customer records.
+            collision. Email or phone matches stay pending until you confirm identity here and
+            bind the login, or reject the signup. Rejection does not change existing CRM customers.
           </p>
         </div>
         <button
@@ -426,6 +476,17 @@ export default function WebsiteSignupsPage() {
                                 {busy ? 'Working…' : 'Approve'}
                               </button>
                             )}
+                            {app.status === 'pending' && canBindMatchedCustomer(app) && (
+                              <button
+                                type="button"
+                                disabled={Boolean(decisionBusyId)}
+                                onClick={() => setSelected(app)}
+                                className={adminUi.btnPrimary}
+                                aria-label={`Open resolution workflow for ${displayOrDash(app.submitted_name)}`}
+                              >
+                                Resolve
+                              </button>
+                            )}
                             {app.status === 'pending' && (
                               <button
                                 type="button"
@@ -541,10 +602,14 @@ export default function WebsiteSignupsPage() {
                   </div>
                   {selected.matched_customer_ids.length > 0 && (
                     <div>
-                      <dt className={adminUi.label}>Matched CRM customer IDs</dt>
+                      <dt className={adminUi.label}>Matched CRM customers</dt>
                       <dd className="text-[#1A1A1A] font-mono text-xs break-all space-y-1">
                         {selected.matched_customer_ids.map((id) => (
-                          <div key={id}>{id}</div>
+                          <div key={id}>
+                            <Link href={`/admin/customers/${id}`} className="text-[#1A1A1A] underline">
+                              {id}
+                            </Link>
+                          </div>
                         ))}
                       </dd>
                     </div>
@@ -564,12 +629,89 @@ export default function WebsiteSignupsPage() {
                 </dl>
 
                 {needsManualResolution(selected) && (
-                  <div className="rounded-md border border-[#F5A623]/40 bg-[#FFF4E5] px-3 py-3">
-                    <p className="text-sm font-medium text-[#8A4500]">Manual resolution required</p>
-                    <p className={`${adminUi.meta} mt-1 text-[#8A4500]`}>
-                      This application cannot be auto-approved. CRM identity must be resolved outside
-                      this queue. Reject is still available if the signup should be declined.
-                    </p>
+                  <div className="rounded-md border border-[#F5A623]/40 bg-[#FFF4E5] px-3 py-3 space-y-3">
+                    <div>
+                      <p className="text-sm font-medium text-[#8A4500]">Manual resolution required</p>
+                      <p className={`${adminUi.meta} mt-1 text-[#8A4500]`}>
+                        {manualResolutionReason(selected.match_kind)}
+                      </p>
+                    </div>
+                    <ol className={`${adminUi.meta} list-decimal pl-4 space-y-1 text-[#8A4500]`}>
+                      <li>Open each matched CRM customer and compare name, email, phone, and history with this signup.</li>
+                      <li>
+                        {selected.match_kind === 'already_linked'
+                          ? 'If this is a duplicate signup, reject it. Do not steal a customer already linked to another login.'
+                          : 'If it is the same person, confirm below and bind this login to that customer. That also approves online ordering.'}
+                      </li>
+                      <li>If it is a different person, reject this signup. The existing CRM record stays unchanged.</li>
+                    </ol>
+                    {candidateCustomerIds(selected).length > 0 && (
+                      <div className="flex flex-col gap-1">
+                        {candidateCustomerIds(selected).map((id) => (
+                          <Link
+                            key={id}
+                            href={`/admin/customers/${id}`}
+                            className="text-sm text-[#8A4500] underline"
+                          >
+                            Open customer {id.slice(-8)}
+                          </Link>
+                        ))}
+                      </div>
+                    )}
+                    {canBindMatchedCustomer(selected) && (
+                      <div className="space-y-2 pt-1">
+                        {candidateCustomerIds(selected).length > 1 && (
+                          <div>
+                            <label htmlFor="bind-customer" className={adminUi.label}>
+                              CRM customer to bind
+                            </label>
+                            <select
+                              id="bind-customer"
+                              value={bindCustomerId}
+                              onChange={(e) => setBindCustomerId(e.target.value)}
+                              className={`${adminUi.field} mt-1`}
+                              disabled={Boolean(decisionBusyId)}
+                            >
+                              <option value="">Select a matched customer</option>
+                              {candidateCustomerIds(selected).map((id) => (
+                                <option key={id} value={id}>
+                                  {id}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                        )}
+                        <label className="flex items-start gap-2 text-sm text-[#8A4500]">
+                          <input
+                            type="checkbox"
+                            className="mt-0.5"
+                            checked={bindConfirmed}
+                            onChange={(e) => setBindConfirmed(e.target.checked)}
+                            disabled={Boolean(decisionBusyId)}
+                          />
+                          I verified this signup is the same person as the selected CRM customer.
+                        </label>
+                        <textarea
+                          value={bindNote}
+                          onChange={(e) => setBindNote(e.target.value.slice(0, REVIEW_NOTE_MAX))}
+                          rows={2}
+                          className={adminUi.field}
+                          placeholder="Optional note (how you verified identity)"
+                          disabled={Boolean(decisionBusyId)}
+                        />
+                        <button
+                          type="button"
+                          disabled={Boolean(decisionBusyId) || !bindConfirmed}
+                          onClick={() => handleResolveBind(selected)}
+                          className={`${adminUi.btnPrimary} w-full`}
+                        >
+                          <Check className="w-4 h-4" />
+                          {decisionBusyId === selected.id
+                            ? 'Binding…'
+                            : 'Bind login and approve ordering'}
+                        </button>
+                      </div>
+                    )}
                   </div>
                 )}
 

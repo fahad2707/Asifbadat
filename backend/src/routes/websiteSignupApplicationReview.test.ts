@@ -1169,3 +1169,205 @@ test('audit insert failure after rejection is surfaced', async () => {
   assert.equal(res.status, 500);
   assert.match(String(res.body.error), /rejected but audit logging failed/i);
 });
+
+function pendingUnlinkedCrmApp(overrides: Record<string, unknown> = {}) {
+  return pendingCreatedApp({
+    link_outcome: 'unlinked',
+    match_kind: 'non_approved_crm',
+    customer_id: undefined,
+    matched_customer_ids: [new mongoose.Types.ObjectId(CUSTOMER_ID)],
+    ...overrides,
+  });
+}
+
+function stubResolveBindRecords(opts?: {
+  customerUserId?: string | null;
+  otherBound?: boolean;
+  userMissing?: boolean;
+  customerMissing?: boolean;
+}) {
+  mock.method(User, 'findById', () => ({
+    select() {
+      return this;
+    },
+    lean: async () => (opts?.userMissing ? null : { _id: new mongoose.Types.ObjectId(USER_ID) }),
+  }));
+  mock.method(Customer, 'findOne', () => ({
+    select() {
+      return this;
+    },
+    lean: async () =>
+      opts?.otherBound ? { _id: new mongoose.Types.ObjectId('64b0000000000000000c0099') } : null,
+  }));
+  mock.method(Customer, 'findById', () => ({
+    select() {
+      return this;
+    },
+    lean: async () =>
+      opts?.customerMissing
+        ? null
+        : {
+            _id: new mongoose.Types.ObjectId(CUSTOMER_ID),
+            user_id:
+              opts?.customerUserId === null || opts?.customerUserId === undefined
+                ? null
+                : new mongoose.Types.ObjectId(opts.customerUserId),
+            account_status: ACCOUNT_STATUS_PENDING,
+          },
+  }));
+}
+
+test('resolve-bind requires admin auth', async () => {
+  assertNoMongoConnection();
+  const res = await request(createApp()).post(
+    `/api/admin/website-signup-applications/${APP_ID}/resolve-bind`
+  );
+  assert.equal(res.status, 401);
+});
+
+test('resolve-bind requires confirmed_same_person', async () => {
+  assertNoMongoConnection();
+  mock.method(WebsiteSignupApplication, 'findById', () => ({
+    lean: async () => pendingUnlinkedCrmApp(),
+  }));
+  const res = await request(createApp())
+    .post(`/api/admin/website-signup-applications/${APP_ID}/resolve-bind`)
+    .set('Authorization', `Bearer ${adminTestToken()}`)
+    .send({ customer_id: CUSTOMER_ID });
+  assert.equal(res.status, 400);
+});
+
+test('unlinked non_approved_crm can be bound and approved after confirmation', async () => {
+  assertNoMongoConnection();
+  const app = pendingUnlinkedCrmApp();
+  mock.method(WebsiteSignupApplication, 'findById', () => ({ lean: async () => app }));
+  stubResolveBindRecords();
+  const audit = stubAuditLog();
+
+  let customerFilter: Record<string, unknown> | undefined;
+  let customerUpdate: Record<string, unknown> | undefined;
+  mock.method(Customer, 'updateOne', async (filter: Record<string, unknown>, upd: Record<string, unknown>) => {
+    customerFilter = filter;
+    customerUpdate = upd;
+    return { matchedCount: 1, modifiedCount: 1 };
+  });
+
+  const approvedDoc = {
+    ...app,
+    status: 'approved',
+    link_outcome: 'linked',
+    customer_id: new mongoose.Types.ObjectId(CUSTOMER_ID),
+    reviewed_by: new mongoose.Types.ObjectId(ADMIN_ID),
+    reviewed_at: new Date('2026-11-03T18:00:00.000Z'),
+    review_note: 'Same person as CRM',
+  };
+  mock.method(WebsiteSignupApplication, 'findOneAndUpdate', () => ({
+    lean: async () => approvedDoc,
+  }));
+
+  const res = await request(createApp())
+    .post(`/api/admin/website-signup-applications/${APP_ID}/resolve-bind`)
+    .set('Authorization', `Bearer ${adminTestToken()}`)
+    .send({
+      confirmed_same_person: true,
+      customer_id: CUSTOMER_ID,
+      review_note: 'Same person as CRM',
+    });
+
+  assert.equal(res.status, 200);
+  assert.equal(res.body.application.status, 'approved');
+  assert.equal(res.body.application.link_outcome, 'linked');
+  assert.equal(res.body.application.customer_id, CUSTOMER_ID);
+  assert.equal(String(customerFilter?._id), CUSTOMER_ID);
+  assert.equal(
+    (customerUpdate?.$set as { user_id?: mongoose.Types.ObjectId })?.user_id?.toString(),
+    USER_ID
+  );
+  assert.equal(
+    (customerUpdate?.$set as { account_status?: string })?.account_status,
+    ACCOUNT_STATUS_APPROVED
+  );
+  assert.equal(audit.created.length, 1);
+  assert.equal(audit.created[0].action, 'website_signup_approve');
+});
+
+test('resolve-bind refuses already_linked matches', async () => {
+  assertNoMongoConnection();
+  mock.method(WebsiteSignupApplication, 'findById', () => ({
+    lean: async () =>
+      pendingUnlinkedCrmApp({
+        match_kind: 'already_linked',
+      }),
+  }));
+  mock.method(Customer, 'updateOne', async () => {
+    throw new Error('must not bind already_linked');
+  });
+
+  const res = await request(createApp())
+    .post(`/api/admin/website-signup-applications/${APP_ID}/resolve-bind`)
+    .set('Authorization', `Bearer ${adminTestToken()}`)
+    .send({ confirmed_same_person: true, customer_id: CUSTOMER_ID });
+
+  assert.equal(res.status, 409);
+  assert.match(String(res.body.error), /already linked/i);
+});
+
+test('resolve-bind requires customer_id when matches are ambiguous', async () => {
+  assertNoMongoConnection();
+  mock.method(WebsiteSignupApplication, 'findById', () => ({
+    lean: async () =>
+      pendingUnlinkedCrmApp({
+        match_kind: 'ambiguous',
+        matched_customer_ids: [
+          new mongoose.Types.ObjectId(CUSTOMER_ID),
+          new mongoose.Types.ObjectId('64b0000000000000000c0002'),
+        ],
+      }),
+  }));
+  stubResolveBindRecords();
+
+  const res = await request(createApp())
+    .post(`/api/admin/website-signup-applications/${APP_ID}/resolve-bind`)
+    .set('Authorization', `Bearer ${adminTestToken()}`)
+    .send({ confirmed_same_person: true });
+
+  assert.equal(res.status, 400);
+  assert.match(String(res.body.error), /select which matched/i);
+});
+
+test('resolve-bind does not steal a customer linked to another user', async () => {
+  assertNoMongoConnection();
+  mock.method(WebsiteSignupApplication, 'findById', () => ({
+    lean: async () => pendingUnlinkedCrmApp(),
+  }));
+  stubResolveBindRecords({ customerUserId: OTHER_USER_ID });
+  mock.method(Customer, 'updateOne', async () => {
+    throw new Error('must not overwrite another user_id');
+  });
+
+  const res = await request(createApp())
+    .post(`/api/admin/website-signup-applications/${APP_ID}/resolve-bind`)
+    .set('Authorization', `Bearer ${adminTestToken()}`)
+    .send({ confirmed_same_person: true, customer_id: CUSTOMER_ID });
+
+  assert.equal(res.status, 409);
+  assert.match(String(res.body.error), /already linked/i);
+});
+
+test('safe created path cannot use resolve-bind', async () => {
+  assertNoMongoConnection();
+  mock.method(WebsiteSignupApplication, 'findById', () => ({
+    lean: async () => pendingCreatedApp(),
+  }));
+  mock.method(Customer, 'updateOne', async () => {
+    throw new Error('must use approve for safe path');
+  });
+
+  const res = await request(createApp())
+    .post(`/api/admin/website-signup-applications/${APP_ID}/resolve-bind`)
+    .set('Authorization', `Bearer ${adminTestToken()}`)
+    .send({ confirmed_same_person: true, customer_id: CUSTOMER_ID });
+
+  assert.equal(res.status, 409);
+  assert.match(String(res.body.error), /Use Approve/i);
+});
