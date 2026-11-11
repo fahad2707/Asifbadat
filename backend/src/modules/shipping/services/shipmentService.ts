@@ -1,13 +1,15 @@
 import mongoose from 'mongoose';
 import Shipment from '../models/Shipment';
 import Product from '../../../models/Product';
+import { applyDeferredWholesaleSaleInventory } from '../../../services/wholesaleInvoiceInventoryService';
 import CreditMemo from '../../credit-memo/models/CreditMemo';
 import { StockMovementType } from '../../../shared/enums';
 import { createStockMovement } from '../../../utils/createStockMovement';
+import { DOC_PREFIX, nextPrefixedNumber } from '../../../utils/documentNumbers';
 
-function generateShipmentNumber(type: 'GROUND' | 'GROUND_RG'): string {
-  const prefix = type === 'GROUND_RG' ? 'RG' : 'SH';
-  return prefix + '-' + Date.now().toString(36).toUpperCase() + '-' + Math.random().toString(36).substring(2, 6).toUpperCase();
+async function generateShipmentNumber(type: 'GROUND' | 'GROUND_RG'): Promise<string> {
+  const prefix = type === 'GROUND_RG' ? DOC_PREFIX.returnShipment : DOC_PREFIX.shipment;
+  return nextPrefixedNumber(Shipment, 'shipment_number', prefix);
 }
 
 function isSkippedProductType(productType: unknown): boolean {
@@ -38,9 +40,9 @@ export function aggregateReturnInventoryQuantities(
 }
 
 /**
- * GROUND: logistics only. Wholesale invoices already own outbound SALE stock
- * (Phase 2D.2 / 2E). Mark-delivered must not decrement Product.stock_quantity
- * and must not write SHIPMENT_OUT.
+ * GROUND: logistics only on the shipment row. If the shipment is linked to a
+ * wholesale invoice that still has inventory_applied=false, stock is taken
+ * here via SALE movements (not SHIPMENT_OUT).
  *
  * GROUND_RG inbound inventory is handled by markReturnShipmentReceived.
  */
@@ -70,7 +72,15 @@ export async function markShipmentDelivered(
       },
       { session }
     );
+    const linkedId = (shipment as { linked_invoice_id?: unknown }).linked_invoice_id;
     await session.commitTransaction();
+    if (linkedId) {
+      await applyDeferredWholesaleSaleInventory({
+        invoiceId: String(linkedId),
+        fulfillmentMethod: 'shipment',
+        adminId: _userId,
+      });
+    }
     return { success: true };
   } catch (e) {
     await session.abortTransaction();
@@ -194,7 +204,11 @@ export async function markReturnShipmentReceived(
       const cm = await CreditMemo.create(
         [
           {
-            credit_memo_number: 'CM-RG-' + Date.now(),
+            credit_memo_number: await nextPrefixedNumber(
+              CreditMemo,
+              'credit_memo_number',
+              DOC_PREFIX.customerCreditMemo
+            ),
             type: 'CUSTOMER',
             reference_shipment_id: shipment._id,
             customer_id: new mongoose.Types.ObjectId(options.customer_id),

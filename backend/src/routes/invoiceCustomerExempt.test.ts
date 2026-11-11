@@ -369,6 +369,9 @@ test('F — converting an exempt quotation copies the stored zero-tax snapshot',
     limit() {
       return this;
     },
+    select() {
+      return this;
+    },
     lean: async () => [],
   }));
   let created: Record<string, unknown> | undefined;
@@ -483,6 +486,9 @@ test('9 — converting a Mongoose Customer Exempt quotation preserves the snapsh
       return this;
     },
     limit() {
+      return this;
+    },
+    select() {
       return this;
     },
     lean: async () => [],

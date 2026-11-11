@@ -17,6 +17,7 @@ import { createApp } from '../../server';
 import CreditMemo from './models/CreditMemo';
 import Product from '../../models/Product';
 import Customer from '../../models/Customer';
+import Vendor from '../../models/Vendor';
 import StockMovement from '../../models/StockMovement';
 import LedgerEntry from '../../models/LedgerEntry';
 import { StockMovementType } from '../../shared/enums';
@@ -97,6 +98,27 @@ async function postApprove(id = CM_ID) {
     .send({});
 }
 
+async function postMarkReceived(id = CM_ID) {
+  return request(createApp())
+    .post(`/api/credit-memos/${id}/mark-received`)
+    .set('Authorization', `Bearer ${adminTestToken()}`)
+    .send({});
+}
+
+async function postMarkDispatched(id = CM_ID) {
+  return request(createApp())
+    .post(`/api/credit-memos/${id}/mark-dispatched`)
+    .set('Authorization', `Bearer ${adminTestToken()}`)
+    .send({});
+}
+
+async function postMarkDelivered(id = CM_ID) {
+  return request(createApp())
+    .post(`/api/credit-memos/${id}/mark-delivered`)
+    .set('Authorization', `Bearer ${adminTestToken()}`)
+    .send({});
+}
+
 async function postCancel(id = CM_ID) {
   return request(createApp())
     .post(`/api/credit-memos/${id}/cancel`)
@@ -126,12 +148,28 @@ function stubApprove(opts: {
   mock.method(CreditMemo, 'findOneAndUpdate', async (filter: Record<string, unknown>, update: Record<string, unknown>) => {
     claims.push({ filter, update });
     if (opts.claim) return opts.claim(filter);
-    if (filter.status !== 'DRAFT') return null;
-    return {
-      ...opts.cm,
-      status: 'APPROVED',
-      ...((update.$set as Record<string, unknown>) || {}),
-    };
+    if (filter.status === 'DRAFT') {
+      return {
+        ...opts.cm,
+        status: 'APPROVED',
+        ...((update.$set as Record<string, unknown>) || {}),
+      };
+    }
+    if (filter.status === 'APPROVED') {
+      return {
+        ...opts.cm,
+        status: 'ADJUSTED',
+        ...((update.$set as Record<string, unknown>) || {}),
+      };
+    }
+    if (filter.status === 'ADJUSTED') {
+      return {
+        ...opts.cm,
+        status: 'CLOSED',
+        ...((update.$set as Record<string, unknown>) || {}),
+      };
+    }
+    return null;
   });
 
   const statusUpdates: Array<{ id: unknown; update: Record<string, unknown> }> = [];
@@ -189,6 +227,11 @@ function stubApprove(opts: {
     customerBalanceUpdates.push({ id, update });
     return { _id: CUSTOMER_ID };
   });
+  const vendorBalanceUpdates: Array<{ id: unknown; update: Record<string, unknown> }> = [];
+  mock.method(Vendor, 'findByIdAndUpdate', async (id: unknown, update: Record<string, unknown>) => {
+    vendorBalanceUpdates.push({ id, update });
+    return { _id: VENDOR_ID };
+  });
 
   return {
     session,
@@ -199,17 +242,37 @@ function stubApprove(opts: {
     stock,
     claims,
     customerBalanceUpdates,
+    vendorBalanceUpdates,
   };
 }
 
-test('customer physical CM approval increases stock and writes CREDIT_MEMO +qty with before/after', async () => {
+test('customer physical CM approval posts AR but does not change stock until received', async () => {
   assertNoMongoConnection();
-  const { session, productUpdates, movements, ledgerCalls } = stubApprove({
+  const { session, productUpdates, movements, ledgerCalls, customerBalanceUpdates } = stubApprove({
     cm: makeCm({ type: 'CUSTOMER', affects_inventory: true }),
     stock: { [PRODUCT_A]: 58 },
   });
 
   const res = await postApprove();
+
+  assertNoMongoConnection();
+  assert.equal(res.status, 200);
+  assert.equal(productUpdates.length, 0);
+  assert.equal(movements.length, 0);
+  assert.equal(ledgerCalls.length, 1);
+  assert.equal(customerBalanceUpdates.length, 1);
+  assert.equal(session.commitTransaction.mock.callCount(), 1);
+  assert.equal(session.abortTransaction.mock.callCount(), 0);
+});
+
+test('customer mark-received increases stock and writes CREDIT_MEMO +qty with before/after', async () => {
+  assertNoMongoConnection();
+  const { session, productUpdates, movements, ledgerCalls } = stubApprove({
+    cm: makeCm({ type: 'CUSTOMER', status: 'APPROVED', affects_inventory: true }),
+    stock: { [PRODUCT_A]: 58 },
+  });
+
+  const res = await postMarkReceived();
 
   assertNoMongoConnection();
   assert.equal(res.status, 200);
@@ -226,8 +289,7 @@ test('customer physical CM approval increases stock and writes CREDIT_MEMO +qty 
   assert.equal(String(movement.reference_id), CM_ID);
   assert.equal(movement.reference_number, 'CM-1004');
   assert.deepEqual(movements[0].options, { session });
-  assert.equal(ledgerCalls.length, 1);
-  assert.equal((ledgerCalls[0].options as { session?: unknown }).session, session);
+  assert.equal(ledgerCalls.length, 0);
   assert.equal(session.commitTransaction.mock.callCount(), 1);
   assert.equal(session.abortTransaction.mock.callCount(), 0);
 });
@@ -246,9 +308,9 @@ test('customer financial-only CM does not change stock or create a movement', as
   assert.equal(session.commitTransaction.mock.callCount(), 1);
 });
 
-test('vendor physical CM approval decreases stock and writes CREDIT_MEMO -qty with before/after', async () => {
+test('vendor physical CM approval posts AP but does not change stock until dispatched', async () => {
   assertNoMongoConnection();
-  const { session, productUpdates, movements } = stubApprove({
+  const { productUpdates, movements, ledgerCalls } = stubApprove({
     cm: makeCm({
       type: 'VENDOR',
       customer_id: undefined,
@@ -262,6 +324,28 @@ test('vendor physical CM approval decreases stock and writes CREDIT_MEMO -qty wi
   const res = await postApprove();
 
   assert.equal(res.status, 200);
+  assert.equal(productUpdates.length, 0);
+  assert.equal(movements.length, 0);
+  assert.equal(ledgerCalls.length, 1);
+});
+
+test('vendor mark-dispatched decreases stock and writes CREDIT_MEMO -qty with before/after', async () => {
+  assertNoMongoConnection();
+  const { session, productUpdates, movements } = stubApprove({
+    cm: makeCm({
+      type: 'VENDOR',
+      status: 'APPROVED',
+      customer_id: undefined,
+      vendor_id: VENDOR_ID,
+      affects_inventory: true,
+      items: [{ product_id: PRODUCT_A, quantity: 5, product_name: 'Lays Box' }],
+    }),
+    stock: { [PRODUCT_A]: 50 },
+  });
+
+  const res = await postMarkDispatched();
+
+  assert.equal(res.status, 200);
   assert.deepEqual(productUpdates[0].update, { $inc: { stock_quantity: -5 } });
   assert.equal(productUpdates[0].options.session, session);
   const movement = movements[0].doc;
@@ -273,6 +357,26 @@ test('vendor physical CM approval decreases stock and writes CREDIT_MEMO -qty wi
   assert.equal(movement.reference_type, 'CreditMemo');
   assert.equal(String(movement.reference_id), CM_ID);
   assert.equal(movement.reference_number, 'CM-1004');
+});
+
+test('vendor mark-delivered closes the memo without another stock movement', async () => {
+  assertNoMongoConnection();
+  const { productUpdates, movements } = stubApprove({
+    cm: makeCm({
+      type: 'VENDOR',
+      status: 'ADJUSTED',
+      customer_id: undefined,
+      vendor_id: VENDOR_ID,
+      affects_inventory: true,
+    }),
+    stock: { [PRODUCT_A]: 45 },
+  });
+
+  const res = await postMarkDelivered();
+
+  assert.equal(res.status, 200);
+  assert.equal(productUpdates.length, 0);
+  assert.equal(movements.length, 0);
 });
 
 test('vendor financial-only CM does not change stock or create a movement', async () => {
@@ -293,14 +397,14 @@ test('vendor financial-only CM does not change stock or create a movement', asyn
   assert.equal(movements.length, 0);
 });
 
-test('missing Product aborts approval with no movement and no committed financial posting', async () => {
+test('missing Product aborts mark-received with no movement', async () => {
   assertNoMongoConnection();
   const { session, movements, statusUpdates } = stubApprove({
-    cm: makeCm({ type: 'CUSTOMER', affects_inventory: true }),
+    cm: makeCm({ type: 'CUSTOMER', status: 'APPROVED', affects_inventory: true }),
     productUpdate: () => null,
   });
 
-  const res = await postApprove();
+  const res = await postMarkReceived();
 
   assert.equal(res.status, 404);
   assert.match(String(res.body.error), /Product not found/);
@@ -310,14 +414,14 @@ test('missing Product aborts approval with no movement and no committed financia
   assert.equal(session.abortTransaction.mock.callCount(), 1);
 });
 
-test('movement create failure aborts stock and financial posting; CM stays DRAFT', async () => {
+test('movement create failure aborts mark-received stock; CM stays APPROVED', async () => {
   assertNoMongoConnection();
   const { session, statusUpdates } = stubApprove({
-    cm: makeCm({ type: 'CUSTOMER', affects_inventory: true }),
+    cm: makeCm({ type: 'CUSTOMER', status: 'APPROVED', affects_inventory: true }),
     movementThrows: true,
   });
 
-  const res = await postApprove();
+  const res = await postMarkReceived();
 
   assert.equal(res.status, 500);
   assert.equal(statusUpdates.length, 0);
@@ -330,6 +434,7 @@ test('multi-line physical CM writes a movement per line with correct before/delt
   const { movements, session } = stubApprove({
     cm: makeCm({
       type: 'CUSTOMER',
+      status: 'APPROVED',
       affects_inventory: true,
       items: [
         { product_id: PRODUCT_A, quantity: 2, product_name: 'Lays Box' },
@@ -339,7 +444,7 @@ test('multi-line physical CM writes a movement per line with correct before/delt
     stock: { [PRODUCT_A]: 58, [PRODUCT_B]: 10 },
   });
 
-  const res = await postApprove();
+  const res = await postMarkReceived();
 
   assert.equal(res.status, 200);
   assert.equal(movements.length, 2);
@@ -447,6 +552,7 @@ test('mixed physical CM applies inventory only to inventory product lines', asyn
   const { session, productUpdates, movements, ledgerCalls, customerBalanceUpdates, stock } = stubApprove({
     cm: makeCm({
       type: 'CUSTOMER',
+      status: 'APPROVED',
       affects_inventory: true,
       items: [
         { product_id: PRODUCT_A, quantity: 5, product_name: 'Lays Box' },
@@ -462,7 +568,7 @@ test('mixed physical CM applies inventory only to inventory product lines', asyn
     },
   });
 
-  const res = await postApprove();
+  const res = await postMarkReceived();
 
   assert.equal(res.status, 200);
   assert.equal(productUpdates.length, 1);
@@ -477,8 +583,8 @@ test('mixed physical CM applies inventory only to inventory product lines', asyn
   assert.equal(movements[0].doc.quantity_change, 5);
   assert.equal(movements[0].doc.quantity_before, 100);
   assert.equal(movements[0].doc.quantity_after, 105);
-  assert.equal(ledgerCalls.length, 1);
-  assert.equal(customerBalanceUpdates.length, 1);
+  assert.equal(ledgerCalls.length, 0);
+  assert.equal(customerBalanceUpdates.length, 0);
   assert.equal(session.commitTransaction.mock.callCount(), 1);
 });
 
@@ -746,7 +852,7 @@ test('draft cancelled CM remains hard-deletable', async () => {
   assert.equal(deleted, true);
 });
 
-test('concurrent approve claims once: second request does not apply inventory', async () => {
+test('concurrent approve claims once: second request does not post AR twice', async () => {
   assertNoMongoConnection();
   let claimed = false;
   const h = stubApprove({
@@ -769,6 +875,36 @@ test('concurrent approve claims once: second request does not apply inventory', 
   assert.equal(first.status, 200);
   assert.equal(second.status, 400);
   assert.match(String(second.body.error), /Only draft/i);
+  assert.equal(h.movements.length, 0);
+  assert.equal(h.productUpdates.length, 0);
+  assert.equal(h.ledgerCalls.length, 1);
+  assert.equal(h.claims.length, 2);
+  assert.equal(h.session.commitTransaction.mock.callCount(), 1);
+});
+
+test('concurrent mark-received claims once: second request does not apply inventory', async () => {
+  assertNoMongoConnection();
+  let claimed = false;
+  const h = stubApprove({
+    cm: makeCm({ type: 'CUSTOMER', status: 'APPROVED', affects_inventory: true }),
+    stock: { [PRODUCT_A]: 58 },
+    claim: (filter) => {
+      assert.equal(filter.status, 'APPROVED');
+      if (claimed) return null;
+      claimed = true;
+      return {
+        ...makeCm({ type: 'CUSTOMER', status: 'APPROVED', affects_inventory: true }),
+        status: 'ADJUSTED',
+      };
+    },
+  });
+
+  const first = await postMarkReceived();
+  const second = await postMarkReceived();
+
+  assert.equal(first.status, 200);
+  assert.equal(second.status, 400);
+  assert.match(String(second.body.error), /already marked received/i);
   assert.equal(h.movements.length, 1);
   assert.equal(h.productUpdates.length, 1);
   assert.equal(h.stock[PRODUCT_A], 60);

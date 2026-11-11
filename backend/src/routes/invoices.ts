@@ -1,5 +1,6 @@
 import express from 'express';
 import mongoose from 'mongoose';
+import { z } from 'zod';
 import Invoice from '../models/Invoice';
 import Customer from '../models/Customer';
 import StoreSettings from '../models/StoreSettings';
@@ -36,9 +37,20 @@ import {
   convertQuotationWithInventory,
   createWholesaleInvoiceWithInventory,
   deleteWholesaleInvoiceWithInventory,
+  invoiceInventoryCommitted,
   usesMigratedWholesaleInventory,
+  applyDeferredWholesaleSaleInventory,
   type InvoiceInventoryLine,
 } from '../services/wholesaleInvoiceInventoryService';
+import Shipment from '../modules/shipping/models/Shipment';
+import { generateShipmentNumber } from '../modules/shipping/services/shipmentService';
+import {
+  DOC_PREFIX,
+  convertedInvoicePrefix,
+  nextPrefixedNumber,
+  parseQuotationOrigin,
+  quotationPrefixForOrigin,
+} from '../utils/documentNumbers';
 
 const router = express.Router();
 
@@ -104,8 +116,27 @@ async function saveCustomerProductPrices(customerId: string | mongoose.Types.Obj
   if (!customerId) return;
   const cid = typeof customerId === 'string' ? new mongoose.Types.ObjectId(customerId) : customerId;
   const iid = typeof invoiceId === 'string' ? new mongoose.Types.ObjectId(invoiceId) : invoiceId;
+  const productIds = items
+    .map((i: any) => i.product_id)
+    .filter(Boolean)
+    .map((pid: any) => (typeof pid === 'string' ? new mongoose.Types.ObjectId(pid) : pid));
+  let products: Array<{ _id?: unknown; price?: number }> = [];
+  if (productIds.length) {
+    try {
+      products = await Product.find({ _id: { $in: productIds } }).select('price').lean();
+    } catch {
+      products = [];
+    }
+  }
+  const catalogById = new Map(products.map((p: any) => [String(p._id), Number(p.price)]));
+
   const ops = items
-    .filter((i: any) => i.product_id && Number(i.price) > 0)
+    .filter((i: any) => {
+      if (!i.product_id || !(Number(i.price) > 0)) return false;
+      const catalog = catalogById.get(String(i.product_id));
+      if (catalog == null || Number.isNaN(catalog)) return false;
+      return Math.round(Number(i.price) * 100) !== Math.round(catalog * 100);
+    })
     .map((i: any) => ({
       updateOne: {
         filter: { customer_id: cid, product_id: typeof i.product_id === 'string' ? new mongoose.Types.ObjectId(i.product_id) : i.product_id },
@@ -146,11 +177,26 @@ function invoiceLinesMayAffectInventory(items: InvoiceInventoryLine[] | undefine
  * Legacy/source-less receivable invoices use it only when product lines can affect stock.
  * ONLINE never adjusts inventory through these routes.
  */
+function fulfillmentPayload(invoice: {
+  fulfillment_method?: unknown;
+  inventory_applied?: unknown;
+  linked_shipment_id?: unknown;
+}) {
+  return {
+    fulfillment_method: invoice.fulfillment_method || null,
+    inventory_applied: invoice.inventory_applied,
+    linked_shipment_id: invoice.linked_shipment_id
+      ? String((invoice.linked_shipment_id as { toString?: () => string }).toString?.() || invoice.linked_shipment_id)
+      : null,
+  };
+}
+
 function usesAtomicInvoiceInventoryPath(
-  invoice: { source?: unknown; invoice_type?: unknown },
+  invoice: { source?: unknown; invoice_type?: unknown; inventory_applied?: unknown },
   oldItems?: InvoiceInventoryLine[],
   newItems?: InvoiceInventoryLine[]
 ): boolean {
+  if (!invoiceInventoryCommitted(invoice)) return false;
   if (usesMigratedWholesaleInventory(invoice)) return true;
   if (!shouldAdjustInventoryForDocumentType(invoice.invoice_type)) return false;
   // ONLINE never adjusts inventory through these routes (same gate as prior legacy loops).
@@ -268,6 +314,7 @@ router.get('/', authenticateAdmin, async (req: AuthRequest, res) => {
           shipping_type: invoice.shipping_type,
           terms: invoice.terms,
           source: invoice.source,
+          ...fulfillmentPayload(invoice),
           ...quotationMark(invoice.shipping_type),
           invoice_date: invoice.invoice_date,
           due_date: invoice.due_date,
@@ -282,27 +329,20 @@ router.get('/', authenticateAdmin, async (req: AuthRequest, res) => {
   }
 });
 
-// Get next document number: INV#001, INV#002, ... or QTN#001, QTN#002, ...
 async function getNextInvoiceNumber(): Promise<string> {
-  const docs = await Invoice.find({ invoice_number: /^INV#\d+$/ }).sort({ invoice_number: -1 }).limit(1).lean();
-  if (docs.length === 0) return 'INV#001';
-  const last = (docs[0] as any).invoice_number;
-  const num = parseInt(last.replace(/^INV#/, ''), 10) || 0;
-  return `INV#${String(num + 1).padStart(3, '0')}`;
+  return nextPrefixedNumber(Invoice, 'invoice_number', DOC_PREFIX.invoice);
 }
-async function getNextQuotationNumber(): Promise<string> {
-  const docs = await Invoice.find({ invoice_number: /^QTN#\d+$/ }).sort({ invoice_number: -1 }).limit(1).lean();
-  if (docs.length === 0) return 'QTN#001';
-  const last = (docs[0] as any).invoice_number;
-  const num = parseInt(last.replace(/^QTN#/, ''), 10) || 0;
-  return `QTN#${String(num + 1).padStart(3, '0')}`;
+async function getNextQuotationNumber(origin?: unknown): Promise<string> {
+  return nextPrefixedNumber(Invoice, 'invoice_number', quotationPrefixForOrigin(origin));
 }
 
 // Generate next invoice or quotation number (for create form)
 router.get('/generate-number', authenticateAdmin, async (req: AuthRequest, res) => {
   try {
     const type = (req.query.type as string) || 'invoice';
-    const number = type === 'quotation' ? await getNextQuotationNumber() : await getNextInvoiceNumber();
+    const origin = parseQuotationOrigin(req.query.origin);
+    const number =
+      type === 'quotation' ? await getNextQuotationNumber(origin) : await getNextInvoiceNumber();
     res.json({ invoice_number: number });
   } catch (e) {
     res.status(500).json({ error: 'Failed to generate number' });
@@ -333,7 +373,11 @@ router.post('/', authenticateAdmin, async (req: AuthRequest, res) => {
   try {
     const body = req.body as any;
     const docType = body.invoice_type === DOCUMENT_TYPE_QUOTATION ? DOCUMENT_TYPE_QUOTATION : DOCUMENT_TYPE_INVOICE;
-    const invoice_number = body.invoice_number || (docType === DOCUMENT_TYPE_QUOTATION ? await getNextQuotationNumber() : await getNextInvoiceNumber());
+    const invoice_number =
+      body.invoice_number ||
+      (docType === DOCUMENT_TYPE_QUOTATION
+        ? await getNextQuotationNumber(body.quotation_origin)
+        : await getNextInvoiceNumber());
     const invoice_date = body.invoice_date ? new Date(body.invoice_date) : new Date();
     const due_date = body.due_date ? new Date(body.due_date) : invoice_date;
     const customer_id = body.customer_id ? new mongoose.Types.ObjectId(body.customer_id) : undefined;
@@ -396,6 +440,7 @@ router.post('/', authenticateAdmin, async (req: AuthRequest, res) => {
       subtotal_amount: (doc as any).subtotal_amount,
       payment_status: (doc as any).payment_status,
       source: (doc as any).source,
+      ...fulfillmentPayload(doc as any),
       items: (doc as any).items || items,
       created_at: (doc as any).created_at,
     });
@@ -407,6 +452,104 @@ router.post('/', authenticateAdmin, async (req: AuthRequest, res) => {
     if (wholesale) return res.status(wholesale.status).json(wholesale.body);
     console.error('Create invoice error:', error);
     res.status(500).json({ error: 'Failed to create invoice' });
+  }
+});
+
+router.post('/:id/fulfill', authenticateAdmin, async (req: AuthRequest, res) => {
+  try {
+    const schema = z.object({
+      method: z.enum(['store_pickup', 'shipment']),
+      transporter_name: z.string().optional(),
+      vehicle_number: z.string().optional(),
+      lr_number: z.string().optional(),
+      expected_delivery_date: z.string().optional(),
+      notes: z.string().optional(),
+    });
+    const body = schema.parse(req.body);
+    const invoice = await Invoice.findById(req.params.id);
+    if (!invoice) return res.status(404).json({ error: 'Invoice not found' });
+    if (isQuotationType(invoice.invoice_type) || isPosSaleInvoiceType(invoice.invoice_type)) {
+      return res.status(400).json({ error: 'Only wholesale invoices can be fulfilled this way' });
+    }
+    if ((invoice as any).inventory_applied !== false) {
+      return res.status(400).json({ error: 'This invoice already took stock or was created before deferred fulfillment' });
+    }
+    if ((invoice as any).fulfillment_method && (invoice as any).fulfillment_method !== 'unfulfilled') {
+      return res.status(400).json({ error: 'This invoice is already set for pickup or shipment' });
+    }
+
+    if (body.method === 'store_pickup') {
+      const result = await applyDeferredWholesaleSaleInventory({
+        invoiceId: invoice._id as mongoose.Types.ObjectId,
+        fulfillmentMethod: 'store_pickup',
+        adminId: req.userId,
+      });
+      if (!result.applied) {
+        return res.status(409).json({ error: 'Stock was already applied for this invoice' });
+      }
+      const live = await Invoice.findById(invoice._id).lean();
+      return res.json({
+        id: String(invoice._id),
+        fulfillment_method: 'store_pickup',
+        inventory_applied: true,
+        ...fulfillmentPayload(live || { fulfillment_method: 'store_pickup', inventory_applied: true }),
+      });
+    }
+
+    const items = ((invoice as any).items || [])
+      .filter((i: any) => i.product_id && Number(i.quantity) > 0)
+      .map((i: any) => ({
+        product_id: i.product_id,
+        product_name: i.product_name,
+        quantity: Number(i.quantity),
+        status: 'PENDING' as const,
+      }));
+    if (!items.length) {
+      return res.status(400).json({ error: 'Invoice has no product lines to ship' });
+    }
+
+    const shipNotes = [
+      body.notes,
+      invoice.customer_name ? `Customer: ${invoice.customer_name}` : '',
+      invoice.customer_phone ? `Phone: ${invoice.customer_phone}` : '',
+      invoice.customer_address ? `Ship to: ${invoice.customer_address}` : '',
+    ]
+      .filter(Boolean)
+      .join('\n');
+
+    const shipment = await Shipment.create({
+      shipment_number: await generateShipmentNumber('GROUND'),
+      shipment_type: 'GROUND',
+      linked_invoice_id: invoice._id,
+      transporter_name: body.transporter_name,
+      vehicle_number: body.vehicle_number,
+      lr_number: body.lr_number,
+      expected_delivery_date: body.expected_delivery_date ? new Date(body.expected_delivery_date) : undefined,
+      notes: shipNotes || undefined,
+      freight_charge: 0,
+      status: 'PACKED',
+      created_by: req.userId,
+      items,
+    });
+
+    invoice.fulfillment_method = 'shipment';
+    (invoice as any).linked_shipment_id = shipment._id;
+    await invoice.save();
+
+    return res.status(201).json({
+      id: String(invoice._id),
+      fulfillment_method: 'shipment',
+      inventory_applied: false,
+      linked_shipment_id: String(shipment._id),
+      shipment_number: shipment.shipment_number,
+      shipment_id: String(shipment._id),
+    });
+  } catch (error: any) {
+    if (error instanceof z.ZodError) return res.status(400).json({ error: error.errors[0].message });
+    const wholesale = httpErrorFromWholesaleInventory(error);
+    if (wholesale) return res.status(wholesale.status).json(wholesale.body);
+    console.error('Fulfill invoice error:', error);
+    return res.status(500).json({ error: 'Failed to fulfill invoice' });
   }
 });
 
@@ -469,6 +612,7 @@ router.get('/:id', authenticateAdmin, async (req: AuthRequest, res) => {
       shipping_type: doc.shipping_type,
       payment_status: state.payment_status,
       source: doc.source,
+      ...fulfillmentPayload(doc),
       ...quotationMark(doc.shipping_type),
       items: doc.items || [],
       created_at: doc.created_at,
@@ -687,7 +831,11 @@ router.post('/:id/convert', authenticateAdmin, async (req: AuthRequest, res) => 
     const total_amount = usedLineTax
       ? totals.total_amount
       : Number((quote as any).total_amount) || subtotal_amount + tax_amount;
-    const invoice_number = await getNextInvoiceNumber();
+    const invoice_number = await nextPrefixedNumber(
+      Invoice,
+      'invoice_number',
+      convertedInvoicePrefix((quote as any).invoice_number)
+    );
     const invoice_date = new Date();
     const due_date = (quote as any).due_date || invoice_date;
 

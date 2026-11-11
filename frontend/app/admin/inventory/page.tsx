@@ -25,6 +25,9 @@ interface InventoryItem {
   sub_category_id?: string;
   cost_price?: number;
   price?: number;
+  best_vendor_id?: string;
+  best_vendor_name?: string;
+  best_unit_cost?: number;
 }
 
 interface Category {
@@ -161,6 +164,9 @@ function InventoryPageInner() {
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState('All');
   const [stockFilter, setStockFilter] = useState<'all' | 'low_stock' | 'out_of_stock'>('all');
+  const [supplierFilter, setSupplierFilter] = useState('');
+  const [selectedReorderIds, setSelectedReorderIds] = useState<Set<string>>(new Set());
+  const [vendors, setVendors] = useState<Array<{ id: string; name: string }>>([]);
   const [showItemModal, setShowItemModal] = useState(false);
   const [showTypeModal, setShowTypeModal] = useState(false);
   const [showCategoryModal, setShowCategoryModal] = useState(false);
@@ -188,7 +194,6 @@ function InventoryPageInner() {
   const [historyRows, setHistoryRows] = useState<MovementRow[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyTypeFilter, setHistoryTypeFilter] = useState('');
-  const [movementSummary, setMovementSummary] = useState<Record<string, { in: number; out: number }>>({});
   const [editing, setEditing] = useState<InventoryItem | null>(null);
   const [form, setForm] = useState({
     item_id: '',
@@ -202,20 +207,37 @@ function InventoryPageInner() {
 
   const fetchProducts = async () => {
     try {
-      const res = await adminApi.get('/products', { params: { limit: 5000, visibility: 'all' } });
-      const list = (res.data.products || []).map((p: any) => ({
-        id: p.id,
-        sku: p.sku,
-        name: p.name,
-        category_name: p.category_name,
-        sub_category_name: p.sub_category_name,
-        stock_quantity: p.stock_quantity ?? 0,
-        low_stock_threshold: p.low_stock_threshold ?? 10,
-        category_id: p.category_id,
-        sub_category_id: p.sub_category_id,
-        cost_price: p.cost_price != null ? Number(p.cost_price) : undefined,
-        price: p.price != null ? Number(p.price) : undefined,
-      }));
+      const [res, ratesRes] = await Promise.all([
+        adminApi.get('/products', { params: { limit: 5000, visibility: 'all' } }),
+        adminApi.get('/vendors/best-rates').catch(() => ({ data: { rates: [] } })),
+      ]);
+      const rates = new Map<string, { vendor_id: string; vendor_name: string; unit_cost: number }>();
+      for (const row of ratesRes.data?.rates || []) {
+        rates.set(String(row.product_id), {
+          vendor_id: row.vendor_id,
+          vendor_name: row.vendor_name,
+          unit_cost: Number(row.unit_cost) || 0,
+        });
+      }
+      const list = (res.data.products || []).map((p: any) => {
+        const best = rates.get(String(p.id));
+        return {
+          id: p.id,
+          sku: p.sku,
+          name: p.name,
+          category_name: p.category_name,
+          sub_category_name: p.sub_category_name,
+          stock_quantity: p.stock_quantity ?? 0,
+          low_stock_threshold: p.low_stock_threshold ?? 10,
+          category_id: p.category_id,
+          sub_category_id: p.sub_category_id,
+          cost_price: p.cost_price != null ? Number(p.cost_price) : undefined,
+          price: p.price != null ? Number(p.price) : undefined,
+          best_vendor_id: best?.vendor_id,
+          best_vendor_name: best?.vendor_name,
+          best_unit_cost: best?.unit_cost,
+        };
+      });
       setItems(list);
     } catch {
       toast.error('Failed to load inventory');
@@ -224,12 +246,16 @@ function InventoryPageInner() {
     }
   };
 
-  const fetchMovementSummary = async () => {
+  const fetchVendors = async () => {
     try {
-      const res = await adminApi.get('/inventory/summary');
-      setMovementSummary(res.data.summary || {});
+      const res = await adminApi.get('/vendors', { params: { limit: 5000 } });
+      const list = (res.data.vendors || []).map((v: { id: string; name: string }) => ({
+        id: String(v.id),
+        name: v.name || 'Supplier',
+      }));
+      setVendors(list.sort((a: { name: string }, b: { name: string }) => a.name.localeCompare(b.name)));
     } catch {
-      setMovementSummary({});
+      setVendors([]);
     }
   };
 
@@ -270,7 +296,7 @@ function InventoryPageInner() {
   useEffect(() => {
     (async () => {
       setLoading(true);
-      await Promise.all([fetchProducts(), fetchMovementSummary()]);
+      await Promise.all([fetchProducts(), fetchVendors()]);
       setLoading(false);
     })();
   }, []);
@@ -439,7 +465,53 @@ function InventoryPageInner() {
         return qty > 0 && qty <= (p.low_stock_threshold || 10);
       }
       return true;
+    })
+    .filter((p) => {
+      if (!supplierFilter) return true;
+      if (p.best_vendor_id === supplierFilter) return true;
+      return !p.best_vendor_id;
     });
+
+  const supplierOptions = Array.from(
+    new Map(
+      [
+        ...vendors.map((v) => [v.id, v.name] as [string, string]),
+        ...items
+          .filter((p) => p.best_vendor_id && p.best_vendor_name)
+          .map((p) => [p.best_vendor_id as string, p.best_vendor_name as string] as [string, string]),
+      ]
+    ).entries()
+  ).sort((a, b) => a[1].localeCompare(b[1]));
+
+  const createPoFromSelection = () => {
+    const selected = filtered.filter((p) => selectedReorderIds.has(p.id));
+    if (!selected.length) {
+      toast.error('Select products to reorder');
+      return;
+    }
+    const vendorIds = [...new Set(selected.map((p) => p.best_vendor_id).filter(Boolean))];
+    const vendorId = supplierFilter || (vendorIds.length === 1 ? String(vendorIds[0]) : '');
+    if (!vendorId) {
+      toast.error('Filter to one supplier, then select products');
+      return;
+    }
+    if (vendorIds.length > 1 && !supplierFilter) {
+      toast.error('Filter to one supplier, or select products that share the same best supplier');
+      return;
+    }
+    const lines = selected.map((p) => ({
+      product_id: p.id,
+      product_name: p.name,
+      qty: Math.max(1, (p.low_stock_threshold || 10) - (p.stock_quantity || 0)),
+      unit_cost: p.best_unit_cost ?? p.cost_price ?? 0,
+    }));
+    const params = new URLSearchParams({
+      create: '1',
+      vendor_id: vendorId,
+      lines: JSON.stringify(lines),
+    });
+    router.push(`/admin/purchase-orders?${params.toString()}`);
+  };
 
   const handleSaveItem = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -502,7 +574,6 @@ function InventoryPageInner() {
         physical_count: '',
       });
       fetchProducts();
-      fetchMovementSummary();
     } catch (err: any) {
       toast.error(err.response?.data?.error || 'Failed to save');
     }
@@ -717,7 +788,6 @@ function InventoryPageInner() {
           : 'Physical count matches system quantity. No stock change.'
       );
       fetchProducts();
-      fetchMovementSummary();
       setShowCountModal(false);
       if (searchParams.get('count') === '1') router.replace('/admin/inventory');
     } catch (err: any) {
@@ -856,7 +926,6 @@ function InventoryPageInner() {
     if (ok) {
       toast.success(`Adjusted ${ok} ${ok === 1 ? 'product' : 'products'}`);
       fetchProducts();
-      fetchMovementSummary();
     }
     if (failures.length) {
       toast.error(failures.slice(0, 3).join(' · '));
@@ -883,7 +952,7 @@ function InventoryPageInner() {
         <div>
           <h1 className="text-2xl font-semibold text-[#0F172A] tracking-tight">Inventory management</h1>
           <p className="text-xs text-slate-400 mt-1">
-            Inbound/outbound columns are stock movement aggregates (not PO or invoice accounting totals). Control buffer levels and log adjustments here.
+            Control buffer levels and log adjustments here. Open History on a product for stock movements.
           </p>
         </div>
       </div>
@@ -930,6 +999,26 @@ function InventoryPageInner() {
           >
             Stock adjustments
           </button>
+          <select
+            value={supplierFilter}
+            onChange={(e) => setSupplierFilter(e.target.value)}
+            className="bg-slate-955/60 border border-white/10 rounded-xl px-3 py-2 text-xs text-slate-200 focus:outline-none focus:ring-1 focus:ring-teal-500"
+          >
+            <option value="">All suppliers</option>
+            {supplierOptions.map(([id, name]) => (
+              <option key={id} value={id}>
+                {name}
+              </option>
+            ))}
+          </select>
+          <button
+            type="button"
+            onClick={createPoFromSelection}
+            disabled={selectedReorderIds.size === 0}
+            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-white bg-[#0F9F8F] hover:bg-[#0B8275] font-bold text-xs disabled:opacity-50"
+          >
+            Create purchase order ({selectedReorderIds.size})
+          </button>
           <select value={filter} onChange={(e) => setFilter(e.target.value)} className="bg-slate-955/60 border border-white/10 rounded-xl px-3 py-2 text-xs text-slate-200 focus:outline-none focus:ring-1 focus:ring-teal-500">
             <option value="All">All Items</option>
           </select>
@@ -946,15 +1035,15 @@ function InventoryPageInner() {
             <table className="w-full border-collapse">
               <thead className="bg-slate-950/60 text-slate-400 border-b border-white/5">
                 <tr>
+                  <th className="w-10 px-4 py-3.5" />
                   <th className="text-left py-3.5 px-4 text-[10px] font-bold uppercase tracking-wider">Item ID / SKU</th>
                   <th className="text-left py-3.5 px-4 text-[10px] font-bold uppercase tracking-wider">Category</th>
                   <th className="text-left py-3.5 px-4 text-[10px] font-bold uppercase tracking-wider">Subcategory</th>
                   <th className="text-left py-3.5 px-4 text-[10px] font-bold uppercase tracking-wider">Item Name</th>
-                  <th className="text-right py-3.5 px-4 text-[10px] font-bold uppercase tracking-wider" title="Sum of positive stock movements">Inbound movements</th>
-                  <th className="text-right py-3.5 px-4 text-[10px] font-bold uppercase tracking-wider" title="Sum of negative stock movements (absolute)">Outbound movements</th>
                   <th className="text-right py-3.5 px-4 text-[10px] font-bold uppercase tracking-wider">Remaining Stock</th>
                   <th className="text-right py-3.5 px-4 text-[10px] font-bold uppercase tracking-wider">Buffer Level</th>
                   <th className="text-center py-3.5 px-4 text-[10px] font-bold uppercase tracking-wider">Reorder status</th>
+                  <th className="text-left py-3.5 px-4 text-[10px] font-bold uppercase tracking-wider">Best supplier</th>
                   <th className="text-right py-3.5 px-4 text-[10px] font-bold uppercase tracking-wider font-semibold">Actions</th>
                 </tr>
               </thead>
@@ -970,16 +1059,26 @@ function InventoryPageInner() {
                     const reorderRequired = p.stock_quantity <= (p.low_stock_threshold || 10);
                     return (
                       <tr key={p.id} className={`border-b border-white/5 transition-colors hover:bg-white/[0.01] ${reorderRequired ? 'bg-rose-500/[0.03]' : ''}`}>
+                        <td className="py-3 px-4">
+                          <input
+                            type="checkbox"
+                            aria-label={`Select ${p.name}`}
+                            checked={selectedReorderIds.has(p.id)}
+                            onChange={() => {
+                              setSelectedReorderIds((prev) => {
+                                const next = new Set(prev);
+                                if (next.has(p.id)) next.delete(p.id);
+                                else next.add(p.id);
+                                return next;
+                              });
+                            }}
+                            className="h-4 w-4 rounded border-[#C7C7C7] accent-black cursor-pointer"
+                          />
+                        </td>
                         <td className="py-3 px-4 text-xs font-mono font-bold text-teal-450">{p.sku || p.id.slice(-6)}</td>
                         <td className="py-3 px-4 text-xs text-slate-400">{p.category_name || '—'}</td>
                         <td className="py-3 px-4 text-xs text-slate-400">{p.sub_category_name || '—'}</td>
                         <td className="py-3 px-4 text-xs font-semibold text-slate-205">{p.name}</td>
-                        <td className="py-3 px-4 text-xs text-right font-mono text-slate-350 font-bold">
-                          {movementSummary[p.id]?.in != null ? movementSummary[p.id].in : '0'}
-                        </td>
-                        <td className="py-3 px-4 text-xs text-right font-mono text-slate-350 font-bold">
-                          {movementSummary[p.id]?.out != null ? movementSummary[p.id].out : '0'}
-                        </td>
                         <td className={`py-3 px-4 text-xs text-right font-extrabold font-mono ${reorderRequired ? 'text-rose-455' : 'text-slate-100'}`}>{p.stock_quantity}</td>
                         <td className="py-3 px-4 text-xs text-right font-mono text-slate-400">{p.low_stock_threshold ?? 10}</td>
                         <td className="py-3 px-4 text-center text-xs">
@@ -987,6 +1086,18 @@ function InventoryPageInner() {
                             <span className="inline-flex px-2 py-0.5 rounded text-[9px] font-bold border bg-rose-500/10 text-rose-400 border-rose-500/20 uppercase tracking-wider">Required</span>
                           ) : (
                             <span className="inline-flex px-2 py-0.5 rounded text-[9px] font-bold border border-white/10 bg-slate-950/40 text-slate-450 uppercase tracking-wider">Stock Good</span>
+                          )}
+                        </td>
+                        <td className="py-3 px-4 text-xs text-slate-200">
+                          {p.best_vendor_name ? (
+                            <>
+                              {p.best_vendor_name}
+                              {p.best_unit_cost != null ? (
+                                <span className="block text-[10px] text-slate-400 font-mono">${Number(p.best_unit_cost).toFixed(2)}</span>
+                              ) : null}
+                            </>
+                          ) : (
+                            '—'
                           )}
                         </td>
                         <td className="py-3 px-4 text-right text-xs">

@@ -26,7 +26,8 @@ type OnlineOrder = {
 };
 
 const statusLabel: Record<string, string> = {
-  confirmed: 'Confirmed',
+  confirmed: 'Under review',
+  quoted: 'Quoted',
   packed: 'Packed',
   dispatched: 'Dispatched',
   delivered: 'Delivered',

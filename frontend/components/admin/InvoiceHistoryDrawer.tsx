@@ -1,6 +1,8 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { X } from 'lucide-react';
 import adminApi from '@/lib/admin-api';
 import { isAdminAuthRedirectError } from '@/lib/admin-auth-redirect';
@@ -47,6 +49,9 @@ interface InvoiceDetail {
     tax_amount?: number;
     total?: number;
   }[];
+  fulfillment_method?: 'unfulfilled' | 'store_pickup' | 'shipment' | null;
+  inventory_applied?: boolean | null;
+  linked_shipment_id?: string | null;
 }
 
 interface ReceiptRow {
@@ -97,6 +102,7 @@ function quoteStatus(inv?: InvoiceDetail | null) {
 }
 
 export default function InvoiceHistoryDrawer({ invoiceId, refreshKey = 0, onClose, onEdit, onReceivePayment, onChanged }: InvoiceHistoryDrawerProps) {
+  const router = useRouter();
   const [loading, setLoading] = useState(false);
   const [invoice, setInvoice] = useState<InvoiceDetail | null>(null);
   const [receipts, setReceipts] = useState<ReceiptRow[]>([]);
@@ -151,9 +157,31 @@ export default function InvoiceHistoryDrawer({ invoiceId, refreshKey = 0, onClos
   const remaining = Math.max(0, total - paid);
   const paidStatus = (invoice?.payment_status || '').toLowerCase() === 'paid' || remaining <= 0;
 
+  const handleFulfill = async (method: 'store_pickup' | 'shipment') => {
+    if (!invoice || acting) return;
+    setActing(true);
+    try {
+      const { data } = await adminApi.post(`/invoices/${invoice.id}/fulfill`, { method });
+      if (method === 'store_pickup') {
+        toast.success(`${invoice.invoice_number}: in-store pickup — stock taken`);
+        onChanged();
+        await load(invoice.id);
+      } else {
+        toast.success(`${invoice.invoice_number} added to shipments as ${data.shipment_number}`);
+        onChanged();
+        onClose();
+        router.push(`/admin/shipments?id=${encodeURIComponent(data.shipment_id || data.linked_shipment_id)}`);
+      }
+    } catch (error: any) {
+      toast.error(error?.response?.data?.error || 'Could not fulfill invoice');
+    } finally {
+      setActing(false);
+    }
+  };
+
   const handleConvert = async () => {
     if (!invoice || acting) return;
-    if (!confirm(`Convert ${invoice.invoice_number} to an invoice?\n\nStock will be deducted and the customer will be billed the quoted amounts.`)) return;
+    if (!confirm(`Convert ${invoice.invoice_number} to an invoice?\n\nThe customer will be billed the quoted amounts. Stock is taken when you choose in-store pickup or mark the shipment delivered.`)) return;
     setActing(true);
     try {
       const res = await adminApi.post(`/invoices/${invoice.id}/convert`);
@@ -252,6 +280,24 @@ export default function InvoiceHistoryDrawer({ invoiceId, refreshKey = 0, onClos
                     <dt className="text-[#6B6C72]">Payment status</dt>
                     <dd>
                       <span className={paidStatus ? adminUi.badgePaid : adminUi.badgeUnpaid}>{paidStatus ? 'Paid' : 'Unpaid'}</span>
+                    </dd>
+                  </div>
+                )}
+                {!quote && (
+                  <div className="flex justify-between gap-4">
+                    <dt className="text-[#6B6C72]">Fulfillment</dt>
+                    <dd>
+                      {invoice.inventory_applied === false && !invoice.fulfillment_method
+                        ? 'Awaiting pickup or shipment'
+                        : invoice.fulfillment_method === 'store_pickup'
+                          ? 'In-store pickup'
+                          : invoice.fulfillment_method === 'shipment'
+                            ? invoice.inventory_applied === false
+                              ? 'Ready to ship'
+                              : 'Delivered'
+                            : invoice.inventory_applied === false
+                              ? 'Awaiting pickup or shipment'
+                              : 'Stock taken'}
                     </dd>
                   </div>
                 )}
@@ -359,6 +405,21 @@ export default function InvoiceHistoryDrawer({ invoiceId, refreshKey = 0, onClos
               >
                 Receive payment
               </button>
+            )}
+            {!quote && invoice.inventory_applied === false && invoice.fulfillment_method !== 'shipment' && (
+              <>
+                <button type="button" disabled={acting} className={adminUi.btnSecondary} onClick={() => void handleFulfill('store_pickup')}>
+                  In-store pickup
+                </button>
+                <button type="button" disabled={acting} className={adminUi.btnSecondary} onClick={() => void handleFulfill('shipment')}>
+                  Send for shipment
+                </button>
+              </>
+            )}
+            {!quote && invoice.fulfillment_method === 'shipment' && invoice.linked_shipment_id && (
+              <Link href={`/admin/shipments?id=${encodeURIComponent(invoice.linked_shipment_id)}`} className={adminUi.btnSecondary}>
+                Open shipment
+              </Link>
             )}
           </div>
         )}

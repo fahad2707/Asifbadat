@@ -431,7 +431,7 @@ export default function CheckoutPage() {
                   className="rounded-lg p-4 text-sm"
                   style={{ background: 'rgba(191,160,106,.08)', border: `1px solid ${theme.line}`, color: theme.cream2 }}
                 >
-                  Pay with cash when your order is delivered. Please have the exact amount ready.
+                  Preferred payment after we confirm the quotation. Nothing is invoiced until an admin reviews this order.
                 </div>
               )}
             </div>

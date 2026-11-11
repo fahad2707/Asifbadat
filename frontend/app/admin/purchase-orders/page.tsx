@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { Suspense, useEffect, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Plus, Search, X, Trash2, Download } from 'lucide-react';
 import adminApi, { uploadApi } from '@/lib/admin-api';
@@ -68,6 +68,14 @@ interface CreateRow {
 }
 
 export default function PurchaseOrdersPage() {
+  return (
+    <Suspense fallback={<div className="flex justify-center h-64 items-center"><div className="animate-spin rounded-full h-10 w-10 border-2 border-teal-500 border-t-transparent" /></div>}>
+      <PurchaseOrdersPageInner />
+    </Suspense>
+  );
+}
+
+function PurchaseOrdersPageInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [pos, setPos] = useState<PurchaseOrder[]>([]);
@@ -130,27 +138,56 @@ export default function PurchaseOrdersPage() {
     fetchPOs();
   }, [search]);
 
-  const openCreatePo = () => {
-    const emptyRow = (): CreateRow => ({
-      product_id: '',
-      product_name: '',
-      category_name: '',
-      qty: 1,
-      unit_cost: 0,
-    });
+  const emptyRow = (): CreateRow => ({
+    product_id: '',
+    product_name: '',
+    category_name: '',
+    qty: 1,
+    unit_cost: 0,
+  });
+
+  const openCreatePo = (prefill?: {
+    vendorId?: string;
+    lines?: Array<{ product_id?: string; product_name?: string; qty?: number; unit_cost?: number }>;
+  }) => {
     setShowCreate(true);
     setPoNumber('');
     setPoDate(new Date().toISOString().slice(0, 10));
-    setVendorId('');
+    setVendorId(prefill?.vendorId || '');
     setBillNum('');
     setShippingCost(0);
-    setRows(Array.from({ length: 15 }, emptyRow));
+    const lines = (prefill?.lines || [])
+      .filter((l) => l.product_id)
+      .map((l) => ({
+        product_id: String(l.product_id),
+        product_name: l.product_name || '',
+        category_name: '',
+        qty: Math.max(1, Number(l.qty) || 1),
+        unit_cost: Number(l.unit_cost) || 0,
+      }));
+    if (lines.length) {
+      const padded = [...lines];
+      while (padded.length < 15) padded.push(emptyRow());
+      setRows(padded);
+    } else {
+      setRows(Array.from({ length: 15 }, emptyRow));
+    }
   };
 
-  // Quick command: /admin/purchase-orders?create=1 opens a blank PO form.
+  // Quick command: /admin/purchase-orders?create=1 opens a PO form (optional vendor_id + lines JSON).
   useEffect(() => {
     if (searchParams?.get('create') !== '1') return;
-    openCreatePo();
+    let lines: Array<{ product_id?: string; product_name?: string; qty?: number; unit_cost?: number }> = [];
+    const raw = searchParams.get('lines');
+    if (raw) {
+      try {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) lines = parsed;
+      } catch {
+        lines = [];
+      }
+    }
+    openCreatePo({ vendorId: searchParams.get('vendor_id') || '', lines });
     router.replace('/admin/purchase-orders', { scroll: false });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams]);

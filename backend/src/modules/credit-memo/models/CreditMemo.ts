@@ -14,6 +14,7 @@ export interface ICreditMemo extends Document {
   credit_memo_number: string;
   type: 'VENDOR' | 'CUSTOMER';
   reference_invoice_id?: mongoose.Types.ObjectId;
+  reference_purchase_order_id?: mongoose.Types.ObjectId;
   reference_shipment_id?: mongoose.Types.ObjectId;
   vendor_id?: mongoose.Types.ObjectId;
   customer_id?: mongoose.Types.ObjectId;
@@ -28,6 +29,12 @@ export interface ICreditMemo extends Document {
   created_by?: mongoose.Types.ObjectId;
   approved_at?: Date;
   approved_by?: mongoose.Types.ObjectId;
+  received_at?: Date;
+  received_by?: mongoose.Types.ObjectId;
+  dispatched_at?: Date;
+  dispatched_by?: mongoose.Types.ObjectId;
+  delivered_at?: Date;
+  delivered_by?: mongoose.Types.ObjectId;
   created_at: Date;
   updated_at: Date;
   items: ICreditMemoItem[];
@@ -51,6 +58,7 @@ const CreditMemoSchema = new Schema<ICreditMemo>(
     credit_memo_number: { type: String, required: true, unique: true },
     type: { type: String, enum: ['VENDOR', 'CUSTOMER'], required: true },
     reference_invoice_id: { type: Schema.Types.ObjectId, ref: 'Invoice' },
+    reference_purchase_order_id: { type: Schema.Types.ObjectId, ref: 'PurchaseOrder' },
     reference_shipment_id: { type: Schema.Types.ObjectId },
     vendor_id: { type: Schema.Types.ObjectId, ref: 'Vendor' },
     customer_id: { type: Schema.Types.ObjectId, ref: 'Customer' },
@@ -65,6 +73,12 @@ const CreditMemoSchema = new Schema<ICreditMemo>(
     created_by: { type: Schema.Types.ObjectId, ref: 'Admin' },
     approved_at: Date,
     approved_by: { type: Schema.Types.ObjectId, ref: 'Admin' },
+    received_at: Date,
+    received_by: { type: Schema.Types.ObjectId, ref: 'Admin' },
+    dispatched_at: Date,
+    dispatched_by: { type: Schema.Types.ObjectId, ref: 'Admin' },
+    delivered_at: Date,
+    delivered_by: { type: Schema.Types.ObjectId, ref: 'Admin' },
     items: [CreditMemoItemSchema],
   },
   { timestamps: { createdAt: 'created_at', updatedAt: 'updated_at' } }

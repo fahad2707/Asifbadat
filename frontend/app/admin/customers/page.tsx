@@ -11,6 +11,8 @@ import toast from 'react-hot-toast';
 import ReceivePaymentLightbox from '@/components/admin/ReceivePaymentLightbox';
 import RegionCombobox from '@/components/RegionCombobox';
 import { moneyIn, moneyNet } from '@/lib/moneyTone';
+import { titleCaseWords } from '@/lib/titleCaseWords';
+import { DEFAULT_CALLING_CODE, joinPhone, splitPhone } from '@/lib/phoneParts';
 
 interface CustomerDoc {
   name: string;
@@ -82,7 +84,32 @@ export default function CustomersPage() {
   const [receivePaymentCustomerId, setReceivePaymentCustomerId] = useState<string | undefined>();
   const [actionDropdownId, setActionDropdownId] = useState<string | null>(null);
   const [actionDropdownAnchor, setActionDropdownAnchor] = useState<DOMRect | null>(null);
+  const [phoneCode, setPhoneCode] = useState(DEFAULT_CALLING_CODE);
+  const [phoneNumber, setPhoneNumber] = useState('');
   const apiBase = typeof window !== 'undefined' ? (process.env.NEXT_PUBLIC_API_URL || '').replace(/\/api\/?$/, '') : '';
+
+  const blankCustomerForm = (): Partial<Customer> => ({
+    name: '',
+    phone: '',
+    email: '',
+    company: '',
+    address: '',
+    billing_address: '',
+    city: '',
+    state: '',
+    zip: '',
+    payment_terms: '',
+    notes: '',
+    customer_code: '',
+  });
+
+  const applyPhoneParts = (code: string, number: string) => {
+    setPhoneCode(code);
+    setPhoneNumber(number);
+    setForm((current) => ({ ...current, phone: joinPhone(code, number) }));
+  };
+
+  const documentHref = (url: string) => (url.startsWith('http') ? url : `${apiBase}${url}`);
 
   const fetchCustomers = async () => {
     try {
@@ -127,15 +154,18 @@ export default function CustomersPage() {
   };
 
   const handleDocumentUpload = async (e: React.ChangeEvent<HTMLInputElement>, customerId: string) => {
-    const file = e.target.files?.[0];
-    if (!file || !customerId) return;
+    const files = Array.from(e.target.files || []);
+    if (!files.length || !customerId) return;
     setUploadingDoc(true);
     try {
-      const fd = new FormData();
-      fd.append('file', file);
-      await adminApi.post(`/customers/${customerId}/documents`, fd);
-      toast.success('Document uploaded');
+      for (const file of files) {
+        const fd = new FormData();
+        fd.append('file', file);
+        await adminApi.post(`/customers/${customerId}/documents`, fd);
+      }
+      toast.success(files.length === 1 ? 'Document uploaded' : `${files.length} documents uploaded`);
       await refreshDetailCustomer(customerId);
+      fetchCustomers();
     } catch (err: any) {
       toast.error(err.response?.data?.error || 'Upload failed');
     } finally {
@@ -166,7 +196,9 @@ export default function CustomersPage() {
     if (searchParams?.get('create') !== '1') return;
     setEditing(null);
     setCustomerFormDirty(false);
-    setForm({ name: '', phone: '', email: '', company: '', address: '', billing_address: '', city: '', state: '', zip: '', payment_terms: '', notes: '', customer_code: '' });
+    setPhoneCode(DEFAULT_CALLING_CODE);
+    setPhoneNumber('');
+    setForm(blankCustomerForm());
     setShowModal(true);
     router.replace('/admin/customers', { scroll: false });
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -183,16 +215,19 @@ export default function CustomersPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!form.name?.trim() || !form.phone?.trim()) {
+    const phone = joinPhone(phoneCode, phoneNumber);
+    if (!form.name?.trim() || !phoneNumber.trim()) {
       toast.error('Name and phone are required');
       return;
     }
+    const company = form.company ? titleCaseWords(form.company) : form.company;
     try {
       if (editing) {
-        await adminApi.put(`/customers/${editing.id}`, form);
+        const { customer_code: _ignore, ...rest } = form;
+        await adminApi.put(`/customers/${editing.id}`, { ...rest, phone, company, email: form.email || undefined });
         toast.success('Customer updated');
       } else {
-        const res = await adminApi.post('/customers', { ...form, email: form.email || undefined });
+        const res = await adminApi.post('/customers', { ...form, phone, company, email: form.email || undefined });
         const created = res.data;
         const fileInput = document.getElementById('customer-docs-form') as HTMLInputElement;
         if (fileInput?.files?.length) {
@@ -209,7 +244,9 @@ export default function CustomersPage() {
       setEditing(null);
       setCustomerFormDirty(false);
       setShowCustomerCloseConfirm(false);
-      setForm({ name: '', phone: '', email: '', company: '', address: '', billing_address: '', city: '', state: '', zip: '', payment_terms: '', notes: '', customer_code: '' });
+      setPhoneCode(DEFAULT_CALLING_CODE);
+      setPhoneNumber('');
+      setForm(blankCustomerForm());
       fetchCustomers();
     } catch (err: any) {
       toast.error(err.response?.data?.error || 'Failed to save');
@@ -230,7 +267,9 @@ export default function CustomersPage() {
     }
     setShowModal(false);
     setEditing(null);
-    setForm({ name: '', phone: '', email: '', company: '', address: '', billing_address: '', city: '', state: '', zip: '', payment_terms: '', notes: '', customer_code: '' });
+    setPhoneCode(DEFAULT_CALLING_CODE);
+    setPhoneNumber('');
+    setForm(blankCustomerForm());
   };
 
   const handleCustomerCloseWithoutSaving = () => {
@@ -238,7 +277,9 @@ export default function CustomersPage() {
     setCustomerFormDirty(false);
     setShowModal(false);
     setEditing(null);
-    setForm({ name: '', phone: '', email: '', company: '', address: '', billing_address: '', city: '', state: '', zip: '', payment_terms: '', notes: '', customer_code: '' });
+    setPhoneCode(DEFAULT_CALLING_CODE);
+    setPhoneNumber('');
+    setForm(blankCustomerForm());
   };
 
   const toggleSelect = (id: string) => {
@@ -257,8 +298,18 @@ export default function CustomersPage() {
 
   const updateAccountStatus = async (customerId: string, account_status: 'pending' | 'approved') => {
     try {
-      await adminApi.put(`/customers/${customerId}/account-status`, { account_status });
-      toast.success(account_status === 'approved' ? 'Customer approved for online ordering' : 'Online access revoked');
+      const { data } = await adminApi.put(`/customers/${customerId}/account-status`, { account_status });
+      const login = data?.online_login;
+      if (login?.username && login?.password) {
+        const mailNote = login.emailed
+          ? ` Email sent${login.email ? ` to ${login.email}` : ''}.`
+          : login.email
+            ? ' Email could not be sent — share these by WhatsApp.'
+            : ' No email on file — share these by WhatsApp.';
+        toast.success(`Website login: ${login.username} / ${login.password}.${mailNote}`, { duration: 12000 });
+      } else {
+        toast.success(account_status === 'approved' ? 'Customer approved for online ordering' : 'Online access revoked');
+      }
       fetchCustomers();
       if (detailCustomer?.id === customerId) {
         await refreshDetailCustomer(customerId);
@@ -314,11 +365,14 @@ export default function CustomersPage() {
   const openEdit = (c: Customer) => {
     setEditing(c);
     setCustomerFormDirty(false);
+    const parts = splitPhone(c.phone || '');
+    setPhoneCode(parts.callingCode);
+    setPhoneNumber(parts.nationalNumber);
     setForm({
       name: c.name,
       customer_code: c.customer_code,
       company: c.company,
-      phone: c.phone,
+      phone: joinPhone(parts.callingCode, parts.nationalNumber),
       email: c.email,
       address: c.address,
       billing_address: c.billing_address,
@@ -375,7 +429,9 @@ export default function CustomersPage() {
             onClick={() => {
               setEditing(null);
               setCustomerFormDirty(false);
-              setForm({ name: '', phone: '', email: '', company: '', address: '', billing_address: '', city: '', state: '', zip: '', payment_terms: '', notes: '', customer_code: '' });
+              setPhoneCode(DEFAULT_CALLING_CODE);
+              setPhoneNumber('');
+              setForm(blankCustomerForm());
               setShowModal(true);
             }}
             className={glassPrimaryBtn}
@@ -603,41 +659,59 @@ export default function CustomersPage() {
                     <input
                       type="text"
                       value={form.customer_code || ''}
-                      onChange={(e) => { setForm({ ...form, customer_code: e.target.value }); setCustomerFormDirty(true); }}
-                      placeholder="Auto-generated if left blank"
-                      className={glassInputClass}
+                      readOnly
+                      placeholder="Click Generate"
+                      className={`${glassInputClass} bg-[#F4F5F8]`}
                     />
                   </div>
                   <button type="button" onClick={generateCustomerCode} className={`${glassButtonClass} shrink-0`}>Generate</button>
                 </div>
               )}
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-slate-400 mb-1.5 uppercase font-bold tracking-wider">Phone *</label>
+              <div>
+                <label className="block text-slate-400 mb-1.5 uppercase font-bold tracking-wider">Phone *</label>
+                <div className="grid grid-cols-[7.5rem_1fr] gap-2">
                   <input
                     type="text"
-                    value={form.phone || ''}
-                    onChange={(e) => { setForm({ ...form, phone: e.target.value }); setCustomerFormDirty(true); }}
+                    inputMode="tel"
+                    value={phoneCode}
+                    onChange={(e) => {
+                      const next = e.target.value.startsWith('+') ? e.target.value : `+${e.target.value.replace(/\D/g, '')}`;
+                      applyPhoneParts(next, phoneNumber);
+                      setCustomerFormDirty(true);
+                    }}
+                    placeholder="+1"
+                    aria-label="Country calling code"
+                    className={glassInputClass}
+                  />
+                  <input
+                    type="tel"
+                    value={phoneNumber}
+                    onChange={(e) => {
+                      applyPhoneParts(phoneCode, e.target.value);
+                      setCustomerFormDirty(true);
+                    }}
+                    placeholder="Phone number"
+                    aria-label="Phone number"
                     className={glassInputClass}
                     required
                   />
                 </div>
-                <div>
-                  <label className="block text-slate-400 mb-1.5 uppercase font-bold tracking-wider">Email</label>
-                  <input
-                    type="email"
-                    value={form.email || ''}
-                    onChange={(e) => { setForm({ ...form, email: e.target.value }); setCustomerFormDirty(true); }}
-                    className={glassInputClass}
-                  />
-                </div>
+              </div>
+              <div>
+                <label className="block text-slate-400 mb-1.5 uppercase font-bold tracking-wider">Email</label>
+                <input
+                  type="email"
+                  value={form.email || ''}
+                  onChange={(e) => { setForm({ ...form, email: e.target.value }); setCustomerFormDirty(true); }}
+                  className={glassInputClass}
+                />
               </div>
               <div>
                 <label className="block text-slate-400 mb-1.5 uppercase font-bold tracking-wider">Company</label>
                 <input
                   type="text"
                   value={form.company || ''}
-                  onChange={(e) => { setForm({ ...form, company: e.target.value }); setCustomerFormDirty(true); }}
+                  onChange={(e) => { setForm({ ...form, company: titleCaseWords(e.target.value) }); setCustomerFormDirty(true); }}
                   className={glassInputClass}
                 />
               </div>
@@ -715,6 +789,7 @@ export default function CustomersPage() {
                 <div>
                   <label className="block text-slate-400 mb-1.5 uppercase font-bold tracking-wider">Upload documents (PDF, JPG)</label>
                   <input type="file" accept=".pdf,.jpg,.jpeg,.png" multiple className="w-full text-xs text-slate-500 file:mr-2 file:py-1.5 file:px-3 file:rounded-xl file:border file:border-white/10 file:bg-slate-900 file:text-white" id="customer-docs-form" />
+                  <p className="text-[11px] text-slate-500 mt-1.5">Each file is kept with this customer. Uploading another file adds it; it does not replace earlier ones.</p>
                 </div>
               )}
               <div className="flex gap-3 pt-4">
@@ -780,15 +855,16 @@ export default function CustomersPage() {
                 {(detailCustomer.documents?.length ?? 0) > 0 ? (
                   <ul className="space-y-1">
                     {(detailCustomer.documents ?? []).map((d, i)=> (
-                      <li key={i}>
-                        <a href={d.url.startsWith('http') ? d.url : `${apiBase}${d.url}`} target="_blank" rel="noopener noreferrer" className="text-teal-400 hover:underline">{d.name}</a>
+                      <li key={`${d.url}-${i}`}>
+                        <a href={documentHref(d.url)} target="_blank" rel="noopener noreferrer" className="text-teal-400 hover:underline">{d.name}</a>
                       </li>
                     ))}
                   </ul>
-                ) : <p className="text-slate-500">No B2B documents signed or uploaded.</p>}
+                ) : <p className="text-slate-500">No documents uploaded yet.</p>}
+                <p className="text-[11px] text-slate-500 mt-2">Stored on the server with this customer. New uploads are added to the list.</p>
                 <div className="mt-4">
-                  <label className="text-[10px] text-slate-450 block mb-1">Upload signed agreement (PDF, JPG)</label>
-                  <input type="file" accept=".pdf,.jpg,.jpeg,.png" disabled={uploadingDoc} onChange={(e) => handleDocumentUpload(e, detailCustomer.id)} className="w-full text-slate-500 file:mr-2 file:py-1 file:px-2.5 file:rounded-xl file:border file:border-white/10 file:bg-slate-900 file:text-white" />
+                  <label className="text-[10px] text-slate-450 block mb-1">Add documents (PDF, JPG) — you can select more than one</label>
+                  <input type="file" accept=".pdf,.jpg,.jpeg,.png" multiple disabled={uploadingDoc} onChange={(e) => handleDocumentUpload(e, detailCustomer.id)} className="w-full text-slate-500 file:mr-2 file:py-1 file:px-2.5 file:rounded-xl file:border file:border-white/10 file:bg-slate-900 file:text-white" />
                 </div>
               </div>
               <div className="pt-4 border-t border-white/10 flex justify-end">

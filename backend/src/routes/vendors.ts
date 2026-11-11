@@ -15,6 +15,7 @@ import {
   getLastPurchasePrices,
 } from '../modules/vendors/services/vendorAnalyticsService';
 import { getCreditMemoTotalsByParty } from '../modules/credit-memo/services/creditMemoBalances';
+import { loadBestSupplierRates } from '../modules/vendors/services/bestSupplierRates';
 import { STATE_PROVINCE_OPTIONS } from '../utils/regions';
 
 const router = express.Router();
@@ -192,6 +193,17 @@ router.get('/analytics/returns', authenticateAdmin, async (req: AuthRequest, res
   } catch (e) {
     console.error('Vendor returns analytics:', e);
     res.status(500).json({ error: 'Failed to fetch returns analytics' });
+  }
+});
+
+router.get('/best-rates', authenticateAdmin, async (req: AuthRequest, res) => {
+  try {
+    const vendorId = typeof req.query.vendor_id === 'string' ? req.query.vendor_id : undefined;
+    const rates = await loadBestSupplierRates(vendorId ? { vendorId } : undefined);
+    res.json({ rates });
+  } catch (e) {
+    console.error('Best supplier rates:', e);
+    res.status(500).json({ error: 'Failed to load best supplier rates' });
   }
 });
 

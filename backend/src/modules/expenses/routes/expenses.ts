@@ -26,8 +26,12 @@ const createSchema = z.object({
 });
 
 // Generate expense number
-router.get('/generate-number', authenticateAdmin, (req, res) => {
-  res.json({ expense_number: generateExpenseNumber() });
+router.get('/generate-number', authenticateAdmin, async (_req, res) => {
+  try {
+    res.json({ expense_number: await generateExpenseNumber() });
+  } catch {
+    res.status(500).json({ error: 'Failed to generate expense number' });
+  }
 });
 
 // Process recurring expenses (call from cron/scheduler; admin only)
@@ -153,10 +157,7 @@ router.post('/', authenticateAdmin, async (req: AuthRequest, res) => {
   try {
     const data = createSchema.parse(req.body);
 
-    let expenseNumber = generateExpenseNumber();
-    while (await Expense.findOne({ expense_number: expenseNumber })) {
-      expenseNumber = generateExpenseNumber();
-    }
+    const expenseNumber = await generateExpenseNumber();
 
     const expense = await Expense.create({
       expense_number: expenseNumber,

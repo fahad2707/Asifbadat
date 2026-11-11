@@ -46,6 +46,16 @@ export interface IInvoice extends Document {
   email_sent: boolean;
   /** Provenance of this row. Absent on historical documents. Never defaulted. */
   source?: 'WHOLESALE' | 'ONLINE' | 'POS';
+  /**
+   * unfulfilled: invoice saved, stock not taken yet.
+   * store_pickup: stock taken at pickup.
+   * shipment: stock taken when the linked shipment is delivered.
+   * Absent on historical invoices that deducted stock at create.
+   */
+  fulfillment_method?: 'unfulfilled' | 'store_pickup' | 'shipment';
+  /** false = stock not taken. true = taken. Absent = legacy (already taken at create). */
+  inventory_applied?: boolean;
+  linked_shipment_id?: mongoose.Types.ObjectId;
   items?: IInvoiceItem[];
   created_at: Date;
   updated_at: Date;
@@ -95,6 +105,9 @@ const InvoiceSchema = new Schema<IInvoice>(
     pdf_path: String,
     email_sent: { type: Boolean, default: false },
     source: { type: String, enum: ['WHOLESALE', 'ONLINE', 'POS'] },
+    fulfillment_method: { type: String, enum: ['unfulfilled', 'store_pickup', 'shipment'] },
+    inventory_applied: { type: Boolean },
+    linked_shipment_id: { type: Schema.Types.ObjectId, ref: 'Shipment' },
     items: [InvoiceItemSchema],
   },
   {

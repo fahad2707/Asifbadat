@@ -38,9 +38,11 @@ export interface IOnlineOrder extends Document {
   payment_status: 'pending' | 'paid' | 'refunded';
   card_last4?: string;
   card_brand?: string;
-  status: 'confirmed' | 'packed' | 'dispatched' | 'delivered' | 'cancelled';
+  status: 'confirmed' | 'quoted' | 'packed' | 'dispatched' | 'delivered' | 'cancelled';
   status_history: IStatusEntry[];
   invoice_id?: mongoose.Types.ObjectId;
+  quotation_id?: mongoose.Types.ObjectId;
+  quotation_number?: string;
   notes?: string;
   /**
    * Client checkout attempt id. Optional for historical rows.
@@ -88,9 +90,15 @@ const OnlineOrderSchema = new Schema<IOnlineOrder>(
     payment_status: { type: String, enum: ['pending', 'paid', 'refunded'], default: 'pending' },
     card_last4: String,
     card_brand: String,
-    status: { type: String, enum: ['confirmed', 'packed', 'dispatched', 'delivered', 'cancelled'], default: 'confirmed' },
+    status: {
+      type: String,
+      enum: ['confirmed', 'quoted', 'packed', 'dispatched', 'delivered', 'cancelled'],
+      default: 'confirmed',
+    },
     status_history: [StatusEntrySchema],
     invoice_id: { type: Schema.Types.ObjectId, ref: 'Invoice' },
+    quotation_id: { type: Schema.Types.ObjectId, ref: 'Invoice' },
+    quotation_number: String,
     notes: String,
     // Client-provided checkout attempt key. Compound unique+sparse with user_id:
     // historical docs without this field are excluded from the index.

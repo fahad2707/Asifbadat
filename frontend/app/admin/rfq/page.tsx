@@ -509,6 +509,7 @@ export default function AdminRFQPage() {
         initialCustomerId={quotationCustomerId}
         initialDocumentType="quotation"
         initialItems={quotationItems}
+        numberOrigin="rfq"
       />
     </div>
   );

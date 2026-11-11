@@ -210,7 +210,7 @@ export default function CartPage() {
                   <>
                     <h2 className="text-2xl font-bold mb-2 text-slate-50">Checkout</h2>
                     <p className="text-sm text-slate-300 mb-4 leading-relaxed">
-                      Place an online order. Final prices and tax are confirmed by the server.
+                      Submit for review. We will send a quotation before invoicing or shipping.
                     </p>
                     <p className="text-lg font-semibold text-slate-50 mb-4">
                       ${items.reduce((s, it) => s + (Number(it.price) || 0) * it.quantity, 0).toFixed(2)}

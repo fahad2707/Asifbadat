@@ -35,6 +35,7 @@ import {
   withTallyRunningBalances,
 } from '@/lib/customerTallyLedger';
 import { MONEY_IN_HEX, MONEY_OUT_HEX, MONEY_PLAIN_HEX, moneyIn, moneyNet, moneyNetHex, moneyOut, moneyPlain } from '@/lib/moneyTone';
+import { titleCaseWords } from '@/lib/titleCaseWords';
 
 type TabId =
   | 'overview'
@@ -112,6 +113,7 @@ export default function Customer360Page() {
   const [receivePaymentOpen, setReceivePaymentOpen] = useState(false);
   const [receivePaymentInvoiceId, setReceivePaymentInvoiceId] = useState<string | undefined>();
   const [uploadingDoc, setUploadingDoc] = useState(false);
+  const apiBase = typeof window !== 'undefined' ? (process.env.NEXT_PUBLIC_API_URL || '').replace(/\/api\/?$/, '') : '';
 
   const fetchCustomerData = async () => {
     if (!id) return;
@@ -199,14 +201,16 @@ export default function Customer360Page() {
     : '';
 
   const handleDocumentUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file || !id) return;
+    const files = Array.from(e.target.files || []);
+    if (!files.length || !id) return;
     setUploadingDoc(true);
     try {
-      const fd = new FormData();
-      fd.append('file', file);
-      await adminApi.post(`/customers/${id}/documents`, fd);
-      toast.success('B2B Agreement Uploaded');
+      for (const file of files) {
+        const fd = new FormData();
+        fd.append('file', file);
+        await adminApi.post(`/customers/${id}/documents`, fd);
+      }
+      toast.success(files.length === 1 ? 'Document uploaded' : `${files.length} documents uploaded`);
       fetchCustomerData();
     } catch (err: any) {
       toast.error(err.response?.data?.error || 'Upload failed');
@@ -215,6 +219,8 @@ export default function Customer360Page() {
       e.target.value = '';
     }
   };
+
+  const documentHref = (url: string) => (url.startsWith('http') ? url : `${apiBase}${url}`);
 
   const handleAddCommLog = (e: React.FormEvent) => {
     e.preventDefault();
@@ -314,9 +320,19 @@ export default function Customer360Page() {
                   onClick={async () => {
                     const next = customer.account_status === 'approved' ? 'pending' : 'approved';
                     try {
-                      await adminApi.put(`/customers/${id}/account-status`, { account_status: next });
-                      setCustomer((prev) => (prev ? { ...prev, account_status: next } : prev));
-                      toast.success(next === 'approved' ? 'Customer approved for online ordering' : 'Online access revoked');
+                      const { data } = await adminApi.put(`/customers/${id}/account-status`, { account_status: next });
+                      setCustomer((prev) => (prev ? { ...prev, account_status: next, user_id: data?.user_id ?? prev.user_id } : prev));
+                      const login = data?.online_login;
+                      if (login?.username && login?.password) {
+                        const mailNote = login.emailed
+                          ? ` Email sent${login.email ? ` to ${login.email}` : ''}.`
+                          : login.email
+                            ? ' Email could not be sent — share these by WhatsApp.'
+                            : ' No email on file — share these by WhatsApp.';
+                        toast.success(`Website login: ${login.username} / ${login.password}.${mailNote}`, { duration: 12000 });
+                      } else {
+                        toast.success(next === 'approved' ? 'Customer approved for online ordering' : 'Online access revoked');
+                      }
                     } catch (err: any) {
                       toast.error(err.response?.data?.error || 'Failed to update approval');
                     }
@@ -326,7 +342,6 @@ export default function Customer360Page() {
                 </button>
               </div>
               
-              {/* Action shortcuts */}
               <div className="flex items-center gap-3 mt-4 text-[11px] text-slate-400">
                 {customer.phone && (
                   <a href={`tel:${customer.phone}`} className="flex items-center gap-1.5 hover:text-white transition-colors">
@@ -429,7 +444,7 @@ export default function Customer360Page() {
             <div className="space-y-4">
               <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest pb-1.5 border-b border-white/5">Customer details</h3>
               <div className="grid grid-cols-2 gap-4">
-                <EditableField label="Company" value={customer.company || ''} onSave={(next) => saveCustomerFields({ company: next.trim() })} />
+                <EditableField label="Company" value={customer.company || ''} onSave={(next) => saveCustomerFields({ company: titleCaseWords(next.trim()) })} />
                 <EditableField
                   label="Primary contact"
                   value={customer.name || ''}
@@ -472,7 +487,10 @@ export default function Customer360Page() {
                   ]}
                   onSave={(next) => saveCustomerFields({ payment_terms: next })}
                 />
-                <EditableField label="Customer code" value={customer.customer_code || ''} onSave={(next) => saveCustomerFields({ customer_code: next.trim() })} />
+                <div>
+                  <span className="text-slate-500 text-[11px]">Customer ID</span>
+                  <span className="font-mono font-semibold text-[#1A1A1A] block">{customer.customer_code || '—'}</span>
+                </div>
               </div>
               <EditableAddress
                 label="Billing address"
@@ -493,6 +511,30 @@ export default function Customer360Page() {
                 multiline
                 onSave={(next) => saveCustomerFields({ notes: next.trim() })}
               />
+              <div>
+                <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest pb-1.5 border-b border-white/5 mb-3">Documents</h3>
+                {(customer.documents?.length ?? 0) > 0 ? (
+                  <ul className="space-y-1 text-sm">
+                    {(customer.documents ?? []).map((d, i) => (
+                      <li key={`${d.url}-${i}`}>
+                        <a href={documentHref(d.url)} target="_blank" rel="noopener noreferrer" className="text-[#0077C5] hover:underline">{d.name}</a>
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="text-sm text-slate-500">No documents uploaded yet.</p>
+                )}
+                <p className="text-[11px] text-[#6B6C72] mt-2">Files stay on this customer’s record. Each new upload is added; it does not replace earlier files.</p>
+                <label className="text-[11px] text-[#6B6C72] block mt-3 mb-1">Add documents (PDF, JPG)</label>
+                <input
+                  type="file"
+                  accept=".pdf,.jpg,.jpeg,.png"
+                  multiple
+                  disabled={uploadingDoc}
+                  onChange={handleDocumentUpload}
+                  className="w-full text-xs text-[#6B6C72]"
+                />
+              </div>
             </div>
           </div>
         )}
@@ -770,7 +812,7 @@ export default function Customer360Page() {
         {activeTab === 'products' && (
           <div className="space-y-4">
             <div className="flex justify-between items-center text-xs pb-1 border-b border-white/5">
-              <span className="text-slate-400">Last selling price charged on this customer’s invoices</span>
+              <span className="text-slate-400">Prices that differ from catalog for this customer</span>
             </div>
             {negotiatedPrices.length === 0 ? (
               <p className="text-center py-6 text-slate-500">No negotiated prices recorded for this customer yet.</p>

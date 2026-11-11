@@ -5,6 +5,13 @@ import Product from '../models/Product';
 import Category from '../models/Category';
 import SubCategory from '../models/SubCategory';
 import TaxType from '../models/TaxType';
+import Invoice from '../models/Invoice';
+import POSSale from '../models/POSSale';
+import OnlineOrder from '../models/OnlineOrder';
+import Vendor from '../models/Vendor';
+import Customer from '../models/Customer';
+import CustomerProductPrice from '../models/CustomerProductPrice';
+import PriceGroup from '../models/PriceGroup';
 import {
   authenticateAdmin,
   optionalAuthenticateAdmin,
@@ -18,6 +25,7 @@ import {
   generateProductId,
   InternalSkuError,
   migrateProductIdAndSku,
+  resolveCreateProductId,
 } from '../utils/productCodes';
 import { toPublicProduct, toStaffProduct } from '../utils/productProjection';
 import { isUserLinkedToApprovedCustomer } from '../utils/customerAccount';
@@ -385,6 +393,128 @@ router.get('/barcode/:barcode', authenticateAdmin, async (req, res) => {
   }
 });
 
+/** Admin: real sales, supplier, and customer prices for the product 360 page. */
+router.get('/:id/activity', authenticateAdmin, async (req: AuthRequest, res) => {
+  try {
+    const productId = req.params.id;
+    if (!mongoose.Types.ObjectId.isValid(productId)) {
+      return res.status(404).json({ error: 'Product not found' });
+    }
+    const oid = new mongoose.Types.ObjectId(productId);
+    const product = await Product.findById(oid).select('vendor_id').lean();
+    if (!product) return res.status(404).json({ error: 'Product not found' });
+
+    const [invoices, posSales, onlineOrders, customerPrices, priceGroups, vendor] = await Promise.all([
+      Invoice.find({ 'items.product_id': oid })
+        .sort({ created_at: -1 })
+        .limit(50)
+        .select('invoice_number invoice_date customer_name source items created_at')
+        .lean(),
+      POSSale.find({ 'items.product_id': oid })
+        .sort({ created_at: -1 })
+        .limit(50)
+        .select('sale_number customer_name invoice_id items created_at')
+        .lean(),
+      OnlineOrder.find({ 'items.product_id': oid })
+        .sort({ created_at: -1 })
+        .limit(50)
+        .select('order_number customer_name invoice_id items created_at')
+        .lean(),
+      CustomerProductPrice.find({ product_id: oid })
+        .sort({ last_invoice_date: -1 })
+        .limit(50)
+        .lean(),
+      PriceGroup.find({ product_ids: oid }).select('name').sort({ name: 1 }).lean(),
+      (product as { vendor_id?: unknown }).vendor_id
+        ? Vendor.findById((product as { vendor_id: unknown }).vendor_id)
+            .select('name phone email supplier_id')
+            .lean()
+        : Promise.resolve(null),
+    ]);
+
+    const sales: Array<{
+      date: string;
+      customer_name: string;
+      quantity: number;
+      price: number;
+      source: string;
+      document: string;
+    }> = [];
+
+    for (const inv of invoices as any[]) {
+      for (const item of inv.items || []) {
+        if (String(item.product_id || '') !== productId) continue;
+        sales.push({
+          date: (inv.invoice_date || inv.created_at || new Date()).toISOString(),
+          customer_name: inv.customer_name || '—',
+          quantity: Number(item.quantity) || 0,
+          price: Number(item.price) || 0,
+          source: inv.source || 'Invoice',
+          document: inv.invoice_number || 'Invoice',
+        });
+      }
+    }
+    for (const sale of posSales as any[]) {
+      if (sale.invoice_id) continue;
+      for (const item of sale.items || []) {
+        if (String(item.product_id || '') !== productId) continue;
+        sales.push({
+          date: (sale.created_at || new Date()).toISOString(),
+          customer_name: sale.customer_name || 'Walk-in',
+          quantity: Number(item.quantity) || 0,
+          price: Number(item.price) || 0,
+          source: 'POS',
+          document: sale.sale_number || 'POS',
+        });
+      }
+    }
+    for (const order of onlineOrders as any[]) {
+      if (order.invoice_id) continue;
+      for (const item of order.items || []) {
+        if (String(item.product_id || '') !== productId) continue;
+        sales.push({
+          date: (order.created_at || new Date()).toISOString(),
+          customer_name: order.customer_name || 'Online',
+          quantity: Number(item.quantity) || 0,
+          price: Number(item.price) || 0,
+          source: 'Online',
+          document: order.order_number || 'Order',
+        });
+      }
+    }
+    sales.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+
+    const customerIds = customerPrices.map((r: any) => r.customer_id).filter(Boolean);
+    const customers = customerIds.length
+      ? await Customer.find({ _id: { $in: customerIds } }).select('name').lean()
+      : [];
+    const customerName = new Map(customers.map((c: any) => [String(c._id), c.name || 'Customer']));
+
+    res.json({
+      vendor: vendor
+        ? {
+            id: String((vendor as any)._id),
+            name: (vendor as any).name,
+            phone: (vendor as any).phone || null,
+            email: (vendor as any).email || null,
+            supplier_id: (vendor as any).supplier_id || null,
+          }
+        : null,
+      sales: sales.slice(0, 50),
+      customer_prices: customerPrices.map((r: any) => ({
+        customer_id: String(r.customer_id),
+        customer_name: customerName.get(String(r.customer_id)) || 'Customer',
+        price: Number(r.last_price) || 0,
+        last_invoice_date: r.last_invoice_date || null,
+      })),
+      price_groups: (priceGroups as any[]).map((g) => ({ id: String(g._id), name: g.name })),
+    });
+  } catch (error) {
+    console.error('Product activity error:', error);
+    res.status(500).json({ error: 'Failed to load product activity' });
+  }
+});
+
 // Get product by ID
 router.get('/:id', optionalAuthenticateAdmin, optionalAuthenticateUser, async (req: AuthRequest, res) => {
   try {
@@ -465,6 +595,7 @@ router.post('/', authenticateAdmin, async (req: AuthRequest, res) => {
       stock_quantity: z.coerce.number().int().optional(),
       low_stock_threshold: z.coerce.number().int().min(0).optional(),
       is_active: z.boolean().optional(),
+      product_id: z.string().optional(),
     });
 
     const raw = schema.parse(req.body);
@@ -488,7 +619,7 @@ router.post('/', authenticateAdmin, async (req: AuthRequest, res) => {
     const fields = {
       name: data.name,
       slug,
-      product_id: await generateProductId(),
+      product_id: await resolveCreateProductId(data.product_id),
       sku: data.sku?.trim() || undefined,
       description: data.description,
       product_type: productType,
@@ -606,11 +737,11 @@ router.put('/:id', authenticateAdmin, async (req: AuthRequest, res) => {
     delete rest.sub_category_id;
     delete (rest as any).tax_type_id;
     delete (rest as any).stock_quantity;
-    // Client cannot set or change product_id; assign on first save if missing.
+    // Product ID is permanent once assigned. First save may keep a generated preview.
     const existingPid = String((existing as any).product_id || '').trim();
     delete (rest as any).product_id;
     if (!existingPid) {
-      update.product_id = await generateProductId();
+      update.product_id = await resolveCreateProductId(data.product_id, { excludeId: String(existing._id) });
     }
     delete (rest as any).barcode;
     delete (rest as any).plu;

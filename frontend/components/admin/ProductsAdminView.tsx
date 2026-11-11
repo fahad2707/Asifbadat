@@ -7,13 +7,10 @@ import {
   Edit,
   Trash2,
   Search,
-  Upload,
-  FileSpreadsheet,
   CheckCircle2,
   XCircle,
   AlertCircle,
   FileDown,
-  Layers,
   RotateCcw,
   ChevronLeft,
   ChevronRight,
@@ -27,6 +24,7 @@ import ProductModal from '@/components/admin/ProductModal';
 import { StockAttentionBanner } from '@/components/admin/StockAttentionBanner';
 import { adminUi } from '@/lib/admin-ui';
 import { formatTaxTypeLabel, productTaxLabel, type TaxTypeOption } from '@/lib/tax-type';
+import { titleCaseWords } from '@/lib/titleCaseWords';
 
 interface Product {
   id: string | number;
@@ -100,10 +98,12 @@ interface ImportExecuteResult {
   subcategories_created: number;
 }
 
-export type ProductsAdminMode = 'active' | 'inactive';
+export type ProductsAdminMode = 'all' | 'active' | 'inactive';
 
-export function ProductsAdminView({ mode }: { mode: ProductsAdminMode }) {
+export function ProductsAdminView({ initialView = 'all' }: { initialView?: ProductsAdminMode }) {
   const router = useRouter();
+  const [view, setView] = useState<ProductsAdminMode>(initialView);
+  const mode = view;
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
@@ -135,12 +135,11 @@ export function ProductsAdminView({ mode }: { mode: ProductsAdminMode }) {
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(50);
 
-  const fetchProducts = useCallback(async () => {
-    setLoading(true);
+  const fetchProducts = useCallback(async (opts?: { quiet?: boolean }) => {
+    if (!opts?.quiet) setLoading(true);
     try {
       const response = await adminApi.get('/products', {
-        // Active list must exclude soft-deleted (is_active=false) or deletes appear to "stick".
-        params: { limit: 5000, visibility: mode === 'inactive' ? 'inactive' : 'active' },
+        params: { limit: 5000, visibility: 'all' },
       });
       setProducts(response.data.products || []);
       setTotalCount(response.data.pagination?.total ?? (response.data.products?.length ?? 0));
@@ -152,7 +151,7 @@ export function ProductsAdminView({ mode }: { mode: ProductsAdminMode }) {
     } finally {
       setLoading(false);
     }
-  }, [mode]);
+  }, []);
 
   const fetchTaxonomy = async () => {
     try {
@@ -335,7 +334,7 @@ export function ProductsAdminView({ mode }: { mode: ProductsAdminMode }) {
       });
       toast.success(`${data?.modified ?? selectedIds.size} product(s) activated`);
       setSelectedIds(new Set());
-      fetchProducts();
+      fetchProducts({ quiet: true });
     } catch (err: unknown) {
       toast.error(formatApiError(err, 'Failed to activate'));
     }
@@ -345,13 +344,7 @@ export function ProductsAdminView({ mode }: { mode: ProductsAdminMode }) {
     setTogglingId(id);
     try {
       await adminApi.put(`/products/${id}`, { is_active: next });
-      setProducts((prev) => {
-        const updated = prev.map((p) => (String(p.id) === id ? { ...p, is_active: next } : p));
-        if (mode === 'inactive' && next) {
-          return updated.filter((p) => String(p.id) !== id);
-        }
-        return updated;
-      });
+      setProducts((prev) => prev.map((p) => (String(p.id) === id ? { ...p, is_active: next } : p)));
       toast.success(next ? 'Product is visible on the website' : 'Product hidden from the website');
     } catch (err: unknown) {
       toast.error(formatApiError(err, 'Could not update visibility'));
@@ -432,6 +425,77 @@ export function ProductsAdminView({ mode }: { mode: ProductsAdminMode }) {
     }
   };
 
+  const handleBulkApply = async () => {
+    if (selectedIds.size === 0) return;
+    if (bulkPriceGroupId === '__new__' && !bulkPriceGroupName.trim()) {
+      toast.error('Enter a name for the new price group');
+      return;
+    }
+    if (!bulkCategoryId && !bulkTaxTypeId && !bulkPriceGroupId) {
+      toast.error('Choose a category, tax type, or price group');
+      return;
+    }
+    const ids = Array.from(selectedIds);
+    const parts: string[] = [];
+    if (bulkCategoryId) {
+      const cat = categories.find((c) => c.id === bulkCategoryId)?.name || 'category';
+      parts.push(titleCaseWords(cat));
+    }
+    if (bulkTaxTypeId) {
+      const selectedTax = taxTypes.find((t) => t.id === bulkTaxTypeId);
+      parts.push(
+        bulkTaxTypeId === '__no_tax__' ? 'No Tax' : selectedTax ? formatTaxTypeLabel(selectedTax) : 'tax type'
+      );
+    }
+    if (bulkPriceGroupId) {
+      parts.push(
+        bulkPriceGroupId === '__new__'
+          ? bulkPriceGroupName.trim()
+          : priceGroups.find((g) => g.id === bulkPriceGroupId)?.name || 'price group'
+      );
+    }
+    if (!confirm(`Apply ${parts.join(', ')} to ${ids.length} product(s)?`)) return;
+
+    setBulkAssigning(true);
+    try {
+      if (bulkCategoryId) {
+        const payload: { ids: string[]; category_id: string; sub_category_id?: string } = {
+          ids,
+          category_id: bulkCategoryId,
+        };
+        if (bulkSubId) payload.sub_category_id = bulkSubId;
+        await adminApi.post('/products/bulk-assign-category', payload);
+      }
+      if (bulkTaxTypeId) {
+        await adminApi.post('/products/bulk-assign-tax-type', {
+          ids,
+          tax_type_id: bulkTaxTypeId === '__no_tax__' ? null : bulkTaxTypeId,
+        });
+      }
+      if (bulkPriceGroupId === '__new__') {
+        await adminApi.post('/price-groups', {
+          name: titleCaseWords(bulkPriceGroupName.trim()),
+          product_ids: ids,
+        });
+      } else if (bulkPriceGroupId) {
+        await adminApi.post(`/price-groups/${bulkPriceGroupId}/products`, { product_ids: ids });
+      }
+      toast.success(`Updated ${ids.length} product(s)`);
+      setBulkCategoryId('');
+      setBulkSubId('');
+      setBulkTaxTypeId('');
+      setBulkPriceGroupId('');
+      setBulkPriceGroupName('');
+      setSelectedIds(new Set());
+      await fetchProducts({ quiet: true });
+      await fetchTaxonomy();
+    } catch (err: unknown) {
+      toast.error(formatApiError(err, 'Failed to update products'));
+    } finally {
+      setBulkAssigning(false);
+    }
+  };
+
   const handleExportSelected = () => {
     if (selectedIds.size === 0) return;
     const rows = filteredProducts.filter((p) => selectedIds.has(String(p.id)));
@@ -466,10 +530,23 @@ export function ProductsAdminView({ mode }: { mode: ProductsAdminMode }) {
   const lowStockCount = products.filter((p) => (p.stock_quantity ?? 0) > 0 && (p.stock_quantity ?? 0) <= lowStockThreshold(p)).length;
   const outOfStockCount = products.filter((p) => (p.stock_quantity ?? 0) <= 0).length;
 
+  const switchView = (next: ProductsAdminMode) => {
+    setView(next);
+    setPage(1);
+    const url = next === 'all' ? '/admin/products' : `/admin/products?view=${next}`;
+    window.history.replaceState(window.history.state, '', url);
+  };
+
   const searchLower = searchTerm.trim().toLowerCase();
+  const catalogForView =
+    mode === 'active'
+      ? products.filter((p) => p.is_active !== false)
+      : mode === 'inactive'
+        ? products.filter((p) => p.is_active === false)
+        : products;
   const filteredBySearch = !searchLower
-    ? products
-    : products.filter((p) => {
+    ? catalogForView
+    : catalogForView.filter((p) => {
         const name = (p.name || '').toLowerCase();
         const sku = (p.sku || '').toLowerCase();
         const productId = (p.product_id || '').toLowerCase();
@@ -507,68 +584,65 @@ export function ProductsAdminView({ mode }: { mode: ProductsAdminMode }) {
 
   return (
     <div>
-      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between mb-8">
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between mb-6">
         <div>
           <h1 className="text-[28px] font-normal text-[#1A1A1A] tracking-tight">
             Products &amp; services
           </h1>
-          {mode === 'inactive' ? (
-            <p className="text-[#6B6C72] mt-2 max-w-2xl text-sm">
-              Hidden from the public storefront. Use <strong>Set active</strong> or the <strong>On website</strong> checkbox to show them in the store again.
-            </p>
-          ) : (
-            <p className="text-[#6B6C72] mt-2 max-w-2xl text-sm">
-              Uncheck <strong>On website</strong> to hide a product from the storefront. It stays in this table so you can see which items are live.
-            </p>
-          )}
           {totalCount !== null && (
-            <p className="text-teal-400 mt-1.5 font-bold text-xs uppercase tracking-wider">
-              {mode === 'inactive'
-                ? `Inactive: ${totalCount.toLocaleString()} product${totalCount !== 1 ? 's' : ''}`
-                : `${totalCount.toLocaleString()} product${totalCount !== 1 ? 's' : ''} · ${products.filter((p) => p.is_active !== false).length.toLocaleString()} on website`}
+            <p className="text-[#6B6C72] mt-1 text-sm">
+              {totalCount.toLocaleString()} product{totalCount !== 1 ? 's' : ''}
+              {mode !== 'inactive' ? (
+                <> · {products.filter((p) => p.is_active !== false).length.toLocaleString()} on website</>
+              ) : null}
             </p>
           )}
         </div>
-        {mode === 'active' && (
-          <div className="flex flex-wrap items-center gap-3">
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept=".csv"
-              className="hidden"
-              onChange={handleFileSelect}
-            />
-            <a
-              href="/product-import-sample.csv"
-              download="product-import-sample.csv"
-              className="inline-flex items-center gap-2 px-3.5 py-2.5 bg-white border border-[#CBD5E1] hover:bg-[#F1F5F9] rounded-md text-sm font-medium text-[#334155] transition-all cursor-pointer"
-            >
-              <FileSpreadsheet className="w-4 h-4 text-slate-400" />
-              Sample CSV
-            </a>
-            <button
-              type="button"
-              onClick={() => fileInputRef.current?.click()}
-              className="inline-flex items-center gap-2 px-3.5 py-2.5 bg-white border border-[#CBD5E1] hover:bg-[#F1F5F9] rounded-md text-sm font-medium text-[#334155] transition-all cursor-pointer"
-            >
-              <Upload className="w-4 h-4 text-slate-400" />
-              Import CSV
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                setEditingProduct(null);
-                setShowModal(true);
-              }}
-              className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-full bg-black text-white text-sm font-medium hover:bg-[#2C2C2C] cursor-pointer"
-            >
-              New product/service
-            </button>
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="inline-flex rounded-full border border-[#C7C7C7] bg-white p-0.5" role="tablist" aria-label="Product visibility">
+            {(
+              [
+                { id: 'all' as const, label: 'All' },
+                { id: 'active' as const, label: 'Active' },
+                { id: 'inactive' as const, label: 'Inactive' },
+              ]
+            ).map((tab) => (
+              <button
+                key={tab.id}
+                type="button"
+                role="tab"
+                aria-selected={mode === tab.id}
+                onClick={() => switchView(tab.id)}
+                className={`px-3.5 py-1.5 text-sm rounded-full ${
+                  mode === tab.id ? 'bg-black text-white' : 'text-[#6B6C72] hover:bg-[#F4F5F8]'
+                }`}
+              >
+                {tab.label}
+              </button>
+            ))}
           </div>
-        )}
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".csv"
+            className="hidden"
+            onChange={handleFileSelect}
+          />
+          <button
+            type="button"
+            onClick={() => {
+              setEditingProduct(null);
+              setShowModal(true);
+            }}
+            className={adminUi.btnPrimary}
+          >
+            <Plus className="w-4 h-4" />
+            New product
+          </button>
+        </div>
       </div>
 
-      {mode === 'active' && (
+      {mode !== 'inactive' && (
         <StockAttentionBanner
           outOfStockCount={outOfStockCount}
           lowStockCount={lowStockCount}
@@ -615,7 +689,7 @@ export function ProductsAdminView({ mode }: { mode: ProductsAdminMode }) {
                   {((safePage - 1) * pageSize + 1).toLocaleString()}–{Math.min(safePage * pageSize, totalFiltered).toLocaleString()}
                 </span>{' '}
                 of <span className="font-semibold text-[#1A1A1A] tabular-nums">{totalFiltered.toLocaleString()}</span>
-                {searchTerm.trim() || categoryFilter || (mode === 'active' && stockFilter !== 'all') ? (
+                {searchTerm.trim() || categoryFilter || (mode !== 'inactive' && stockFilter !== 'all') ? (
                   <span className="text-[#8D9096]"> (filtered)</span>
                 ) : null}
               </>
@@ -638,14 +712,14 @@ export function ProductsAdminView({ mode }: { mode: ProductsAdminMode }) {
           </label>
         </div>
       </div>
-      {mode === 'active' && stockFilter !== 'all' && (
+      {mode !== 'inactive' && stockFilter !== 'all' && (
         <p className="text-xs text-slate-400 mb-2 font-semibold flex items-center gap-2">
           Showing only {stockFilter === 'low_stock' ? 'low stock' : 'out of stock'} products.
           <button type="button" onClick={() => setStockFilter('all')} className="text-teal-400 font-bold hover:underline">Show all catalog items</button>
         </p>
       )}
 
-      {mode === 'active' && (
+      {mode !== 'inactive' && (
       <>
       {/* Import preview / progress / summary */}
       {importStep === 'preview' && preview && (
@@ -777,64 +851,73 @@ export function ProductsAdminView({ mode }: { mode: ProductsAdminMode }) {
       )}
 
       {selectedIds.size > 0 && (
-      <div className="bg-slate-900/40 backdrop-blur-lg border border-white/[0.06] border-t-white/[0.18] p-4 rounded-2xl mb-6 flex flex-wrap items-center gap-4 text-xs font-semibold">
-          <div className="flex flex-col gap-3 w-full lg:flex-row lg:flex-wrap lg:items-end">
-            <div className="flex items-center gap-2 flex-wrap">
-              <span className="text-slate-450 font-bold">{selectedIds.size} selected</span>
-              <span className="text-[10px] text-slate-550 hidden sm:inline">Tip: use the header checkbox to select all rows in current page view.</span>
+        <div className="sticky top-2 z-20 mb-4 rounded-lg border border-[#E3E5E8] bg-white shadow-sm">
+          <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-2.5 border-b border-[#E3E5E8]">
+            <p className="text-sm text-[#1A1A1A]">
+              <span className="inline-flex items-center justify-center min-w-[1.5rem] h-6 px-2 rounded-full bg-black text-white text-xs font-medium mr-2">
+                {selectedIds.size}
+              </span>
+              selected
+            </p>
+            <div className="flex flex-wrap items-center gap-1">
+              <button
+                type="button"
+                onClick={() => {
+                  const ids = Array.from(selectedIds).slice(0, 50);
+                  router.push(`/admin/products/labels?ids=${ids.map(encodeURIComponent).join(',')}`);
+                }}
+                className={adminUi.btnGhost}
+              >
+                <Printer className="w-3.5 h-3.5" />
+                Print labels
+              </button>
+              <button type="button" onClick={handleExportSelected} className={adminUi.btnGhost}>
+                <FileDown className="w-3.5 h-3.5" />
+                Export
+              </button>
+              {mode === 'inactive' ? (
+                <button type="button" onClick={handleBulkActivate} className={adminUi.btnSecondary}>
+                  <RotateCcw className="w-3.5 h-3.5" />
+                  Set on website
+                </button>
+              ) : (
+                <button type="button" onClick={handleBulkDelete} className={adminUi.btnGhost}>
+                  <Trash2 className="w-3.5 h-3.5" />
+                  Deactivate
+                </button>
+              )}
+              <button type="button" onClick={() => setSelectedIds(new Set())} className={adminUi.btnGhost}>
+                Clear
+              </button>
             </div>
-            {mode === 'active' && (
-            <div className="flex flex-wrap items-center gap-2 p-2 border border-white/5 bg-slate-950/40 rounded-xl w-full lg:w-auto">
-              <Layers className="w-4 h-4 text-teal-400 shrink-0 hidden sm:block" />
-              <span className="text-slate-350 shrink-0">Bulk Category:</span>
+          </div>
+          <div className="flex flex-wrap items-end gap-3 px-4 py-3">
+            <div className="min-w-[160px]">
+              <label className={adminUi.label}>Category</label>
               <select
                 value={bulkCategoryId}
                 onChange={(e) => {
                   setBulkCategoryId(e.target.value);
                   setBulkSubId('');
                 }}
-                className="border border-white/10 rounded-lg px-2.5 py-1 bg-slate-950/60 font-medium text-white focus:outline-none focus:ring-1 focus:ring-teal-500"
+                className={`${adminUi.field} mt-1`}
               >
-                <option value="">Category…</option>
+                <option value="">Leave unchanged</option>
                 {categories.map((c) => (
                   <option key={c.id} value={c.id}>
-                    {c.name}
+                    {titleCaseWords(c.name)}
                   </option>
                 ))}
               </select>
-              <select
-                value={bulkSubId}
-                disabled={!bulkCategoryId}
-                onChange={(e) => setBulkSubId(e.target.value)}
-                className="border border-white/10 rounded-lg px-2.5 py-1 bg-slate-950/60 font-medium text-white focus:outline-none focus:ring-1 focus:ring-teal-500 disabled:opacity-50"
-              >
-                <option value="">No subcategory</option>
-                {subCategories
-                  .filter((s) => s.category_id === bulkCategoryId)
-                  .map((s) => (
-                    <option key={s.id} value={s.id}>
-                      {s.name}
-                    </option>
-                  ))}
-              </select>
-              <button
-                type="button"
-                disabled={!bulkCategoryId || bulkAssigning}
-                onClick={handleBulkAssignCategory}
-                className="bg-teal-600 hover:bg-teal-500 text-white px-3 py-1.5 rounded-lg border border-white/10 font-bold whitespace-nowrap active:scale-95 disabled:opacity-40 transition-all cursor-pointer"
-              >
-                {bulkAssigning ? 'Applying…' : `Apply to ${selectedIds.size}`}
-              </button>
             </div>
-            )}
-            <div className="flex flex-wrap items-center gap-2 p-2 border border-white/5 bg-slate-950/40 rounded-xl w-full lg:w-auto">
-              <span className="text-slate-350 shrink-0">Tax Type:</span>
+            <div className="min-w-[160px]">
+              <label className={adminUi.label}>Tax type</label>
               <select
                 value={bulkTaxTypeId}
                 onChange={(e) => setBulkTaxTypeId(e.target.value)}
-                className="border border-white/10 rounded-lg px-2.5 py-1 bg-slate-950/60 font-medium text-white focus:outline-none focus:ring-1 focus:ring-teal-500"
+                className={`${adminUi.field} mt-1`}
               >
-                <option value="">Select tax type…</option>
+                <option value="">Leave unchanged</option>
                 <option value="__no_tax__">No Tax</option>
                 {taxTypes.map((t) => (
                   <option key={t.id} value={t.id}>
@@ -842,106 +925,53 @@ export function ProductsAdminView({ mode }: { mode: ProductsAdminMode }) {
                   </option>
                 ))}
               </select>
-              <button
-                type="button"
-                disabled={!bulkTaxTypeId || bulkTaxAssigning}
-                onClick={handleBulkAssignTaxType}
-                className="bg-teal-600 hover:bg-teal-500 text-white px-3 py-1.5 rounded-lg border border-white/10 font-bold whitespace-nowrap active:scale-95 disabled:opacity-40 transition-all cursor-pointer"
-              >
-                {bulkTaxAssigning ? 'Applying…' : 'Apply'}
-              </button>
             </div>
-            {mode === 'active' && (
-            <div className="flex flex-wrap items-center gap-2 p-2 border border-white/5 bg-slate-950/40 rounded-xl w-full lg:w-auto">
-              <span className="text-slate-350 shrink-0">Price group:</span>
+            <div className="min-w-[180px]">
+              <label className={adminUi.label}>Price group</label>
               <select
                 value={bulkPriceGroupId}
                 onChange={(e) => {
                   setBulkPriceGroupId(e.target.value);
                   if (e.target.value !== '__new__') setBulkPriceGroupName('');
                 }}
-                className="border border-white/10 rounded-lg px-2.5 py-1 bg-slate-950/60 font-medium text-white focus:outline-none focus:ring-1 focus:ring-teal-500"
+                className={`${adminUi.field} mt-1`}
               >
-                <option value="">Select price group…</option>
-                <option value="__new__">+ Add price group</option>
+                <option value="">Leave unchanged</option>
+                <option value="__new__">+ New group</option>
                 {priceGroups.map((g) => (
                   <option key={g.id} value={g.id}>
-                    {g.name}{g.product_count != null ? ` (${g.product_count})` : ''}
+                    {titleCaseWords(g.name)}
                   </option>
                 ))}
               </select>
-              {bulkPriceGroupId === '__new__' && (
+            </div>
+            {bulkPriceGroupId === '__new__' && (
+              <div className="min-w-[160px]">
+                <label className={adminUi.label}>New group name</label>
                 <input
                   type="text"
                   value={bulkPriceGroupName}
                   onChange={(e) => setBulkPriceGroupName(e.target.value)}
-                  placeholder="New group name…"
-                  className="border border-white/10 rounded-lg px-2.5 py-1 bg-slate-950/60 font-medium text-white focus:outline-none focus:ring-1 focus:ring-teal-500 min-w-[140px]"
+                  onBlur={() => setBulkPriceGroupName((n) => titleCaseWords(n))}
+                  placeholder="Group name"
+                  className={`${adminUi.field} mt-1`}
                 />
-              )}
-              <button
-                type="button"
-                disabled={
-                  bulkPriceGroupAssigning ||
-                  !bulkPriceGroupId ||
-                  (bulkPriceGroupId === '__new__' && !bulkPriceGroupName.trim())
-                }
-                onClick={handleBulkAssignPriceGroup}
-                className="bg-teal-600 hover:bg-teal-500 text-white px-3 py-1.5 rounded-lg border border-white/10 font-bold whitespace-nowrap active:scale-95 disabled:opacity-40 transition-all cursor-pointer"
-              >
-                {bulkPriceGroupAssigning ? 'Applying…' : `Add ${selectedIds.size}`}
-              </button>
-            </div>
+              </div>
             )}
-            <div className="flex items-center gap-2 flex-wrap">
-              <button
-                type="button"
-                onClick={() => {
-                  const ids = Array.from(selectedIds).slice(0, 50);
-                  router.push(`/admin/products/labels?ids=${ids.map(encodeURIComponent).join(',')}`);
-                }}
-                className="inline-flex items-center gap-2 px-3 py-2 bg-slate-950/40 border border-white/10 hover:bg-white/5 text-slate-300 rounded-lg text-xs font-semibold"
-              >
-                <Printer className="w-3.5 h-3.5 text-teal-400" />
-                Print labels
-              </button>
-              <button
-                type="button"
-                onClick={handleExportSelected}
-                className="inline-flex items-center gap-2 px-3 py-2 bg-slate-950/40 border border-white/10 hover:bg-white/5 text-slate-300 rounded-lg text-xs font-semibold"
-              >
-                <FileDown className="w-3.5 h-3.5 text-teal-400" />
-                Export
-              </button>
-              {mode === 'inactive' ? (
-              <button
-                type="button"
-                onClick={handleBulkActivate}
-                className="inline-flex items-center gap-1.5 px-3 py-2 bg-[#0F9F8F] hover:bg-[#0B8275] border-transparent text-white rounded-xl text-xs font-bold cursor-pointer active:scale-95"
-              >
-                <RotateCcw className="w-3.5 h-3.5" />
-                Set active
-              </button>
-              ) : (
-              <button
-                type="button"
-                onClick={handleBulkDelete}
-                className="inline-flex items-center gap-1.5 px-3 py-2 bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/30 text-rose-455 rounded-xl text-xs font-bold cursor-pointer active:scale-95 transition-all"
-              >
-                <Trash2 className="w-3.5 h-3.5" />
-                Deactivate
-              </button>
-              )}
-              <button
-                type="button"
-                onClick={() => setSelectedIds(new Set())}
-                className="text-slate-500 hover:text-slate-205 font-bold"
-              >
-                Clear selection
-              </button>
-            </div>
+            <button
+              type="button"
+              disabled={
+                bulkAssigning ||
+                (!bulkCategoryId && !bulkTaxTypeId && !bulkPriceGroupId) ||
+                (bulkPriceGroupId === '__new__' && !bulkPriceGroupName.trim())
+              }
+              onClick={handleBulkApply}
+              className={adminUi.btnPrimary}
+            >
+              {bulkAssigning ? 'Applying…' : `Apply to ${selectedIds.size}`}
+            </button>
           </div>
-      </div>
+        </div>
       )}
 
       {loading ? (
@@ -990,10 +1020,14 @@ export function ProductsAdminView({ mode }: { mode: ProductsAdminMode }) {
                       {product.image_url && (
                         <img src={product.image_url} alt={product.name} className="w-10 h-10 object-cover rounded-xl border border-white/10 shadow-sm" />
                       )}
-                      <span className="font-bold text-white hover:text-teal-400 transition-colors">{product.name}</span>
+                      <span className="font-bold text-[#1A1A1A] hover:text-[#0F9F8F] transition-colors">
+                        {titleCaseWords(product.name)}
+                      </span>
                     </div>
                   </td>
-                  <td className="py-3 px-4 text-slate-350 font-semibold">{product.category_name || '-'}</td>
+                  <td className="py-3 px-4 text-[#6B6C72] font-semibold">
+                    {product.category_name ? titleCaseWords(product.category_name) : '-'}
+                  </td>
                   <td className="py-3 px-4 text-right font-bold text-slate-200">
                     ${parseFloat(product.price.toString()).toFixed(2)}
                   </td>

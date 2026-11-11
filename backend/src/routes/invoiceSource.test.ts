@@ -58,6 +58,9 @@ function stubInvoiceNumber() {
     limit() {
       return this;
     },
+    select() {
+      return this;
+    },
     lean: async () => [],
   }));
 }
@@ -352,7 +355,7 @@ test('no historical backfill or INV-WEB classification exists', () => {
   const online = readFileSync(join(process.cwd(), 'src/routes/online-orders.ts'), 'utf8');
   const model = readFileSync(join(process.cwd(), 'src/models/Invoice.ts'), 'utf8');
   assert.equal(invoices.includes('updateMany'), false);
-  assert.equal(online.includes("source: 'ONLINE'"), true);
+  assert.equal(online.includes("source: 'ONLINE'"), false);
   assert.equal(online.includes('source: invoice_number'), false);
   assert.match(model, /enum:\s*\['WHOLESALE', 'ONLINE', 'POS'\]/);
   assert.equal(/source:\s*\{[^}]*default/.test(model), false);
@@ -392,27 +395,12 @@ function stubOnlineDeliveryClaim(order: {
   return session;
 }
 
-test('E — online delivery Invoice.create includes source ONLINE', async () => {
+test('E — website order status PUT does not create an ONLINE invoice', async () => {
   assertNoMongoConnection();
   const order = {
     _id: { toString: () => ORDER_ID },
-    order_number: 'WEB-0042',
-    customer_name: 'Delivery Customer',
-    customer_phone: '5550100',
-    customer_email: 'delivery@example.com',
-    address_line1: '1 Main St',
-    city: 'Plymouth Meeting',
-    state: 'PA',
-    zip: '19462',
-    items: [],
-    subtotal: 80,
-    tax_amount: 20,
-    total_amount: 100,
-    payment_method: 'cod' as const,
-    payment_status: 'pending',
     status: 'dispatched',
     status_history: [] as Array<{ status: string; timestamp: Date }>,
-    save: async () => {},
   };
   const created: Record<string, unknown>[] = [];
   mock.method(OnlineOrder, 'findById', async () => order);
@@ -420,16 +408,6 @@ test('E — online delivery Invoice.create includes source ONLINE', async () => 
     created.push(doc);
     return { _id: { toString: () => INVOICE_ID }, ...doc };
   });
-  mock.method(paymentApplication, 'applyPaymentToInvoice', async () => ({
-    invoice_id: INVOICE_ID,
-    invoice_number: 'INV-WEB-0042',
-    amount_applied: 100,
-    amount_paid: 100,
-    remaining_balance: 0,
-    payment_status: 'paid',
-    receipt: { id: 'r', trx_id: 't', amount_received: 100, invoice_num: 'INV-WEB-0042' },
-  }));
-  stubOnlineDeliveryClaim(order);
 
   const res = await request(createApp())
     .put(`/api/online-orders/${ORDER_ID}/status`)
@@ -437,81 +415,14 @@ test('E — online delivery Invoice.create includes source ONLINE', async () => 
     .send({ status: 'delivered' });
 
   assertNoMongoConnection();
-  assert.equal(res.status, 200);
-  assert.equal(created.length, 1);
-  assert.equal(created[0].source, 'ONLINE');
-  assert.equal(created[0].invoice_type, 'invoice');
+  assert.equal(res.status, 400);
+  assert.match(String(res.body.error), /quotations/i);
+  assert.equal(created.length, 0);
 });
 
-test('F — claim failure after payment compensates receipt and deletes unpaid ONLINE invoice', async () => {
+test('F — website order delivery path no longer applies payment or stock', async () => {
   assertNoMongoConnection();
-  const created: Record<string, unknown>[] = [];
-  const deletedReceipts: string[] = [];
-  const deletedInvoices: string[] = [];
-  const order = {
-    _id: { toString: () => ORDER_ID },
-    order_number: 'WEB-0042',
-    customer_name: 'Delivery Customer',
-    customer_phone: '5550100',
-    customer_email: 'delivery@example.com',
-    address_line1: '1 Main St',
-    city: 'Plymouth Meeting',
-    state: 'PA',
-    zip: '19462',
-    items: [],
-    subtotal: 80,
-    tax_amount: 20,
-    total_amount: 100,
-    payment_method: 'cod' as const,
-    payment_status: 'pending',
-    status: 'dispatched',
-    status_history: [] as Array<{ status: string; timestamp: Date }>,
-    save: async () => {},
-  };
-  mock.method(OnlineOrder, 'findById', async () => order);
-  mock.method(Invoice, 'create', async (doc: Record<string, unknown>) => {
-    created.push(doc);
-    return { _id: { toString: () => INVOICE_ID }, ...doc };
-  });
-  mock.method(paymentApplication, 'applyPaymentToInvoice', async () => ({
-    invoice_id: INVOICE_ID,
-    invoice_number: 'INV-WEB-0042',
-    amount_applied: 100,
-    amount_paid: 100,
-    remaining_balance: 0,
-    payment_status: 'paid',
-    receipt: { id: 'r-source', trx_id: 't', amount_received: 100, invoice_num: 'INV-WEB-0042' },
-  }));
-  mock.method(paymentApplication, 'deleteReceiptLifecycle', async (receiptId: string) => {
-    deletedReceipts.push(receiptId);
-    return {
-      deleted: true as const,
-      invoice: {
-        id: INVOICE_ID,
-        invoice_number: 'INV-WEB-0042',
-        total_amount: 100,
-        amount_paid: 0,
-        payment_status: 'unpaid',
-      },
-    };
-  });
-  mock.method(Invoice, 'findByIdAndDelete', async (id: { toString(): string }) => {
-    deletedInvoices.push(id.toString());
-    return { _id: id };
-  });
-  const session = stubOnlineDeliveryClaim(order, { claimThrows: true });
-
-  const res = await request(createApp())
-    .put(`/api/online-orders/${ORDER_ID}/status`)
-    .set('Authorization', `Bearer ${adminTestToken()}`)
-    .send({ status: 'delivered' });
-
-  assertNoMongoConnection();
-  assert.equal(res.status, 500);
-  assert.equal(created.length, 1);
-  assert.equal(created[0].source, 'ONLINE');
-  assert.equal(order.status, 'dispatched');
-  assert.ok(session.abortTransaction.mock.callCount() >= 1);
-  assert.deepEqual(deletedReceipts, ['r-source']);
-  assert.deepEqual(deletedInvoices, [INVOICE_ID]);
+  const src = readFileSync(join(process.cwd(), 'src/routes/online-orders.ts'), 'utf8');
+  assert.equal(src.includes("source: 'ONLINE'"), false);
+  assert.equal(src.includes('applyPaymentToInvoice'), false);
 });

@@ -21,11 +21,24 @@ import {
 import { minSellingPrice, sellingBelowMin } from '@/lib/min-selling-price';
 import { notifyBarcodeScanMiss, notifyBarcodeScanSuccess, unlockScanAudio } from '@/lib/barcode-feedback';
 import { moneyIn, moneyPlain } from '@/lib/moneyTone';
+import { titleCaseWords } from '@/lib/titleCaseWords';
+import { DEFAULT_CALLING_CODE, joinPhone } from '@/lib/phoneParts';
 
 const LOCATION_OF_SALE = '511 W Germantown Pike, Plymouth Meeting, PA 19462-1303';
 const INITIAL_LINES = 15;
 /** Payment terms offered on invoices/quotations. Stored as plain text (no schema change). */
 export const TERMS_OPTIONS = ['Due on receipt', 'Net 15', 'Net 30', 'Net 60'];
+
+function looksLikeDocNumber(num: string): boolean {
+  return /^(INV|QTN|QI|RI|WI|RQ|WQ)#\d+$/.test(num);
+}
+
+function fallbackDocNumber(type: 'invoice' | 'quotation', origin?: 'quotation' | 'rfq' | 'online'): string {
+  if (type === 'invoice') return 'INV#001';
+  if (origin === 'rfq') return 'RQ#001';
+  if (origin === 'online') return 'WQ#001';
+  return 'QTN#001';
+}
 
 function emptyLine(): LineItem {
   return {
@@ -144,9 +157,11 @@ interface InvoiceFormLightboxProps {
   initialDocumentType?: 'invoice' | 'quotation';
   /** Prefill line items (e.g. when generating a quotation from an RFQ). */
   initialItems?: InvoiceInitialItem[];
+  /** RFQ and website orders get their own quotation number series. */
+  numberOrigin?: 'quotation' | 'rfq' | 'online';
 }
 
-export default function InvoiceFormLightbox({ isOpen, onClose, onSaved, editId, initialCustomerId, initialDocumentType, initialItems }: InvoiceFormLightboxProps) {
+export default function InvoiceFormLightbox({ isOpen, onClose, onSaved, editId, initialCustomerId, initialDocumentType, initialItems, numberOrigin }: InvoiceFormLightboxProps) {
   const [dirty, setDirty] = useState(false);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
@@ -277,10 +292,10 @@ export default function InvoiceFormLightbox({ isOpen, onClose, onSaved, editId, 
       const docType = initialDocumentType || 'invoice';
       setDocumentType(docType);
       setInvoiceDate(new Date().toISOString().slice(0, 10));
-      adminApi.get('/invoices/generate-number', { params: { type: docType } }).then((r) => {
+      adminApi.get('/invoices/generate-number', { params: { type: docType, origin: numberOrigin } }).then((r) => {
         const num = r.data.invoice_number || '';
-        setInvoiceNumber(/^INV#\d+|^QTN#\d+/.test(num) ? num : (docType === 'quotation' ? 'QTN#001' : 'INV#001'));
-      }).catch(() => setInvoiceNumber(docType === 'quotation' ? 'QTN#001' : 'INV#001'));
+        setInvoiceNumber(looksLikeDocNumber(num) ? num : fallbackDocNumber(docType, numberOrigin));
+      }).catch(() => setInvoiceNumber(fallbackDocNumber(docType, numberOrigin)));
       const empty: LineItem[] = Array.from({ length: INITIAL_LINES }, () => emptyLine());
       setUsesLineTax(true);
       // Pre-fill lines from initialItems (e.g. generated from an RFQ). Prices passed in
@@ -602,10 +617,10 @@ export default function InvoiceFormLightbox({ isOpen, onClose, onSaved, editId, 
     if (editId) return;
     setDocumentType(type);
     setDirty(true);
-    adminApi.get('/invoices/generate-number', { params: { type } }).then((r) => {
+    adminApi.get('/invoices/generate-number', { params: { type, origin: numberOrigin } }).then((r) => {
       const num = r.data.invoice_number || '';
-      setInvoiceNumber(/^INV#\d+|^QTN#\d+/.test(num) ? num : (type === 'quotation' ? 'QTN#001' : 'INV#001'));
-    }).catch(() => setInvoiceNumber(type === 'quotation' ? 'QTN#001' : 'INV#001'));
+      setInvoiceNumber(looksLikeDocNumber(num) ? num : fallbackDocNumber(type, numberOrigin));
+    }).catch(() => setInvoiceNumber(fallbackDocNumber(type, numberOrigin)));
   };
 
 
@@ -618,6 +633,8 @@ export default function InvoiceFormLightbox({ isOpen, onClose, onSaved, editId, 
     name: '', customer_code: '', phone: '', email: '', company: '', address: '', billing_address: '',
     city: '', state: '', zip: '', payment_terms: '', notes: '',
   });
+  const [newCustomerPhoneCode, setNewCustomerPhoneCode] = useState(DEFAULT_CALLING_CODE);
+  const [newCustomerPhoneNumber, setNewCustomerPhoneNumber] = useState('');
   const [savingCustomer, setSavingCustomer] = useState(false);
 
   const handleClose = () => {
@@ -701,7 +718,7 @@ export default function InvoiceFormLightbox({ isOpen, onClose, onSaved, editId, 
         savedId = editId;
       } else {
         const res = await adminApi.post('/invoices', payload);
-        toast.success('Invoice created');
+        toast.success('Invoice created — take stock from Fulfill (pickup or shipment)');
         savedId = res.data?.id ?? editId ?? '';
       }
       setDirty(false);
@@ -729,13 +746,19 @@ export default function InvoiceFormLightbox({ isOpen, onClose, onSaved, editId, 
 
   const handleAddCustomerSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newCustomerForm.name?.trim() || !newCustomerForm.phone?.trim()) {
+    const phone = joinPhone(newCustomerPhoneCode, newCustomerPhoneNumber);
+    if (!newCustomerForm.name?.trim() || !newCustomerPhoneNumber.trim()) {
       toast.error('Name and phone are required');
       return;
     }
     setSavingCustomer(true);
     try {
-      const res = await adminApi.post('/customers', { ...newCustomerForm, email: newCustomerForm.email || undefined });
+      const res = await adminApi.post('/customers', {
+        ...newCustomerForm,
+        phone,
+        company: newCustomerForm.company ? titleCaseWords(newCustomerForm.company) : newCustomerForm.company,
+        email: newCustomerForm.email || undefined,
+      });
       const created = res.data;
       setCustomers((prev) => [...prev, { id: created.id, customer_code: created.customer_code, name: created.name, company: created.company, phone: created.phone, email: created.email, address: created.address, billing_address: created.billing_address, city: created.city, state: created.state, zip: created.zip, tax_exempt: customerIsCurrentlyExempt(created) }]);
       setCustomerId(created.id);
@@ -750,6 +773,8 @@ export default function InvoiceFormLightbox({ isOpen, onClose, onSaved, editId, 
       }
       setAddCustomerOpen(false);
       setNewCustomerForm({ name: '', customer_code: '', phone: '', email: '', company: '', address: '', billing_address: '', city: '', state: '', zip: '', payment_terms: '', notes: '' });
+      setNewCustomerPhoneCode(DEFAULT_CALLING_CODE);
+      setNewCustomerPhoneNumber('');
       if (fileInput) fileInput.value = '';
       toast.success('Customer added');
     } catch (err: any) {
@@ -1095,7 +1120,29 @@ export default function InvoiceFormLightbox({ isOpen, onClose, onSaved, editId, 
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Phone *</label>
-                <input type="text" value={newCustomerForm.phone} onChange={(e) => setNewCustomerForm((f) => ({ ...f, phone: e.target.value }))} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" required />
+                <div className="grid grid-cols-[7.5rem_1fr] gap-2">
+                  <input
+                    type="text"
+                    inputMode="tel"
+                    value={newCustomerPhoneCode}
+                    onChange={(e) => {
+                      const next = e.target.value.startsWith('+') ? e.target.value : `+${e.target.value.replace(/\D/g, '')}`;
+                      setNewCustomerPhoneCode(next);
+                    }}
+                    placeholder="+1"
+                    aria-label="Country calling code"
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                  />
+                  <input
+                    type="tel"
+                    value={newCustomerPhoneNumber}
+                    onChange={(e) => setNewCustomerPhoneNumber(e.target.value)}
+                    placeholder="Phone number"
+                    aria-label="Phone number"
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                    required
+                  />
+                </div>
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Email</label>
@@ -1103,7 +1150,7 @@ export default function InvoiceFormLightbox({ isOpen, onClose, onSaved, editId, 
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Company</label>
-                <input type="text" value={newCustomerForm.company} onChange={(e) => setNewCustomerForm((f) => ({ ...f, company: e.target.value }))} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" />
+                <input type="text" value={newCustomerForm.company} onChange={(e) => setNewCustomerForm((f) => ({ ...f, company: titleCaseWords(e.target.value) }))} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" />
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Address / Bill to</label>

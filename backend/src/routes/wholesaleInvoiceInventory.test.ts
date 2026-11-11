@@ -25,6 +25,7 @@ import { DOCUMENT_TYPE_INVOICE, DOCUMENT_TYPE_QUOTATION } from '../utils/documen
 import { StockMovementType } from '../shared/enums';
 import {
   aggregateInvoiceInventoryQuantities,
+  applyDeferredWholesaleSaleInventory,
   netStockChangesFromInvoiceItems,
   usesMigratedWholesaleInventory,
 } from '../services/wholesaleInvoiceInventoryService';
@@ -95,6 +96,9 @@ function stubInvoiceNumber() {
       return this;
     },
     limit() {
+      return this;
+    },
+    select() {
       return this;
     },
     lean: async () => [],
@@ -385,7 +389,7 @@ test('duplicate invoice lines aggregate; net edit is oldQty - newQty', () => {
   assert.equal(net.get(PRODUCT_C), 5);
 });
 
-test('1-4 CREATE deducts stock, one SALE per aggregated product, before/after/delta hold', async () => {
+test('1-4 CREATE does not deduct stock until pickup or delivery', async () => {
   assertNoMongoConnection();
   const h = stubWholesaleHarness({ stock: { [PRODUCT_A]: 50, [PRODUCT_B]: 20 } });
   const res = await postInvoice({
@@ -396,51 +400,61 @@ test('1-4 CREATE deducts stock, one SALE per aggregated product, before/after/de
   assertNoMongoConnection();
   assert.equal(res.status, 201);
   assert.equal(h.invoiceCreates[0].source, 'WHOLESALE');
-  assert.equal(h.stock[PRODUCT_A], 42);
-  assert.equal(h.stock[PRODUCT_B], 18);
-  assert.equal(h.productUpdates.length, 2);
-  assert.equal(h.movements.length, 2);
-  for (const row of h.productUpdates) {
-    assert.equal(row.options.session, h.session);
-  }
-  for (const row of h.movements) {
-    assert.deepEqual(row.options, { session: h.session });
-  }
-  const byProduct = new Map(h.movements.map((m) => [String(m.doc.product_id), m.doc]));
-  assertSaleMovement(byProduct.get(PRODUCT_A)!, { change: -8, before: 50, after: 42, number: 'INV#W2D2' });
-  assertSaleMovement(byProduct.get(PRODUCT_B)!, { change: -2, before: 20, after: 18, number: 'INV#W2D2' });
-  assert.equal(h.session.commitTransaction.mock.callCount(), 1);
-  assert.equal(h.session.abortTransaction.mock.callCount(), 0);
+  assert.equal(h.invoiceCreates[0].inventory_applied, false);
+  assert.equal(h.invoiceCreates[0].fulfillment_method, 'unfulfilled');
+  assert.equal(h.stock[PRODUCT_A], 50);
+  assert.equal(h.stock[PRODUCT_B], 20);
+  assert.equal(h.productUpdates.length, 0);
+  assert.equal(h.movements.length, 0);
 });
 
-test('5 CREATE missing Product aborts invoice and stock', async () => {
+test('5 CREATE missing Product still saves the invoice (stock waits for fulfill)', async () => {
   assertNoMongoConnection();
   const h = stubWholesaleHarness({ missingAtFindById: [PRODUCT_MISSING] });
   const res = await postInvoice({
     invoice_number: 'INV#MISS',
     items: [line(PRODUCT_MISSING, 2)],
   });
-  assert.equal(res.status, 404);
-  assert.match(String(res.body.error), /Product not found/i);
-  assert.equal(h.stock[PRODUCT_MISSING], undefined);
+  assert.equal(res.status, 201);
   assert.equal(h.movements.length, 0);
-  assert.equal(h.persistedInvoice, null);
-  assert.equal(h.session.abortTransaction.mock.callCount(), 1);
-  assert.equal(h.session.commitTransaction.mock.callCount(), 0);
+  assert.equal(h.productUpdates.length, 0);
 });
 
-test('6 CREATE movement failure rolls back Invoice + Product', async () => {
+test('6 CREATE does not write stock movements', async () => {
   assertNoMongoConnection();
   const h = stubWholesaleHarness({ movementThrows: true, stock: { [PRODUCT_A]: 50 } });
   const res = await postInvoice({
     invoice_number: 'INV#MOVEFAIL',
     items: [line(PRODUCT_A, 4)],
   });
-  assert.equal(res.status, 500);
+  assert.equal(res.status, 201);
   assert.equal(h.stock[PRODUCT_A], 50);
-  assert.equal(h.persistedInvoice, null);
-  assert.equal(h.session.abortTransaction.mock.callCount(), 1);
-  assert.equal(h.session.commitTransaction.mock.callCount(), 0);
+  assert.equal(h.movements.length, 0);
+});
+
+test('pickup applyDeferred deducts stock with SALE movements', async () => {
+  assertNoMongoConnection();
+  const items = [line(PRODUCT_A, 3), line(PRODUCT_B, 2)];
+  const h = stubWholesaleHarness({
+    stock: { [PRODUCT_A]: 50, [PRODUCT_B]: 20 },
+    invoiceClaim: () => ({
+      _id: { toString: () => INVOICE_ID },
+      invoice_number: 'INV#PICK',
+      items,
+      inventory_applied: true,
+      fulfillment_method: 'store_pickup',
+    }),
+  });
+  const result = await applyDeferredWholesaleSaleInventory({
+    invoiceId: INVOICE_ID,
+    fulfillmentMethod: 'store_pickup',
+    adminId: ADMIN_ID,
+  });
+  assert.equal(result.applied, true);
+  assert.equal(h.stock[PRODUCT_A], 47);
+  assert.equal(h.stock[PRODUCT_B], 18);
+  assert.equal(h.movements.length, 2);
+  assert.equal(h.movements[0].doc.movement_type, StockMovementType.SALE);
 });
 
 test('7 CREATE invoice failure leaves stock unchanged', async () => {
@@ -465,8 +479,8 @@ test('8 CREATE negative stock remains allowed', async () => {
     items: [line(PRODUCT_A, 5)],
   });
   assert.equal(res.status, 201);
-  assert.equal(h.stock[PRODUCT_A], -4);
-  assertSaleMovement(h.movements[0].doc, { change: -5, before: 1, after: -4, number: 'INV#NEG' });
+  assert.equal(h.stock[PRODUCT_A], 1);
+  assert.equal(h.movements.length, 0);
 });
 
 test('9 CREATE fractional inventory quantity => 400', async () => {
@@ -505,9 +519,8 @@ test('11-12 CREATE zero quantity and service/non_inventory are skipped', async (
   assert.equal(h.stock[PRODUCT_A], 50);
   assert.equal(h.stock[PRODUCT_SERVICE], 99);
   assert.equal(h.stock[PRODUCT_NONINV], 99);
-  assert.equal(h.stock[PRODUCT_B], 19);
-  assert.equal(h.movements.length, 1);
-  assert.equal(String(h.movements[0].doc.product_id), PRODUCT_B);
+  assert.equal(h.stock[PRODUCT_B], 20);
+  assert.equal(h.movements.length, 0);
 });
 
 test('13 CREATE duplicate product lines aggregate to one $inc and one SALE', async () => {
@@ -518,10 +531,9 @@ test('13 CREATE duplicate product lines aggregate to one $inc and one SALE', asy
     items: [line(PRODUCT_A, 3), line(PRODUCT_A, 5)],
   });
   assert.equal(res.status, 201);
-  assert.equal(h.productUpdates.length, 1);
-  assert.deepEqual(h.productUpdates[0].update, { $inc: { stock_quantity: -8 } });
-  assert.equal(h.movements.length, 1);
-  assert.equal(h.stock[PRODUCT_A], 22);
+  assert.equal(h.productUpdates.length, 0);
+  assert.equal(h.movements.length, 0);
+  assert.equal(h.stock[PRODUCT_A], 30);
 });
 
 test('14 quotation gets WHOLESALE but no stock / no transaction inventory', async () => {
@@ -912,8 +924,9 @@ test('41-44 CONVERT creates WHOLESALE invoice, deducts stock, SALE movement, mar
   assert.equal(h.invoiceCreates[0].invoice_type, DOCUMENT_TYPE_INVOICE);
   assert.equal((quote as { source?: unknown }).source, undefined);
   assert.match(String(quote.shipping_type), /^converted:/);
-  assert.equal(h.stock[PRODUCT_A], 44);
-  assertSaleMovement(h.movements[0].doc, { change: -6, before: 50, after: 44 });
+  assert.equal(h.invoiceCreates[0].inventory_applied, false);
+  assert.equal(h.stock[PRODUCT_A], 50);
+  assert.equal(h.movements.length, 0);
   assert.equal(h.session.commitTransaction.mock.callCount(), 1);
 });
 
@@ -939,10 +952,9 @@ test('45 CONVERT stock failure leaves quote unconverted', async () => {
   });
   mock.method(Invoice, 'findById', async () => quote);
   const res = await convertQuote(QUOTE_ID);
-  assert.equal(res.status, 404);
-  assert.equal(h.session.abortTransaction.mock.callCount(), 1);
-  assert.equal(h.session.commitTransaction.mock.callCount(), 0);
+  assert.equal(res.status, 201);
   assert.equal(h.stock[PRODUCT_A], 50);
+  assert.equal(h.movements.length, 0);
 });
 
 test('46 CONVERT movement failure leaves quote unconverted', async () => {
@@ -963,9 +975,9 @@ test('46 CONVERT movement failure leaves quote unconverted', async () => {
   });
   mock.method(Invoice, 'findById', async () => quote);
   const res = await convertQuote(QUOTE_ID);
-  assert.equal(res.status, 500);
-  assert.equal(h.session.abortTransaction.mock.callCount(), 1);
+  assert.equal(res.status, 201);
   assert.equal(h.stock[PRODUCT_A], 50);
+  assert.equal(h.movements.length, 0);
 });
 
 test('47 CONVERT invoice creation failure leaves quote unconverted', async () => {
@@ -1019,8 +1031,8 @@ test('48 two concurrent conversions allow only one', async () => {
   assert.equal(first.status, 201);
   assert.equal(second.status, 400);
   assert.equal(h.invoiceCreates.length, 1);
-  assert.equal(h.stock[PRODUCT_A], 48);
-  assert.equal(h.movements.length, 1);
+  assert.equal(h.stock[PRODUCT_A], 50);
+  assert.equal(h.movements.length, 0);
 });
 
 test('49 already-converted quote cannot convert again', async () => {
@@ -1056,9 +1068,8 @@ test('50 converted invoice movement references the new Invoice', async () => {
   mock.method(Invoice, 'findById', async () => quote);
   const res = await convertQuote(QUOTE_ID);
   assert.equal(res.status, 201);
-  assert.equal(h.movements[0].doc.reference_type, 'Invoice');
-  assert.equal(String(h.movements[0].doc.reference_id), INVOICE_ID);
-  assert.notEqual(String(h.movements[0].doc.reference_id), QUOTE_ID);
+  assert.equal(h.invoiceCreates[0].inventory_applied, false);
+  assert.equal(h.movements.length, 0);
 });
 
 test('51-59 isolation: no INV-WEB heuristic, no OnlineOrder lookup, no shipment/accounting drive-by', () => {
@@ -1076,7 +1087,6 @@ test('51-59 isolation: no INV-WEB heuristic, no OnlineOrder lookup, no shipment/
   assert.equal(service.includes('idempotency'), false);
   assert.equal(/stock_quantity\s*>=/.test(service), false);
   assert.equal(service.includes('Math.floor'), false);
-  assert.equal(invoices.includes('Shipment'), false);
+  assert.match(invoices, /fulfill/);
   assert.equal(service.includes('SHIPMENT_OUT'), false);
-  assert.equal(service.includes('modules/shipping'), false);
 });

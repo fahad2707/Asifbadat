@@ -3,7 +3,7 @@
 import { useEffect, useState, Suspense, type CSSProperties } from 'react';
 import Link from 'next/link';
 import { useSearchParams, useRouter } from 'next/navigation';
-import { CheckCircle, Package, Truck, MapPin, Clock } from 'lucide-react';
+import { CheckCircle, Package, Clock } from 'lucide-react';
 import { customerAuthTheme, customerAuthUi } from '@/lib/customer-auth-ui';
 
 const API =
@@ -25,7 +25,10 @@ interface OrderData {
   created_at: string;
 }
 
-const STATUS_STEPS = ['confirmed', 'packed', 'dispatched', 'delivered'];
+const STATUS_STEPS = [
+  { key: 'confirmed', label: 'Submitted' },
+  { key: 'quoted', label: 'Quoted' },
+];
 
 const pageShell: CSSProperties = {
   background: `
@@ -174,7 +177,10 @@ function OrderConfirmationContent() {
     );
   }
 
-  const currentIdx = STATUS_STEPS.indexOf(order.status);
+  const currentIdx = Math.max(
+    0,
+    STATUS_STEPS.findIndex((s) => s.key === order.status)
+  );
   const isCancelled = order.status === 'cancelled';
 
   return (
@@ -205,9 +211,11 @@ function OrderConfirmationContent() {
             className="text-2xl text-[#F5F1E8] mb-2"
             style={{ fontFamily: customerAuthTheme.serif }}
           >
-            {isCancelled ? 'Order cancelled' : 'Thank you for your order'}
+            {isCancelled ? 'Order cancelled' : 'We received your request'}
           </h2>
           <p className="text-sm text-[#A8A29A]">
+            We will review this as a quotation before invoicing or shipping.
+            <br />
             Order <span className="text-[#D4B88A] font-semibold">{order.order_number}</span>
             {' · '}
             {new Date(order.created_at).toLocaleDateString('en-US', {
@@ -226,10 +234,9 @@ function OrderConfirmationContent() {
             <div className="flex items-center justify-between">
               {STATUS_STEPS.map((s, i) => {
                 const done = i <= currentIdx;
-                const icons = [Package, Package, Truck, MapPin];
-                const Icon = icons[i];
+                const Icon = i === 0 ? Package : CheckCircle;
                 return (
-                  <div key={s} className="flex flex-col items-center flex-1 relative">
+                  <div key={s.key} className="flex flex-col items-center flex-1 relative">
                     {i > 0 && (
                       <div
                         className={`absolute top-4 right-1/2 w-full h-0.5 -z-0 ${
@@ -246,8 +253,8 @@ function OrderConfirmationContent() {
                     >
                       <Icon className="w-4 h-4" />
                     </div>
-                    <span className="text-[10px] mt-2 text-center capitalize text-[#A8A29A] tracking-wide">
-                      {s.replace(/_/g, ' ')}
+                    <span className="text-[10px] mt-2 text-center text-[#A8A29A] tracking-wide">
+                      {s.label}
                     </span>
                   </div>
                 );

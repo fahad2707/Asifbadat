@@ -18,6 +18,11 @@ import {
   accountStatusFromDocument,
 } from '../utils/customerAccount';
 import { z } from 'zod';
+import crypto from 'crypto';
+import bcrypt from 'bcryptjs';
+import { fallbackCustomerCode, randomCustomerCode } from '../utils/customerCode';
+import { onlinePasswordFromName } from '../utils/onlineLoginCredentials';
+import { sendOnlineAccessEmail } from '../utils/mail';
 
 function customerAccountFields(c: {
   account_status?: unknown;
@@ -50,13 +55,86 @@ const storage = multer.diskStorage({
 });
 const upload = multer({ storage, limits: { fileSize: 15 * 1024 * 1024 } }); // 15MB
 
+const BCRYPT_ROUNDS = 12;
+
+type ProvisionedLogin = {
+  username: string;
+  password: string;
+  emailed: boolean;
+  email: string | null;
+};
+
+async function provisionOnlineLogin(customer: any): Promise<ProvisionedLogin | null> {
+  if (customer.user_id) return null;
+
+  if (!customer.customer_code) {
+    customer.customer_code = await generateCustomerCode();
+  }
+
+  const password = onlinePasswordFromName(String(customer.name || ''));
+  const password_hash = await bcrypt.hash(password, BCRYPT_ROUNDS);
+
+  let email: string | undefined = String(customer.email || '').trim().toLowerCase() || undefined;
+  if (email) {
+    const emailTaken = await User.findOne({
+      email: { $regex: new RegExp(`^${email.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') },
+    });
+    if (emailTaken) email = undefined;
+  }
+
+  const phoneRaw = String(customer.phone || '').trim();
+  let phone = phoneRaw || undefined;
+  if (phone) {
+    const phoneTaken = await User.findOne({ phone });
+    if (phoneTaken) phone = undefined;
+  }
+  if (!phone) {
+    phone = `acct:cust:${crypto.createHash('sha256').update(String(customer._id)).digest('hex').slice(0, 20)}`;
+  }
+
+  const user = await User.create({
+    name: customer.name,
+    ...(email ? { email } : {}),
+    phone,
+    password_hash,
+    email_verified: true,
+  });
+  customer.user_id = user._id;
+
+  let emailed = false;
+  const mailTo = String(customer.email || '').trim();
+  if (mailTo) {
+    try {
+      emailed = await sendOnlineAccessEmail(mailTo, {
+        name: customer.name,
+        username: String(customer.customer_code),
+        password,
+      });
+    } catch (err) {
+      console.error('Online access email failed:', err);
+    }
+  }
+
+  return {
+    username: String(customer.customer_code),
+    password,
+    emailed,
+    email: mailTo || null,
+  };
+}
+
 async function generateCustomerCode(): Promise<string> {
   for (let i = 0; i < 20; i++) {
-    const code = 'C' + String(Math.floor(100000 + Math.random() * 900000));
+    const code = randomCustomerCode();
     const exists = await Customer.findOne({ customer_code: code });
     if (!exists) return code;
   }
-  return 'C' + String(Date.now() % 1000000).padStart(6, '0');
+  return fallbackCustomerCode();
+}
+
+function catalogPriceDiffers(lastPrice: number, catalogPrice: number | null | undefined): boolean {
+  if (catalogPrice == null || Number.isNaN(Number(catalogPrice))) return false;
+  return Math.round(lastPrice * 100) !== Math.round(Number(catalogPrice) * 100);
 }
 
 // Generate customer ID (for forms)
@@ -246,8 +324,8 @@ router.get('/:id/product-prices', authenticateAdmin, async (req: AuthRequest, re
       .populate('product_id', 'name price sku product_id')
       .sort({ last_invoice_date: -1, updated_at: -1 })
       .lean();
-    res.json({
-      prices: rows.map((row) => {
+    const prices = rows
+      .map((row) => {
         const product = row.product_id && typeof row.product_id === 'object' ? (row.product_id as {
           _id?: { toString(): string };
           name?: string;
@@ -255,17 +333,20 @@ router.get('/:id/product-prices', authenticateAdmin, async (req: AuthRequest, re
           sku?: string;
           product_id?: string;
         }) : null;
+        const catalog_price = product?.price != null ? Number(product.price) : null;
+        const last_price = Number(row.last_price) || 0;
         return {
           product_id: product?._id?.toString() || String(row.product_id || ''),
           product_name: product?.name || 'Product',
           sku: product?.sku || '',
           catalog_code: product?.product_id || '',
-          catalog_price: product?.price != null ? Number(product.price) : null,
-          last_price: Number(row.last_price) || 0,
+          catalog_price,
+          last_price,
           last_invoice_date: row.last_invoice_date || null,
         };
-      }),
-    });
+      })
+      .filter((row) => catalogPriceDiffers(row.last_price, row.catalog_price));
+    res.json({ prices });
   } catch (error) {
     console.error('Customer product prices error:', error);
     res.status(500).json({ error: 'Failed to fetch negotiated prices' });
@@ -347,11 +428,20 @@ router.post('/:id/documents', authenticateAdmin, upload.single('file'), async (r
     if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
     const customer = await Customer.findById(req.params.id);
     if (!customer) return res.status(404).json({ error: 'Customer not found' });
-    const doc = { name: req.file.originalname || req.file.filename, url: `/uploads/customers/${req.file.filename}` };
-    const docs = (customer as any).documents || [];
-    docs.push(doc);
-    (customer as any).documents = docs;
+    const doc = {
+      name: req.file.originalname || req.file.filename,
+      url: `/uploads/customers/${req.file.filename}`,
+      uploaded_at: new Date(),
+    };
+    const existing = Array.isArray((customer as any).documents)
+      ? (customer as any).documents
+      : (customer as any).documents
+        ? [(customer as any).documents]
+        : [];
+    existing.push(doc);
+    (customer as any).documents = existing;
     await customer.save();
+    const docs = (customer as any).documents || existing;
     res.json({ document: doc, documents: docs });
   } catch (error) {
     console.error('Upload customer document error:', error);
@@ -363,7 +453,6 @@ router.post('/:id/documents', authenticateAdmin, upload.single('file'), async (r
 router.put('/:id', authenticateAdmin, async (req: AuthRequest, res) => {
   try {
     const schema = z.object({
-      customer_code: z.string().optional(),
       name: z.string().min(1).optional(),
       company: z.string().optional(),
       phone: z.string().optional(),
@@ -400,11 +489,16 @@ router.put('/:id/account-status', authenticateAdmin, async (req: AuthRequest, re
     const { account_status } = schema.parse(req.body);
     const customer = await Customer.findById(req.params.id);
     if (!customer) return res.status(404).json({ error: 'Customer not found' });
+    let online_login: ProvisionedLogin | null = null;
+    if (account_status === ACCOUNT_STATUS_APPROVED) {
+      online_login = await provisionOnlineLogin(customer);
+    }
     customer.account_status = account_status;
     await customer.save();
     res.json({
       id: customer._id.toString(),
       ...customerAccountFields(customer),
+      ...(online_login ? { online_login } : {}),
     });
   } catch (error: any) {
     if (error instanceof z.ZodError) return res.status(400).json({ error: error.errors[0].message });

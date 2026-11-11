@@ -33,7 +33,8 @@ interface OnlineOrder {
 }
 
 const statusConfig: Record<string, { label: string; icon: any; color: string; bgColor: string }> = {
-  confirmed: { label: 'Confirmed', icon: Package, color: 'text-blue-600', bgColor: 'bg-blue-100' },
+  confirmed: { label: 'Under review', icon: Package, color: 'text-blue-600', bgColor: 'bg-blue-100' },
+  quoted: { label: 'Quoted', icon: CheckCircle, color: 'text-teal-700', bgColor: 'bg-teal-100' },
   packed: { label: 'Packed', icon: CheckCircle, color: 'text-yellow-600', bgColor: 'bg-yellow-100' },
   dispatched: { label: 'Dispatched', icon: Truck, color: 'text-purple-600', bgColor: 'bg-purple-100' },
   delivered: { label: 'Delivered', icon: MapPin, color: 'text-green-600', bgColor: 'bg-green-100' },

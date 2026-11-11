@@ -35,6 +35,35 @@ export async function sendVerificationEmail(to: string, token: string): Promise<
   });
 }
 
+export async function sendOnlineAccessEmail(
+  to: string,
+  opts: { name?: string; username: string; password: string }
+): Promise<boolean> {
+  const t = createTransporter();
+  if (!t) return false;
+  const base = (process.env.FRONTEND_URL || '').replace(/\/$/, '');
+  const loginUrl = `${base}/login`;
+  const who = opts.name ? `${opts.name}, ` : '';
+  const text =
+    `${who}your wholesale website login is ready.\n\n` +
+    `Sign in at: ${loginUrl}\n` +
+    `Username: ${opts.username}\n` +
+    `Password: ${opts.password}\n\n` +
+    `You can also sign in with this email if it is on your account. Please change your password after first login.`;
+  await t.sendMail({
+    from: process.env.SMTP_USER,
+    to,
+    subject: 'Your wholesale website login',
+    text,
+    html:
+      `<p>${who}your wholesale website login is ready.</p>` +
+      `<p>Sign in at <a href="${loginUrl}">${loginUrl}</a></p>` +
+      `<p>Username: <strong>${opts.username}</strong><br/>Password: <strong>${opts.password}</strong></p>` +
+      `<p>You can also sign in with this email if it is on your account. Please change your password after first login.</p>`,
+  });
+  return true;
+}
+
 export async function sendPasswordResetEmail(to: string, token: string): Promise<void> {
   const t = createTransporter();
   if (!t) return;

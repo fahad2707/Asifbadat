@@ -2,11 +2,10 @@ import mongoose from 'mongoose';
 import Expense from '../models/Expense';
 import LedgerEntry from '../../../models/LedgerEntry';
 import { LedgerAccountType, LedgerReferenceType } from '../../../shared/enums';
+import { DOC_PREFIX, nextPrefixedNumber } from '../../../utils/documentNumbers';
 
-export function generateExpenseNumber(): string {
-  const prefix = 'EXP';
-  const num = Math.floor(100000 + Math.random() * 900000);
-  return `${prefix}${num}`;
+export async function generateExpenseNumber(): Promise<string> {
+  return nextPrefixedNumber(Expense, 'expense_number', DOC_PREFIX.expense);
 }
 
 function paymentModeToAccountType(mode: string): string {
@@ -145,8 +144,7 @@ export async function processRecurringExpenses(createdBy?: mongoose.Types.Object
     });
     if (existing) continue;
 
-    let num = generateExpenseNumber();
-    while (await Expense.findOne({ expense_number: num })) num = generateExpenseNumber();
+    const num = await generateExpenseNumber();
 
     const newExp = await Expense.create({
       expense_number: num,

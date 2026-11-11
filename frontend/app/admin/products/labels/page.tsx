@@ -33,6 +33,13 @@ function ProductLabelsInner() {
     () => rows.reduce((sum, r) => sum + (Number(r.quantity) || 0), 0),
     [rows]
   );
+  const backToProductId = useMemo(() => {
+    const ids = (searchParams?.get('ids') || '')
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean);
+    return ids.length === 1 ? ids[0] : null;
+  }, [searchParams]);
 
   useEffect(() => {
     const idsParam = searchParams?.get('ids') || '';
@@ -178,12 +185,22 @@ function ProductLabelsInner() {
   return (
     <div className="max-w-4xl space-y-6">
       <div>
+        {backToProductId ? (
+          <Link
+            href={`/admin/products/${backToProductId}`}
+            className="inline-flex items-center text-sm font-medium text-[#6B6C72] hover:text-[#1A1A1A] mb-3"
+          >
+            Back to product
+          </Link>
+        ) : (
+          <Link
+            href="/admin/products"
+            className="inline-flex items-center text-sm font-medium text-[#6B6C72] hover:text-[#1A1A1A] mb-3"
+          >
+            Back to products
+          </Link>
+        )}
         <h1 className="text-[28px] font-normal text-[#1A1A1A] tracking-tight">Print barcode labels</h1>
-        <p className="text-sm text-[#6B6C72] mt-2 max-w-2xl">
-          2×1&quot; warehouse labels with a Code 128 barcode of each product&apos;s stored SKU.
-          Manufacturer/vendor SKUs are never replaced. Products without a SKU can use Generate internal SKU
-          ({'EDI-<product ID>'}) first.
-        </p>
       </div>
 
       <div className="bg-white border border-[#E3E5E8] rounded-md p-4 space-y-3">
@@ -265,11 +282,7 @@ function ProductLabelsInner() {
                     <div className="text-xs text-[#6B6C72] font-mono mt-0.5">
                       SKU: {hasSku ? r.sku : '—'} · Product ID: {r.product_id || '—'}
                     </div>
-                    {hasSku ? (
-                      <p className="text-[11px] text-[#6B6C72] mt-1">
-                        Existing manufacturer/vendor SKU is preserved and will be encoded as Code 128.
-                      </p>
-                    ) : (
+                    {hasSku ? null : (
                       <div className="mt-2 flex flex-wrap items-center gap-2">
                         <button
                           type="button"
@@ -314,14 +327,14 @@ function ProductLabelsInner() {
         )}
       </div>
 
-      <p className="text-xs text-[#8D9096]">
-        <Link href="/admin/products/active" className="underline hover:text-[#1A1A1A]">
-          Back to products
+      {backToProductId ? (
+        <Link
+          href={`/admin/products/${backToProductId}`}
+          className="inline-flex items-center justify-center px-4 py-2 rounded-full border border-[#C7C7C7] text-sm font-medium text-[#1A1A1A] hover:bg-[#F4F5F8]"
+        >
+          Back to product
         </Link>
-        {' · '}
-        Labels are PDF pages sized 2×1 inches. Use your printer&apos;s actual size / no-scale settings.
-        Physical scanner verification is a separate check.
-      </p>
+      ) : null}
     </div>
   );
 }

@@ -50,7 +50,7 @@ export const adminUi = {
   body: 'text-sm font-normal text-[#1A1A1A]',
   meta: 'text-xs font-normal text-[#6B6C72]',
   helper: 'text-xs font-normal text-[#8D9096]',
-  navGroup: 'text-sm font-semibold text-[#1A1A1A]',
+  navGroup: 'text-[11px] font-semibold uppercase tracking-[0.08em] text-[#6B6C72]',
   navSection: 'text-[11px] font-medium text-[#6B6C72]',
   metric: 'text-[28px] font-normal text-[#1A1A1A] tabular-nums',
   label: 'text-xs font-medium text-[#6B6C72]',
@@ -86,14 +86,16 @@ export const adminUi = {
 } as const;
 
 export function adminNavItemClass(active: boolean): string {
-  return `block px-3 py-1.5 text-[12px] font-normal rounded-md ${
-    active ? 'bg-[#F4F5F8] text-[#1A1A1A]' : 'text-[#6B6C72] hover:bg-[#F4F5F8] hover:text-[#1A1A1A]'
+  return `flex items-center gap-2.5 px-2.5 py-[7px] text-[13px] ${
+    active
+      ? 'rounded-r-md bg-[#F4F5F8] text-[#1A1A1A] font-medium border-l-2 border-black'
+      : 'rounded-md text-[#393A3D] hover:bg-[#F4F5F8] hover:text-[#1A1A1A]'
   }`;
 }
 
 export function adminNavUtilityClass(active: boolean): string {
-  return `flex items-center gap-3 px-3 py-2 rounded-md text-[12px] font-normal ${
-    active ? 'bg-[#F4F5F8] text-[#1A1A1A]' : 'text-[#6B6C72] hover:bg-[#F4F5F8] hover:text-[#1A1A1A]'
+  return `flex items-center gap-2.5 px-2.5 py-[7px] rounded-md text-[13px] ${
+    active ? 'bg-[#F4F5F8] text-[#1A1A1A] font-medium' : 'text-[#393A3D] hover:bg-[#F4F5F8] hover:text-[#1A1A1A]'
   }`;
 }
 

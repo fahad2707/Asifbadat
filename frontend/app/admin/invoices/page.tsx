@@ -1,8 +1,10 @@
 'use client';
 
 import { Suspense, useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
+import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { Search, Download, Trash2, X } from 'lucide-react';
+import { Search, Download, Trash2, X, Send } from 'lucide-react';
 import adminApi from '@/lib/admin-api';
 import { isAdminAuthRedirectError } from '@/lib/admin-auth-redirect';
 import toast from 'react-hot-toast';
@@ -12,7 +14,7 @@ import { exportInvoicesToExcel } from '@/lib/export-invoices-excel';
 import InvoiceFormLightbox from '@/components/admin/InvoiceFormLightbox';
 import ReceivePaymentLightbox from '@/components/admin/ReceivePaymentLightbox';
 import InvoiceHistoryDrawer from '@/components/admin/InvoiceHistoryDrawer';
-import { adminUi } from '@/lib/admin-ui';
+import { adminMenuItemClass, adminMenuPanel, adminUi } from '@/lib/admin-ui';
 import { moneyIn, moneyOut, moneyPlain } from '@/lib/moneyTone';
 
 interface InvoiceItem {
@@ -40,6 +42,9 @@ interface Invoice {
   quote_status?: 'open' | 'rejected' | 'converted';
   converted_invoice_number?: string;
   items?: InvoiceItem[];
+  fulfillment_method?: 'unfulfilled' | 'store_pickup' | 'shipment' | null;
+  inventory_applied?: boolean | null;
+  linked_shipment_id?: string | null;
 }
 
 type DocType = 'invoice' | 'quotation';
@@ -73,6 +78,11 @@ function InvoicesPageInner() {
   const [shareAfter, setShareAfter] = useState<Invoice | null>(null);
   const [historyId, setHistoryId] = useState<string | null>(null);
   const [historyTick, setHistoryTick] = useState(0);
+  const [sendMenuId, setSendMenuId] = useState<string | null>(null);
+  const [sendMenuAnchor, setSendMenuAnchor] = useState<DOMRect | null>(null);
+  const [fulfillMenuId, setFulfillMenuId] = useState<string | null>(null);
+  const [fulfillMenuAnchor, setFulfillMenuAnchor] = useState<DOMRect | null>(null);
+  const [fulfillingId, setFulfillingId] = useState<string | null>(null);
 
   const fetchInvoices = async () => {
     try {
@@ -315,8 +325,28 @@ function InvoicesPageInner() {
   const money = (n: number) => `$${Number(n || 0).toFixed(2)}`;
   const fmtDate = (inv: Invoice) => new Date(inv.invoice_date || inv.created_at).toLocaleDateString();
 
+  const fulfillInvoice = async (inv: Invoice, method: 'store_pickup' | 'shipment') => {
+    setFulfillingId(inv.id);
+    setFulfillMenuId(null);
+    setFulfillMenuAnchor(null);
+    try {
+      const { data } = await adminApi.post(`/invoices/${inv.id}/fulfill`, { method });
+      if (method === 'store_pickup') {
+        toast.success(`${inv.invoice_number}: in-store pickup — stock taken`);
+      } else {
+        toast.success(`${inv.invoice_number} added to shipments as ${data.shipment_number}`);
+        router.push(`/admin/shipments?id=${encodeURIComponent(data.shipment_id || data.linked_shipment_id)}`);
+      }
+      fetchInvoices();
+    } catch (error: any) {
+      toast.error(error?.response?.data?.error || 'Could not fulfill invoice');
+    } finally {
+      setFulfillingId(null);
+    }
+  };
+
   const convertQuote = async (inv: Invoice) => {
-    if (!confirm(`Convert ${inv.invoice_number} to an invoice?\n\nStock will be deducted and the customer will be billed the quoted amounts.`)) return;
+    if (!confirm(`Convert ${inv.invoice_number} to an invoice?\n\nThe customer will be billed the quoted amounts. Stock is taken when you choose in-store pickup or mark the shipment delivered.`)) return;
     try {
       const res = await adminApi.post(`/invoices/${inv.id}/convert`);
       toast.success(`Converted to ${res.data.invoice_number}`);
@@ -550,6 +580,40 @@ function InvoicesPageInner() {
                             </button>
                           </>
                         )}
+                        {!quote && inv.inventory_applied === false && (
+                          <>
+                            <span className="text-[#C7C7C7] mx-1.5">·</span>
+                            {inv.fulfillment_method === 'shipment' && inv.linked_shipment_id ? (
+                              <Link href={`/admin/shipments?id=${encodeURIComponent(inv.linked_shipment_id)}`} className="text-[#0077C5] hover:underline">
+                                Shipment
+                              </Link>
+                            ) : (
+                              <button
+                                type="button"
+                                disabled={fulfillingId === inv.id}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  if (fulfillMenuId === inv.id) {
+                                    setFulfillMenuId(null);
+                                    setFulfillMenuAnchor(null);
+                                  } else {
+                                    setFulfillMenuId(inv.id);
+                                    setFulfillMenuAnchor(e.currentTarget.getBoundingClientRect());
+                                  }
+                                }}
+                                className="text-[#0077C5] hover:underline disabled:opacity-50"
+                              >
+                                Fulfill
+                              </button>
+                            )}
+                          </>
+                        )}
+                        {!quote && inv.fulfillment_method === 'store_pickup' && (
+                          <>
+                            <span className="text-[#C7C7C7] mx-1.5">·</span>
+                            <span className="text-[#6B6C72]">Picked up</span>
+                          </>
+                        )}
                         <span className="text-[#C7C7C7] mx-1.5">·</span>
                         <button type="button" onClick={() => handleDownloadPDF(inv)} className="text-[#6B6C72] hover:underline" title="Download / print PDF">
                           PDF
@@ -557,21 +621,22 @@ function InvoicesPageInner() {
                         <span className="text-[#C7C7C7] mx-1.5">·</span>
                         <button
                           type="button"
-                          onClick={() => handleWhatsApp(inv)}
+                          aria-label="Send"
+                          title="Send"
                           disabled={sharingId === inv.id}
-                          className="text-[#6B6C72] hover:underline disabled:opacity-50"
-                          title={inv.customer_phone ? `WhatsApp ${inv.customer_phone}` : 'Share on WhatsApp'}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (sendMenuId === inv.id) {
+                              setSendMenuId(null);
+                              setSendMenuAnchor(null);
+                            } else {
+                              setSendMenuId(inv.id);
+                              setSendMenuAnchor(e.currentTarget.getBoundingClientRect());
+                            }
+                          }}
+                          className="inline-flex align-middle p-1 rounded-full text-[#6B6C72] hover:text-[#1A1A1A] hover:bg-[#F4F5F8] disabled:opacity-50"
                         >
-                          WhatsApp
-                        </button>
-                        <span className="text-[#C7C7C7] mx-1.5">·</span>
-                        <button
-                          type="button"
-                          onClick={() => handleEmail(inv)}
-                          className="text-[#6B6C72] hover:underline"
-                          title={inv.customer_email ? `Send to ${inv.customer_email}` : 'No email on file — opens your mail app with the PDF downloaded'}
-                        >
-                          Email
+                          <Send className="w-4 h-4" />
                         </button>
                       </td>
                     </tr>
@@ -582,6 +647,71 @@ function InvoicesPageInner() {
           </div>
         </div>
       )}
+
+      {typeof document !== 'undefined' && fulfillMenuId && fulfillMenuAnchor && (() => {
+        const inv = invoices.find((i) => i.id === fulfillMenuId);
+        if (!inv) return null;
+        const closeFulfill = () => { setFulfillMenuId(null); setFulfillMenuAnchor(null); };
+        return createPortal(
+          <>
+            <div className="fixed inset-0 z-[100]" aria-hidden onClick={(e) => { e.stopPropagation(); closeFulfill(); }} />
+            <div
+              data-admin-menu
+              className={`fixed z-[101] py-1.5 min-w-[200px] ${adminMenuPanel}`}
+              style={{ top: fulfillMenuAnchor.bottom + 4, right: typeof window !== 'undefined' ? window.innerWidth - fulfillMenuAnchor.right : 0 }}
+            >
+              <button
+                type="button"
+                className={adminMenuItemClass()}
+                onClick={(e) => { e.stopPropagation(); void fulfillInvoice(inv, 'store_pickup'); }}
+              >
+                In-store pickup
+              </button>
+              <button
+                type="button"
+                className={adminMenuItemClass()}
+                onClick={(e) => { e.stopPropagation(); void fulfillInvoice(inv, 'shipment'); }}
+              >
+                Send for shipment
+              </button>
+            </div>
+          </>,
+          document.body
+        );
+      })()}
+
+      {typeof document !== 'undefined' && sendMenuId && sendMenuAnchor && (() => {
+        const inv = invoices.find((i) => i.id === sendMenuId);
+        if (!inv) return null;
+        const closeSend = () => { setSendMenuId(null); setSendMenuAnchor(null); };
+        return createPortal(
+          <>
+            <div className="fixed inset-0 z-[100]" aria-hidden onClick={(e) => { e.stopPropagation(); closeSend(); }} />
+            <div
+              data-admin-menu
+              className={`fixed z-[101] py-1.5 min-w-[160px] ${adminMenuPanel}`}
+              style={{ top: sendMenuAnchor.bottom + 4, right: typeof window !== 'undefined' ? window.innerWidth - sendMenuAnchor.right : 0 }}
+            >
+              <button
+                type="button"
+                className={adminMenuItemClass()}
+                disabled={sharingId === inv.id}
+                onClick={(e) => { e.stopPropagation(); closeSend(); void handleWhatsApp(inv); }}
+              >
+                WhatsApp
+              </button>
+              <button
+                type="button"
+                className={adminMenuItemClass()}
+                onClick={(e) => { e.stopPropagation(); closeSend(); void handleEmail(inv); }}
+              >
+                Email
+              </button>
+            </div>
+          </>,
+          document.body
+        );
+      })()}
 
       <InvoiceFormLightbox
         isOpen={createOpen}

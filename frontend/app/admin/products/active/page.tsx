@@ -1,7 +1,5 @@
-'use client';
-
-import { ProductsAdminView } from '@/components/admin/ProductsAdminView';
+import { redirect } from 'next/navigation';
 
 export default function ActiveProductsPage() {
-  return <ProductsAdminView key="active" mode="active" />;
+  redirect('/admin/products?view=active');
 }

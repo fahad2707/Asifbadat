@@ -19,6 +19,7 @@ import Shipment from './models/Shipment';
 import Product from '../../models/Product';
 import StockMovement from '../../models/StockMovement';
 import CreditMemo from '../credit-memo/models/CreditMemo';
+import Invoice from '../../models/Invoice';
 import { StockMovementType } from '../../shared/enums';
 
 const SHIPMENT_ID = '64b0000000000000000d0101';
@@ -55,6 +56,7 @@ type ShipmentDoc = {
   shipment_type: 'GROUND' | 'GROUND_RG';
   status: string;
   items: Array<{ product_id: string; product_name?: string; quantity: number }>;
+  linked_invoice_id?: string;
   delivered_date?: Date;
   proof_of_delivery_url?: string;
 };
@@ -95,6 +97,7 @@ async function markReturnReceived(id = SHIPMENT_ID, body: Record<string, unknown
 function stubShipmentOps(opts: {
   shipment: ShipmentDoc;
   stock?: Record<string, number>;
+  deferredInvoice?: Record<string, unknown> | null;
 }) {
   const session = createFakeSession();
   mock.method(mongoose, 'startSession', async () => session);
@@ -150,6 +153,8 @@ function stubShipmentOps(opts: {
   });
 
   mock.method(CreditMemo, 'create', async (docs: unknown) => [Array.isArray(docs) ? docs[0] : docs]);
+
+  mock.method(Invoice, 'findOneAndUpdate', async () => opts.deferredInvoice ?? null);
 
   return { session, shipment, stock, productUpdates, movements, statusUpdates };
 }
@@ -287,4 +292,29 @@ test('G — already-delivered GROUND shipment is rejected and does not touch sto
   assert.equal(h.statusUpdates.length, 0);
   assert.equal(h.session.abortTransaction.mock.callCount(), 1);
   assert.equal(h.session.commitTransaction.mock.callCount(), 0);
+});
+
+test('H — GROUND delivery of linked deferred invoice deducts SALE stock', async () => {
+  assertNoMongoConnection();
+  const invoiceId = '64b0000000000000000d0303';
+  const h = stubShipmentOps({
+    shipment: makeShipment({
+      linked_invoice_id: invoiceId,
+      items: [{ product_id: PRODUCT_A, quantity: 100 }],
+    }),
+    stock: { [PRODUCT_A]: 500 },
+    deferredInvoice: {
+      _id: { toString: () => invoiceId },
+      invoice_number: 'INV#001',
+      items: [{ product_id: PRODUCT_A, quantity: 100 }],
+    },
+  });
+
+  const res = await markDelivered();
+
+  assert.equal(res.status, 200);
+  assert.equal(h.stock[PRODUCT_A], 400);
+  assert.equal(h.movements.length, 1);
+  assert.equal(h.movements[0].doc.movement_type, StockMovementType.SALE);
+  assert.equal(h.movements[0].doc.quantity_change, -100);
 });

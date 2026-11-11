@@ -12,6 +12,7 @@ import { sendPdfResponse } from '../utils/pdfHelpers';
 import { z } from 'zod';
 import { receivePurchaseOrder, PurchaseOrderReceiveError } from '../services/purchaseOrderReceiveService';
 import { postVendorLedger } from '../modules/vendors/services/vendorLedgerService';
+import { DOC_PREFIX, nextPrefixedNumber } from '../utils/documentNumbers';
 
 const router = express.Router();
 
@@ -168,10 +169,16 @@ async function generatePOPDFBuffer(po: any): Promise<Buffer> {
   });
 }
 
-const generatePONumber = () => `P${String(Math.floor(10000 + Math.random() * 90000))}`;
+async function generatePONumber(): Promise<string> {
+  return nextPrefixedNumber(PurchaseOrder, 'po_number', DOC_PREFIX.purchaseOrder);
+}
 
-router.get('/generate-id', authenticateAdmin, (req, res) => {
-  res.json({ po_number: generatePONumber() });
+router.get('/generate-id', authenticateAdmin, async (_req, res) => {
+  try {
+    res.json({ po_number: await generatePONumber() });
+  } catch {
+    res.status(500).json({ error: 'Failed to generate PO number' });
+  }
 });
 
 // List purchase orders
@@ -357,7 +364,7 @@ router.post('/', authenticateAdmin, async (req: AuthRequest, res) => {
     const total_amount = subtotal + tax_amount;
 
     const po = await PurchaseOrder.create({
-      po_number: data.po_number || generatePONumber(),
+      po_number: data.po_number || (await generatePONumber()),
       vendor_id: data.vendor_id,
       status: 'draft',
       items,

@@ -205,6 +205,37 @@ export async function generateProductId(): Promise<string> {
   return String(Date.now() % 100000).padStart(5, '0');
 }
 
+export function isAssignableProductId(value: string): boolean {
+  return /^\d{5,6}$/.test(String(value ?? '').trim());
+}
+
+/**
+ * Keep a Generate-ID preview if it is still unused; otherwise mint a new one.
+ */
+export async function resolveCreateProductId(
+  requested?: string | null,
+  opts?: { excludeId?: string }
+): Promise<string> {
+  const incoming = String(requested ?? '').trim();
+  if (!incoming) return generateProductId();
+  if (!isAssignableProductId(incoming)) {
+    const err: Error & { status?: number } = new Error('Product ID must be 5 or 6 digits');
+    err.status = 400;
+    throw err;
+  }
+  const clashQuery: Record<string, unknown> = { product_id: incoming };
+  if (opts?.excludeId && mongoose.Types.ObjectId.isValid(opts.excludeId)) {
+    clashQuery._id = { $ne: new mongoose.Types.ObjectId(opts.excludeId) };
+  }
+  const exists = await Product.findOne(clashQuery).select('_id').lean();
+  if (exists) {
+    const err: Error & { status?: number } = new Error('That Product ID is already in use');
+    err.status = 400;
+    throw err;
+  }
+  return incoming;
+}
+
 /**
  * One-time migration for existing catalog (~1400+ products):
  * - Long UPC/barcode values → `sku`

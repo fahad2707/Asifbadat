@@ -6,6 +6,13 @@ import adminApi from '@/lib/admin-api';
 import toast from 'react-hot-toast';
 import { adminUi } from '@/lib/admin-ui';
 import ShipmentPackagesSection from '@/components/admin/ShipmentPackagesSection';
+import {
+  formatShipmentDate,
+  shipmentStatusBadgeClass,
+  shipmentStatusLabel,
+  shipmentTypeBadgeClass,
+  shipmentTypeLabel,
+} from '@/lib/shipment-display';
 
 export type ShipmentStatus =
   | 'PENDING'
@@ -41,19 +48,10 @@ export interface ShipmentDetail {
   }>;
 }
 
-const STATUS_UPDATES: Array<'PENDING' | 'PACKED' | 'DISPATCHED' | 'IN_TRANSIT'> = [
-  'PENDING',
-  'PACKED',
-  'DISPATCHED',
-  'IN_TRANSIT',
+const STATUS_FLOW: Array<{ value: 'PACKED' | 'IN_TRANSIT'; label: string }> = [
+  { value: 'PACKED', label: 'Ready to ship' },
+  { value: 'IN_TRANSIT', label: 'Out for delivery' },
 ];
-
-function fmtDate(value?: string) {
-  if (!value) return '—';
-  const d = new Date(value);
-  if (Number.isNaN(d.getTime())) return '—';
-  return d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
-}
 
 function itemLabel(item: NonNullable<ShipmentDetail['items']>[number]) {
   if (item.product_name) return item.product_name;
@@ -82,12 +80,30 @@ export default function ShipmentDrawer({
   const [loading, setLoading] = useState(false);
   const [shipment, setShipment] = useState<ShipmentDetail | null>(null);
   const [acting, setActing] = useState(false);
+  const [logistics, setLogistics] = useState({
+    transporter_name: '',
+    vehicle_number: '',
+    lr_number: '',
+    freight_charge: '',
+    expected_delivery_date: '',
+    notes: '',
+  });
+  const [savingLogistics, setSavingLogistics] = useState(false);
 
   const load = async (id: string) => {
     setLoading(true);
     try {
       const res = await adminApi.get(`/shipments/${id}`);
       setShipment(res.data);
+      const s = res.data as ShipmentDetail;
+      setLogistics({
+        transporter_name: s.transporter_name || '',
+        vehicle_number: s.vehicle_number || '',
+        lr_number: s.lr_number || '',
+        freight_charge: s.freight_charge != null ? String(s.freight_charge) : '',
+        expected_delivery_date: s.expected_delivery_date ? String(s.expected_delivery_date).slice(0, 10) : '',
+        notes: s.notes || '',
+      });
     } catch (err) {
       toast.error(apiError(err, 'Failed to load shipment'));
       onClose();
@@ -132,16 +148,51 @@ export default function ShipmentDrawer({
     }
   };
 
+  const steps = isRg
+    ? [
+        { key: 'PACKED', label: 'Ready' },
+        { key: 'IN_TRANSIT', label: 'In transit' },
+        { key: 'RETURNED', label: 'Received' },
+      ]
+    : [
+        { key: 'PACKED', label: 'Ready' },
+        { key: 'IN_TRANSIT', label: 'Out for delivery' },
+        { key: 'DELIVERED', label: 'Delivered' },
+      ];
+  const stepIndex = (() => {
+    if (shipment?.status === 'RETURNED' || shipment?.status === 'DELIVERED') return 2;
+    if (shipment?.status === 'IN_TRANSIT' || shipment?.status === 'DISPATCHED') return 1;
+    if (shipment?.status === 'FAILED') return -1;
+    return 0;
+  })();
+
   return (
     <div className="fixed inset-0 z-40">
       <button type="button" aria-label="Close shipment" className="absolute inset-0 bg-[rgba(26,26,26,0.35)]" onClick={onClose} />
-      <aside className="absolute right-0 top-0 h-full w-full max-w-[480px] bg-white border-l border-[#E3E5E8] shadow-xl flex flex-col">
-        <div className="flex items-start justify-between gap-3 px-5 py-4 border-b border-[#E3E5E8]">
-          <div>
-            <p className={adminUi.helper}>{shipment?.shipment_type || 'Shipment'}</p>
-            <h2 className="text-xl font-medium text-[#1A1A1A] mt-0.5 font-mono">
-              {shipment?.shipment_number || '…'}
-            </h2>
+      <aside className="absolute right-0 top-0 h-full w-full max-w-[560px] bg-white border-l border-[#E3E5E8] shadow-xl flex flex-col">
+        <div className="flex items-start justify-between gap-3 px-6 py-4 border-b border-[#E3E5E8]">
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <h2 className="text-xl font-medium text-[#1A1A1A] font-mono truncate">
+                {shipment?.shipment_number || '…'}
+              </h2>
+              {shipment && (
+                <>
+                  <span className={shipmentTypeBadgeClass(shipment.shipment_type)}>
+                    {shipmentTypeLabel(shipment.shipment_type)}
+                  </span>
+                  <span className={shipmentStatusBadgeClass(shipment.status)}>
+                    {shipmentStatusLabel(shipment.status)}
+                  </span>
+                </>
+              )}
+            </div>
+            {shipment && (
+              <p className={`${adminUi.helper} mt-1`}>
+                Invoice {invoiceLabel || shipment.linked_invoice_id || '—'}
+                {shipment.created_at ? ` · ${formatShipmentDate(shipment.created_at)}` : ''}
+              </p>
+            )}
           </div>
           <button type="button" onClick={onClose} className={adminUi.btnIcon} aria-label="Close">
             <X className="w-5 h-5" />
@@ -153,88 +204,137 @@ export default function ShipmentDrawer({
             <div className="animate-spin rounded-full h-8 w-8 border-2 border-black border-t-transparent" />
           </div>
         ) : (
-          <div className="flex-1 overflow-y-auto px-5 py-4 space-y-6">
-            <div className="grid grid-cols-2 gap-2">
-              <div className="rounded-md border border-[#E3E5E8] px-3 py-2">
-                <p className={adminUi.helper}>Status</p>
-                <p className="text-sm font-medium">{shipment.status}</p>
-              </div>
-              <div className="rounded-md border border-[#E3E5E8] px-3 py-2">
-                <p className={adminUi.helper}>Linked invoice</p>
-                <p className="text-sm font-medium truncate">
-                  {invoiceLabel || shipment.linked_invoice_id || '—'}
-                </p>
-              </div>
-            </div>
+          <div className="flex-1 overflow-y-auto px-6 py-5 space-y-6">
+            {stepIndex >= 0 && (
+              <ol className="flex items-center gap-2">
+                {steps.map((step, i) => {
+                  const done = i <= stepIndex;
+                  return (
+                    <li key={step.key} className="flex items-center gap-2 flex-1 min-w-0">
+                      <span
+                        className={`w-6 h-6 shrink-0 rounded-full text-[11px] font-medium flex items-center justify-center ${
+                          done ? 'bg-black text-white' : 'bg-[#F4F5F8] text-[#8D9096]'
+                        }`}
+                      >
+                        {i + 1}
+                      </span>
+                      <span className={`text-xs truncate ${done ? 'text-[#1A1A1A] font-medium' : 'text-[#8D9096]'}`}>
+                        {step.label}
+                      </span>
+                      {i < steps.length - 1 && (
+                        <span className={`h-px flex-1 ${i < stepIndex ? 'bg-black' : 'bg-[#E3E5E8]'}`} />
+                      )}
+                    </li>
+                  );
+                })}
+              </ol>
+            )}
 
             <section>
-              <h3 className={adminUi.sectionTitle}>Logistics</h3>
-              <dl className="mt-2 space-y-1.5 text-sm">
-                <div className="flex justify-between gap-4">
-                  <dt className="text-[#6B6C72]">Transporter</dt>
-                  <dd className="text-right">{shipment.transporter_name || '—'}</dd>
+              <h3 className={adminUi.sectionTitle}>Carrier</h3>
+              {terminal ? (
+                <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-3 text-sm">
+                  <div>
+                    <dt className={adminUi.helper}>Transporter</dt>
+                    <dd className="mt-0.5">{shipment.transporter_name || '—'}</dd>
+                  </div>
+                  <div>
+                    <dt className={adminUi.helper}>Vehicle</dt>
+                    <dd className="mt-0.5 font-mono">{shipment.vehicle_number || '—'}</dd>
+                  </div>
+                  <div>
+                    <dt className={adminUi.helper}>Tracking / LR</dt>
+                    <dd className="mt-0.5">{shipment.lr_number || '—'}</dd>
+                  </div>
+                  <div>
+                    <dt className={adminUi.helper}>{isRg ? 'Received' : 'Delivered'}</dt>
+                    <dd className="mt-0.5">{formatShipmentDate(shipment.delivered_date)}</dd>
+                  </div>
+                  {shipment.notes ? (
+                    <div className="col-span-2">
+                      <dt className={adminUi.helper}>Notes</dt>
+                      <dd className="mt-0.5 whitespace-pre-wrap">{shipment.notes}</dd>
+                    </div>
+                  ) : null}
+                </dl>
+              ) : (
+                <div className="mt-3 grid grid-cols-2 gap-3">
+                  <label className="block space-y-1 col-span-2 sm:col-span-1">
+                    <span className={adminUi.label}>Transporter</span>
+                    <input className={adminUi.field} value={logistics.transporter_name} onChange={(e) => setLogistics((p) => ({ ...p, transporter_name: e.target.value }))} />
+                  </label>
+                  <label className="block space-y-1">
+                    <span className={adminUi.label}>Vehicle</span>
+                    <input className={adminUi.field} value={logistics.vehicle_number} onChange={(e) => setLogistics((p) => ({ ...p, vehicle_number: e.target.value }))} />
+                  </label>
+                  <label className="block space-y-1">
+                    <span className={adminUi.label}>Tracking / LR</span>
+                    <input className={adminUi.field} value={logistics.lr_number} onChange={(e) => setLogistics((p) => ({ ...p, lr_number: e.target.value }))} />
+                  </label>
+                  <label className="block space-y-1">
+                    <span className={adminUi.label}>Freight</span>
+                    <input className={adminUi.field} value={logistics.freight_charge} onChange={(e) => setLogistics((p) => ({ ...p, freight_charge: e.target.value }))} />
+                  </label>
+                  <label className="block space-y-1 col-span-2">
+                    <span className={adminUi.label}>Expected delivery</span>
+                    <input type="date" className={adminUi.field} value={logistics.expected_delivery_date} onChange={(e) => setLogistics((p) => ({ ...p, expected_delivery_date: e.target.value }))} />
+                  </label>
+                  <label className="block space-y-1 col-span-2">
+                    <span className={adminUi.label}>Notes / ship-to</span>
+                    <textarea className={adminUi.field} rows={3} value={logistics.notes} onChange={(e) => setLogistics((p) => ({ ...p, notes: e.target.value }))} />
+                  </label>
+                  <div className="col-span-2">
+                    <button
+                      type="button"
+                      disabled={savingLogistics}
+                      className={adminUi.btnSecondary}
+                      onClick={async () => {
+                        setSavingLogistics(true);
+                        try {
+                          await adminApi.patch(`/shipments/${shipment.id}`, {
+                            transporter_name: logistics.transporter_name,
+                            vehicle_number: logistics.vehicle_number,
+                            lr_number: logistics.lr_number,
+                            freight_charge:
+                              logistics.freight_charge === '' || Number.isNaN(Number(logistics.freight_charge))
+                                ? undefined
+                                : Number(logistics.freight_charge),
+                            expected_delivery_date: logistics.expected_delivery_date || undefined,
+                            notes: logistics.notes,
+                          });
+                          toast.success('Shipment details saved');
+                          await load(shipment.id);
+                          onChanged();
+                        } catch (err) {
+                          toast.error(apiError(err, 'Could not save shipment'));
+                        } finally {
+                          setSavingLogistics(false);
+                        }
+                      }}
+                    >
+                      {savingLogistics ? 'Saving…' : 'Save details'}
+                    </button>
+                  </div>
                 </div>
-                <div className="flex justify-between gap-4">
-                  <dt className="text-[#6B6C72]">Vehicle</dt>
-                  <dd className="text-right font-mono">{shipment.vehicle_number || '—'}</dd>
-                </div>
-                <div className="flex justify-between gap-4">
-                  <dt className="text-[#6B6C72]">LR number</dt>
-                  <dd className="text-right font-mono">{shipment.lr_number || '—'}</dd>
-                </div>
-                <div className="flex justify-between gap-4">
-                  <dt className="text-[#6B6C72]">Freight</dt>
-                  <dd className="tabular-nums">
-                    {shipment.freight_charge != null
-                      ? `$${Number(shipment.freight_charge).toFixed(2)}`
-                      : '—'}
-                  </dd>
-                </div>
-                <div className="flex justify-between gap-4">
-                  <dt className="text-[#6B6C72]">Weight (kg)</dt>
-                  <dd className="tabular-nums">{shipment.weight_kg ?? '—'}</dd>
-                </div>
-                <div className="flex justify-between gap-4">
-                  <dt className="text-[#6B6C72]">Volume (cbm)</dt>
-                  <dd className="tabular-nums">{shipment.volume_cbm ?? '—'}</dd>
-                </div>
-                <div className="flex justify-between gap-4">
-                  <dt className="text-[#6B6C72]">Dispatch</dt>
-                  <dd>{fmtDate(shipment.dispatch_date)}</dd>
-                </div>
-                <div className="flex justify-between gap-4">
-                  <dt className="text-[#6B6C72]">ETA</dt>
-                  <dd>{fmtDate(shipment.expected_delivery_date)}</dd>
-                </div>
-                <div className="flex justify-between gap-4">
-                  <dt className="text-[#6B6C72]">Delivered / returned</dt>
-                  <dd>{fmtDate(shipment.delivered_date)}</dd>
-                </div>
-                <div className="flex justify-between gap-4">
-                  <dt className="text-[#6B6C72]">Created</dt>
-                  <dd>{fmtDate(shipment.created_at)}</dd>
-                </div>
-              </dl>
+              )}
             </section>
 
             {shipment.items && shipment.items.length > 0 && (
               <section>
-                <h3 className={adminUi.sectionTitle}>Line items</h3>
-                <div className="mt-2 border border-[#E3E5E8] rounded-md overflow-hidden">
-                  <table className="w-full text-xs">
-                    <thead className="bg-[#FAFAFA] text-[#6B6C72]">
+                <h3 className={adminUi.sectionTitle}>Items</h3>
+                <div className="mt-3 border border-[#E3E5E8] rounded-xl overflow-hidden">
+                  <table className="w-full text-sm">
+                    <thead className={adminUi.tableHead}>
                       <tr>
-                        <th className="text-left px-2 py-1.5 font-medium">Item</th>
-                        <th className="text-right px-2 py-1.5 font-medium">Qty</th>
-                        <th className="text-right px-2 py-1.5 font-medium">Line status</th>
+                        <th className="text-left px-3 py-2">Item</th>
+                        <th className="text-right px-3 py-2">Qty</th>
                       </tr>
                     </thead>
                     <tbody>
                       {shipment.items.map((item, idx) => (
                         <tr key={idx} className="border-t border-[#E3E5E8]">
-                          <td className="px-2 py-1.5">{itemLabel(item)}</td>
-                          <td className="px-2 py-1.5 text-right tabular-nums">{Number(item.quantity || 0)}</td>
-                          <td className="px-2 py-1.5 text-right">{item.status || '—'}</td>
+                          <td className="px-3 py-2">{itemLabel(item)}</td>
+                          <td className="px-3 py-2 text-right tabular-nums">{Number(item.quantity || 0)}</td>
                         </tr>
                       ))}
                     </tbody>
@@ -243,82 +343,70 @@ export default function ShipmentDrawer({
               </section>
             )}
 
-            {shipment.notes && (
-              <section>
-                <h3 className={adminUi.sectionTitle}>Notes</h3>
-                <p className="mt-2 text-sm text-[#1A1A1A]">{shipment.notes}</p>
-              </section>
-            )}
-
             <ShipmentPackagesSection shipmentId={shipment.id} onChanged={onChanged} />
           </div>
         )}
 
         {shipment && (
-          <div className="border-t border-[#E3E5E8] px-5 py-3 space-y-2">
-            {canUpdateStatus && (
-              <div className="flex flex-wrap gap-2">
-                {STATUS_UPDATES.filter((s) => s !== shipment.status).map((status) => (
-                  <button
-                    key={status}
-                    type="button"
-                    disabled={acting}
-                    className={adminUi.btnSecondary}
-                    onClick={() =>
-                      runAction(
-                        async () => {
-                          await adminApi.patch(`/shipments/${shipment.id}/status`, { status });
-                        },
-                        `Status set to ${status}`
-                      )
-                    }
-                  >
-                    {acting ? 'Updating…' : `Set ${status}`}
-                  </button>
-                ))}
-              </div>
+          <div className="border-t border-[#E3E5E8] px-6 py-3 flex flex-wrap items-center gap-2">
+            {canUpdateStatus &&
+              STATUS_FLOW.filter((s) => s.value !== shipment.status).map((status) => (
+                <button
+                  key={status.value}
+                  type="button"
+                  disabled={acting}
+                  className={adminUi.btnSecondary}
+                  onClick={() =>
+                    runAction(
+                      async () => {
+                        await adminApi.patch(`/shipments/${shipment.id}/status`, { status: status.value });
+                      },
+                      status.label
+                    )
+                  }
+                >
+                  {acting ? 'Updating…' : status.label}
+                </button>
+              ))}
+            {canMarkDelivered && (
+              <button
+                type="button"
+                disabled={acting}
+                className={adminUi.btnPrimary}
+                onClick={() => {
+                  if (!confirm(`Mark ${shipment.shipment_number} as delivered?\n\nStock will be deducted now.`)) return;
+                  runAction(async () => {
+                    await adminApi.post(`/shipments/${shipment.id}/mark-delivered`, {});
+                  }, 'Delivered — stock taken');
+                }}
+              >
+                {acting ? 'Marking delivered…' : 'Mark delivered'}
+              </button>
             )}
-            <div className="flex flex-wrap gap-2">
-              {canMarkDelivered && (
-                <button
-                  type="button"
-                  disabled={acting}
-                  className={adminUi.btnPrimary}
-                  onClick={() => {
-                    if (!confirm(`Mark ${shipment.shipment_number} as delivered?`)) return;
-                    runAction(async () => {
-                      await adminApi.post(`/shipments/${shipment.id}/mark-delivered`, {});
-                    }, 'Shipment marked delivered');
-                  }}
-                >
-                  {acting ? 'Marking delivered…' : 'Mark Delivered'}
-                </button>
-              )}
-              {canMarkReturnReceived && (
-                <button
-                  type="button"
-                  disabled={acting}
-                  className={adminUi.btnPrimary}
-                  onClick={() => {
-                    if (
-                      !confirm(
-                        `Mark Return Received for GROUND_RG shipment ${shipment.shipment_number}?\n\nThis records warehouse receipt of the return. Inventory will update via the shipment return endpoint (not a separate stock adjustment).`
-                      )
-                    ) {
-                      return;
-                    }
-                    runAction(async () => {
-                      await adminApi.post(`/shipments/${shipment.id}/mark-return-received`, {});
-                    }, `Return received · ${shipment.shipment_number}`);
-                  }}
-                >
-                  {acting ? 'Marking received…' : 'Mark Return Received'}
-                </button>
-              )}
-              {terminal && (
-                <p className={adminUi.helper}>This shipment is {shipment.status.toLowerCase()} and cannot be updated.</p>
-              )}
-            </div>
+            {canMarkReturnReceived && (
+              <button
+                type="button"
+                disabled={acting}
+                className={adminUi.btnPrimary}
+                onClick={() => {
+                  if (
+                    !confirm(
+                      `Mark ${shipment.shipment_number} as return received?\n\nWarehouse stock will update for this return.`
+                    )
+                  ) {
+                    return;
+                  }
+                  runAction(async () => {
+                    await adminApi.post(`/shipments/${shipment.id}/mark-return-received`, {});
+                  }, `Return received · ${shipment.shipment_number}`);
+                }}
+              >
+                {acting ? 'Marking received…' : 'Mark return received'}
+              </button>
+            )}
+            {terminal && (
+              <p className={adminUi.helper}>This shipment is {shipmentStatusLabel(shipment.status).toLowerCase()} and cannot be updated.</p>
+            )}
           </div>
         )}
       </aside>

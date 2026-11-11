@@ -159,6 +159,9 @@ function chainableFindResult(docs: Fixture[]) {
     limit() {
       return result;
     },
+    select() {
+      return result;
+    },
     lean() {
       return Promise.resolve(docs);
     },

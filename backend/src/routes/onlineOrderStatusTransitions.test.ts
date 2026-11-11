@@ -124,21 +124,17 @@ test('source enforces adjacency matrix and conditional claims (no document.save 
   const src = readFileSync(join(process.cwd(), 'src/routes/online-orders.ts'), 'utf8');
   assert.match(src, /ONLINE_ORDER_ALLOWED_TRANSITIONS/);
   assert.match(src, /Invalid status transition from/);
-  // Non-delivery path must claim with findOneAndUpdate, not mutate+save for status.
   const statusHandler = src.slice(src.indexOf("router.put('/:id/status'"));
-  const nonDeliveryTail = statusHandler.slice(statusHandler.lastIndexOf('// Non-delivery'));
-  assert.match(nonDeliveryTail, /findOneAndUpdate/);
-  assert.doesNotMatch(nonDeliveryTail, /await\s+\w+\.save\s*\(/);
-  // Delivery claim must require dispatched (not broad $nin-only).
-  assert.match(src, /status:\s*'dispatched'/);
+  assert.match(statusHandler, /findOneAndUpdate/);
+  assert.doesNotMatch(statusHandler, /await\s+\w+\.save\s*\(/);
+  assert.match(src, /link-quotation/);
 });
 
-test('A — valid transitions succeed via conditional claim', async () => {
+test('A — cancel is the only allowed status PUT', async () => {
   assertNoMongoConnection();
   const cases: Array<[string, string]> = [
-    ['confirmed', 'packed'],
-    ['packed', 'dispatched'],
     ['confirmed', 'cancelled'],
+    ['quoted', 'cancelled'],
     ['packed', 'cancelled'],
     ['dispatched', 'cancelled'],
   ];
@@ -162,54 +158,20 @@ test('A — valid transitions succeed via conditional claim', async () => {
   }
 });
 
-test('A — dispatched → delivered claims only status dispatched', async () => {
+test('A — packed / dispatched / delivered are rejected without invoicing', async () => {
   assertNoMongoConnection();
-  const order = makeOrder({ status: 'dispatched' });
+  const order = makeOrder({ status: 'confirmed' });
   mock.method(OnlineOrder, 'findById', async () => order);
-
   let invCreated = false;
-  let claimFilter: Record<string, unknown> | undefined;
   mock.method(Invoice, 'create', async () => {
     invCreated = true;
     return { _id: new mongoose.Types.ObjectId('64b0000000000000000d0303') };
   });
-  mock.method(paymentApplication, 'applyPaymentToInvoice', async () => ({
-    receipt: { id: 'rcpt-1' },
-  }));
-
-  const session = {
-    startTransaction: mock.fn(),
-    commitTransaction: mock.fn(async () => {}),
-    abortTransaction: mock.fn(async () => {}),
-    endSession: mock.fn(),
-  };
-  mock.method(mongoose, 'startSession', async () => session);
-  mock.method(OnlineOrder, 'findOneAndUpdate', async (filter: Record<string, unknown>, update: Record<string, unknown>) => {
-    claimFilter = filter;
-    assert.equal(filter.status, 'dispatched');
-    Object.assign(order, update.$set || {});
-    order.status = 'delivered';
-    return order;
-  });
-  mock.method(Product, 'findById', () => ({
-    session: async () => ({
-      _id: PRODUCT_A,
-      product_type: 'inventory',
-      stock_quantity: 10,
-    }),
-  }));
-  mock.method(Product, 'findOneAndUpdate', async () => ({
-    _id: PRODUCT_A,
-    stock_quantity: 9,
-  }));
-  mock.method(StockMovement, 'create', async () => [{}]);
-
   const res = await putStatus(ORDER_ID, 'delivered');
-  assert.equal(res.status, 200);
-  assert.equal(res.body.status, 'delivered');
-  assert.equal(invCreated, true);
-  assert.equal(claimFilter?.status, 'dispatched');
-  assert.equal(order.status, 'delivered');
+  assert.equal(res.status, 400);
+  assert.match(String(res.body.error), /quotations/i);
+  assert.equal(invCreated, false);
+  assert.equal(order.status, 'confirmed');
 });
 
 test('B — illegal skips fail', async () => {
@@ -230,7 +192,7 @@ test('B — illegal skips fail', async () => {
     });
     const res = await putStatus(ORDER_ID, to);
     assert.equal(res.status, 400, `${from}→${to}`);
-    assert.match(String(res.body.error), new RegExp(`Invalid status transition from ${from} to ${to}`));
+    assert.match(String(res.body.error), /quotations|Invalid status transition/i);
     assert.equal(order.status, from);
   }
 });
@@ -250,7 +212,7 @@ test('C — backward transitions fail', async () => {
     });
     const res = await putStatus(ORDER_ID, to);
     assert.equal(res.status, 400);
-    assert.match(String(res.body.error), /Invalid status transition/);
+    assert.match(String(res.body.error), /quotations|Invalid status transition/);
   }
 });
 
@@ -293,7 +255,7 @@ test('E — same-status updates fail without history growth', async () => {
     });
     const res = await putStatus(ORDER_ID, status);
     assert.equal(res.status, 400);
-    assert.match(String(res.body.error), /Invalid status transition/);
+    assert.match(String(res.body.error), /quotations|Invalid status transition/i);
     assert.equal(order.status_history.length, before);
   }
 });
@@ -328,50 +290,23 @@ test('F — cancel has no invoice/payment/stock effects', async () => {
   assert.equal(movementCalls, 0);
 });
 
-test('G — P0 race: cancel wins before delivery claim → delivery compensates, no orphan', async () => {
+test('G — PUT delivered never invoices even if the order is still dispatched', async () => {
   assertNoMongoConnection();
-  // findById still sees dispatched (stale-ish start); cancel wins before claim.
   const order = makeOrder({ status: 'dispatched' });
   mock.method(OnlineOrder, 'findById', async () => order);
-
-  const invoiceId = new mongoose.Types.ObjectId('64b0000000000000000d0303');
-  let deletedInvoice = false;
-  let deletedReceipt = false;
-
-  mock.method(Invoice, 'create', async () => ({ _id: invoiceId }));
-  mock.method(Invoice, 'findByIdAndDelete', async () => {
-    deletedInvoice = true;
+  let invCreated = false;
+  mock.method(Invoice, 'create', async () => {
+    invCreated = true;
     return {};
   });
-  mock.method(paymentApplication, 'applyPaymentToInvoice', async () => ({
-    receipt: { id: 'rcpt-race' },
-  }));
-  mock.method(paymentApplication, 'deleteReceiptLifecycle', async () => {
-    deletedReceipt = true;
-    return {};
+  mock.method(OnlineOrder, 'findOneAndUpdate', async () => {
+    throw new Error('must not claim delivered');
   });
-
-  const session = {
-    startTransaction: mock.fn(),
-    commitTransaction: mock.fn(async () => {}),
-    abortTransaction: mock.fn(async () => {}),
-    endSession: mock.fn(),
-  };
-  mock.method(mongoose, 'startSession', async () => session);
-
-  mock.method(OnlineOrder, 'findOneAndUpdate', async (filter: Record<string, unknown>) => {
-    assert.equal(filter.status, 'dispatched');
-    // Concurrent cancel committed first.
-    order.status = 'cancelled';
-    return null;
-  });
-
   const res = await putStatus(ORDER_ID, 'delivered');
   assert.equal(res.status, 400);
-  assert.match(String(res.body.error), /no longer dispatched|delivery claim failed/i);
-  assert.equal(order.status, 'cancelled');
-  assert.equal(deletedReceipt, true);
-  assert.equal(deletedInvoice, true);
+  assert.match(String(res.body.error), /quotations/i);
+  assert.equal(invCreated, false);
+  assert.equal(order.status, 'dispatched');
 });
 
 test('G — P0 race: delivery wins; later cancel cannot overwrite delivered', async () => {
@@ -411,4 +346,26 @@ test('G — concurrent claims: cancel claim loses if delivery already set delive
   assert.equal(res.status, 400);
   assert.match(String(res.body.error), /Order status changed|cannot transition/);
   assert.equal(order.status, 'delivered');
+});
+
+test('link-quotation marks the order quoted without invoicing', async () => {
+  assertNoMongoConnection();
+  const QUOTE_ID = '64b0000000000000000d0404';
+  const order = makeOrder({ status: 'confirmed' });
+  mock.method(Invoice, 'findById', () => ({
+    select: () => ({
+      lean: async () => ({ invoice_type: 'quotation', invoice_number: 'QTN#101' }),
+    }),
+  }));
+  mock.method(OnlineOrder, 'findOneAndUpdate', async (_filter: unknown, update: Record<string, unknown>) => {
+    Object.assign(order, update.$set || {});
+    return order;
+  });
+  const res = await request(createApp())
+    .post(`/api/online-orders/${ORDER_ID}/link-quotation`)
+    .set('Authorization', `Bearer ${adminToken()}`)
+    .send({ quotation_id: QUOTE_ID });
+  assert.equal(res.status, 200);
+  assert.equal(order.status, 'quoted');
+  assert.equal(String((order as { quotation_id?: string }).quotation_id), QUOTE_ID);
 });

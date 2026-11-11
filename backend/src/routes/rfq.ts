@@ -5,6 +5,7 @@ import RFQ from '../models/RFQ';
 import Product from '../models/Product';
 import Customer from '../models/Customer';
 import { authenticateAdmin, AuthRequest } from '../middleware/auth';
+import { DOC_PREFIX, nextPrefixedNumber } from '../utils/documentNumbers';
 import rateLimit from 'express-rate-limit';
 
 const router = express.Router();
@@ -18,12 +19,7 @@ const rfqCreateLimiter = rateLimit({
 });
 
 async function generateRfqNumber(): Promise<string> {
-  for (let i = 0; i < 8; i++) {
-    const candidate = `RFQ-${Date.now()}-${Math.floor(100 + Math.random() * 900)}`;
-    const exists = await RFQ.findOne({ rfq_number: candidate }).lean();
-    if (!exists) return candidate;
-  }
-  return `RFQ-${Date.now()}`;
+  return nextPrefixedNumber(RFQ, 'rfq_number', DOC_PREFIX.rfq);
 }
 
 const itemSchema = z.object({

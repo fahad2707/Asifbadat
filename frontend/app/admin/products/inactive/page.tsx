@@ -1,7 +1,5 @@
-'use client';
-
-import { ProductsAdminView } from '@/components/admin/ProductsAdminView';
+import { redirect } from 'next/navigation';
 
 export default function InactiveProductsPage() {
-  return <ProductsAdminView key="inactive" mode="inactive" />;
+  redirect('/admin/products?view=inactive');
 }

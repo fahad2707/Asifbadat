@@ -85,10 +85,25 @@ test('1 — admin POST customer starts pending and ignores body.account_status',
   assert.equal(created?.account_status, ACCOUNT_STATUS_PENDING);
 });
 
+function mockOnlineLoginProvision() {
+  delete process.env.SMTP_USER;
+  delete process.env.SMTP_PASS;
+  mock.method(Customer, 'findOne', async () => null);
+  mock.method(User, 'findOne', async () => null);
+  mock.method(User, 'create', async (doc: Record<string, unknown>) => ({
+    _id: { toString: () => USER_ID },
+    ...doc,
+  }));
+}
+
 test('2 — admin can approve', async () => {
   assertNoMongoConnection();
   const customer = {
     _id: { toString: () => CUSTOMER_ID },
+    name: 'Afzal',
+    customer_code: 'C48291',
+    phone: '5550101',
+    email: 'afzal@example.com',
     account_status: ACCOUNT_STATUS_PENDING,
     is_active: true,
     save: async function save() {
@@ -96,6 +111,7 @@ test('2 — admin can approve', async () => {
     },
   };
   mock.method(Customer, 'findById', async () => customer);
+  mockOnlineLoginProvision();
 
   const res = await request(createApp())
     .put(`/api/customers/${CUSTOMER_ID}/account-status`)
@@ -106,12 +122,17 @@ test('2 — admin can approve', async () => {
   assert.equal(res.body.account_status, ACCOUNT_STATUS_APPROVED);
   assert.equal(customer.account_status, ACCOUNT_STATUS_APPROVED);
   assert.equal(customer.is_active, true);
+  assert.equal(res.body.online_login?.username, 'C48291');
+  assert.equal(res.body.online_login?.password, 'Afzal321');
 });
 
 test('2b — admin can reject and re-approve', async () => {
   assertNoMongoConnection();
   const customer = {
     _id: { toString: () => CUSTOMER_ID },
+    name: 'Afzal',
+    customer_code: 'C48291',
+    phone: '5550101',
     account_status: ACCOUNT_STATUS_PENDING,
     is_active: true,
     save: async function save() {
@@ -119,6 +140,7 @@ test('2b — admin can reject and re-approve', async () => {
     },
   };
   mock.method(Customer, 'findById', async () => customer);
+  mockOnlineLoginProvision();
 
   const reject = await request(createApp())
     .put(`/api/customers/${CUSTOMER_ID}/account-status`)

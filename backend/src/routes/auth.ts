@@ -14,6 +14,7 @@ import {
   type CustomerLinkResult,
 } from '../utils/customerAccount';
 import { isSmtpConfigured, sendPasswordResetEmail } from '../utils/mail';
+import { looksLikeCustomerCode } from '../utils/onlineLoginCredentials';
 import { logSecurityEvent } from '../utils/securityLog';
 import {
   loginLimiter,
@@ -394,22 +395,35 @@ router.post('/login', loginLimiter, async (req, res) => {
 
     const schema = z
       .object({
-        email: emailSchema.optional(),
+        email: z.string().trim().min(1).max(320).optional(),
         phone: phoneSchema.optional(),
         password: z.string().min(1).max(128),
       })
       .refine((data) => data.email || data.phone, {
-        message: 'Either email or phone is required',
+        message: 'Email, customer ID, or phone is required',
         path: ['email'],
       });
 
     const { email, phone, password } = schema.parse(req.body);
 
-    const query: Record<string, string> = {};
-    if (email) query.email = email;
-    if (phone) query.phone = phone;
-
-    const user = email ? await findUserByEmail(email) : await User.findOne(query);
+    let user = null as Awaited<ReturnType<typeof User.findOne>>;
+    const identifier = email?.trim() || '';
+    if (phone && !identifier) {
+      user = await User.findOne({ phone });
+    } else if (identifier.includes('@')) {
+      user = await findUserByEmail(identifier);
+    } else if (looksLikeCustomerCode(identifier)) {
+      const customer = await Customer.findOne({
+        customer_code: { $regex: new RegExp(`^${escapeRegex(identifier)}$`, 'i') },
+      })
+        .select('user_id')
+        .lean();
+      if (customer?.user_id) {
+        user = await User.findById((customer as { user_id: unknown }).user_id);
+      }
+    } else {
+      user = (await findUserByEmail(identifier)) || (await User.findOne({ phone: identifier }));
+    }
     if (!user || !user.password_hash) {
       logSecurityEvent('auth_login_fail', req, { kind: 'user' });
       return res.status(401).json({ error: 'Invalid credentials' });

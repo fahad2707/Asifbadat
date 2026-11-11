@@ -178,6 +178,10 @@ function stubReturnHarness(opts: {
     return [doc];
   });
 
+  mock.method(CreditMemo, 'find', () => ({
+    select: () => ({ lean: async () => [] }),
+    lean: async () => [],
+  }));
   mock.method(CreditMemo, 'create', async (docs: unknown) => {
     const doc = Array.isArray(docs) ? docs[0] : docs;
     creditMemos.push(doc);

@@ -8,11 +8,13 @@ import { formatTaxTypeLabel } from '@/lib/tax-type';
 import toast from 'react-hot-toast';
 import NumberInput from './NumberInput';
 import { minSellingPrice, sellingBelowMin } from '@/lib/min-selling-price';
+import { titleCaseWords } from '@/lib/titleCaseWords';
 
 const ADD_CATEGORY = '__add_category__';
 const ADD_SUB = '__add_sub__';
 const ADD_TAX = '__add_tax__';
 const ADD_VENDOR = '__add_vendor__';
+const ADD_PRICE_GROUP = '__add_price_group__';
 
 interface Product {
   id?: string | number;
@@ -58,6 +60,12 @@ interface Vendor {
   name: string;
 }
 
+interface PriceGroupOption {
+  id: string;
+  name: string;
+  product_ids?: string[];
+}
+
 interface ProductModalProps {
   product: Product | null;
   onClose: () => void;
@@ -95,7 +103,7 @@ function AddCategoryModal({ onClose, onSaved }: { onClose: () => void; onSaved: 
     setLoading(true);
     try {
       const { data } = await adminApi.post('/categories', {
-        name: name.trim(),
+        name: titleCaseWords(name.trim()),
         image_url: imageUrl || undefined,
       });
       onSaved(data.id, data.name);
@@ -359,6 +367,9 @@ export default function ProductModal({ product, onClose, onSuccess }: ProductMod
   const [marginPct, setMarginPct] = useState<string>('');
   const [marginUsd, setMarginUsd] = useState<string>('');
   const [taxTypeId, setTaxTypeId] = useState<string | null | undefined>(null);
+  const [priceGroups, setPriceGroups] = useState<PriceGroupOption[]>([]);
+  const [priceGroupId, setPriceGroupId] = useState('');
+  const [newPriceGroupName, setNewPriceGroupName] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Defensive: never call .map/.find on a non-array (e.g. error object from a bad response).
@@ -404,11 +415,27 @@ export default function ProductModal({ product, onClose, onSuccess }: ProductMod
       toast.error('Failed to load vendors');
     }
   };
+  const fetchPriceGroups = async () => {
+    try {
+      const response = await adminApi.get('/price-groups');
+      const list = Array.isArray(response.data) ? response.data : [];
+      setPriceGroups(
+        list.map((g: PriceGroupOption) => ({
+          id: String(g.id),
+          name: g.name || '',
+          product_ids: Array.isArray(g.product_ids) ? g.product_ids.map(String) : [],
+        }))
+      );
+    } catch {
+      setPriceGroups([]);
+    }
+  };
 
   useEffect(() => {
     fetchCategories();
     fetchTaxTypes();
     fetchVendors();
+    fetchPriceGroups();
   }, []);
 
   useEffect(() => {
@@ -435,6 +462,17 @@ export default function ProductModal({ product, onClose, onSuccess }: ProductMod
       if (product.image_url) setImagePreview(product.image_url);
     } else {
       setTaxTypeId(null);
+      void (async () => {
+        try {
+          const { data } = await adminApi.get('/products/generate-id');
+          const preview = String(data?.product_id || data?.item_id || '');
+          if (preview) {
+            setFormData((prev) => (prev.product_id ? prev : { ...prev, product_id: preview }));
+          }
+        } catch {
+          /* user can still click Generate */
+        }
+      })();
     }
   }, [product]);
 
@@ -499,6 +537,25 @@ export default function ProductModal({ product, onClose, onSuccess }: ProductMod
     }
   };
 
+  const existingPriceGroups = product?.id
+    ? priceGroups.filter((g) => (g.product_ids || []).includes(String(product.id)))
+    : [];
+
+  const assignSelectedPriceGroup = async (productMongoId: string) => {
+    if (priceGroupId === ADD_PRICE_GROUP) {
+      const name = titleCaseWords(newPriceGroupName.trim());
+      if (!name) {
+        toast.error('Enter a price group name');
+        throw new Error('Price group name required');
+      }
+      await adminApi.post('/price-groups', { name, product_ids: [productMongoId] });
+      return;
+    }
+    if (priceGroupId) {
+      await adminApi.post(`/price-groups/${priceGroupId}/products`, { product_ids: [productMongoId] });
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const sell = Number(formData.price) || 0;
@@ -507,15 +564,21 @@ export default function ProductModal({ product, onClose, onSuccess }: ProductMod
       toast.error(`Selling price must be at least 5% above cost. Minimum is $${minSellingPrice(cost).toFixed(2)}.`);
       return;
     }
+    if (priceGroupId === ADD_PRICE_GROUP && !newPriceGroupName.trim()) {
+      toast.error('Enter a price group name');
+      return;
+    }
     setLoading(true);
     try {
       const payload: Record<string, unknown> = {
         ...formData,
+        name: titleCaseWords(String(formData.name || '').trim()),
         price: Number(formData.price) || 0,
         stock_quantity: Number(formData.stock_quantity) || 0,
         low_stock_threshold: Number(formData.low_stock_threshold) || 10,
       };
-      delete payload.product_id;
+      if (payload.product_id) payload.product_id = String(payload.product_id).trim();
+      else delete payload.product_id;
       if (product?.id) {
         if (taxTypeId === undefined) {
           delete payload.tax_type_id;
@@ -525,25 +588,34 @@ export default function ProductModal({ product, onClose, onSuccess }: ProductMod
       } else {
         payload.tax_type_id = taxTypeId ?? null;
       }
+      let savedId = product?.id ? String(product.id) : '';
       if (product?.id) {
         const { data } = await adminApi.put(`/products/${product.id}`, payload);
         const assigned = data?.product_id ? String(data.product_id) : '';
         if (assigned) {
-          setFormData((f) => ({ ...f, product_id: assigned }));
+          setFormData((f) => ({ ...f, product_id: assigned, name: String(payload.name) }));
         }
         toast.success(assigned ? `Product updated (ID ${assigned})` : 'Product updated');
       } else {
         const { data } = await adminApi.post('/products', payload);
         const assigned = data?.product_id ? String(data.product_id) : '';
+        savedId = data?.id ? String(data.id) : savedId;
         if (assigned) {
-          setFormData((f) => ({ ...f, product_id: assigned }));
+          setFormData((f) => ({ ...f, product_id: assigned, name: String(payload.name) }));
         }
         toast.success(assigned ? `Product created (ID ${assigned})` : 'Product created');
-        if (data?.id) {
-          onSuccess({ id: String(data.id) });
-          onClose();
-          return;
+      }
+      if (savedId && priceGroupId) {
+        try {
+          await assignSelectedPriceGroup(savedId);
+        } catch (groupErr: any) {
+          toast.error(groupErr.response?.data?.error || 'Product saved, but price group was not assigned');
         }
+      }
+      if (!product?.id && savedId) {
+        onSuccess({ id: savedId });
+        onClose();
+        return;
       }
       onSuccess();
       onClose();
@@ -665,25 +737,24 @@ export default function ProductModal({ product, onClose, onSuccess }: ProductMod
                 }
                 className="flex-1 px-4 py-2 border border-gray-300 rounded-lg bg-gray-50 text-gray-700 font-mono"
               />
-              {!formData.product_id && (
+              {!product?.id && (
                 <button
                   type="button"
                   onClick={async () => {
                     try {
                       const { data } = await adminApi.get('/products/generate-id');
                       setFormData((prev) => ({ ...prev, product_id: data.product_id || data.item_id || '' }));
-                      toast('Preview only — save the product to lock this ID', { icon: 'ℹ️' });
                     } catch {
                       toast.error('Failed to generate Product ID');
                     }
                   }}
                   className="px-4 py-2 rounded-lg font-medium bg-gray-100 text-gray-700 hover:bg-gray-200 border border-gray-300 whitespace-nowrap"
                 >
-                  Preview ID
+                  Generate Product ID
                 </button>
               )}
             </div>
-            <p className="text-xs text-gray-500 mt-1">5-digit unique ID — permanent once saved. Shown on the website and used in POS.</p>
+            <p className="text-xs text-gray-500 mt-1">5-digit unique ID — the number shown here is saved. Permanent once the product is created.</p>
           </div>
 
           <div>
@@ -692,6 +763,9 @@ export default function ProductModal({ product, onClose, onSuccess }: ProductMod
               type="text"
               value={formData.name}
               onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+              onBlur={() =>
+                setFormData((f) => ({ ...f, name: titleCaseWords(String(f.name || '')) }))
+              }
               className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500"
               required
             />
@@ -779,10 +853,49 @@ export default function ProductModal({ product, onClose, onSuccess }: ProductMod
               <option value={ADD_CATEGORY}>+ Add new category</option>
               {categoryList.map((cat) => (
                 <option key={cat.id} value={cat.id}>
-                  {cat.name}
+                  {titleCaseWords(cat.name)}
                 </option>
               ))}
             </select>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">Price range group</label>
+            <select
+              value={priceGroupId}
+              onChange={(e) => {
+                setPriceGroupId(e.target.value);
+                if (e.target.value !== ADD_PRICE_GROUP) setNewPriceGroupName('');
+              }}
+              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500"
+            >
+              <option value="">No price group</option>
+              <option value={ADD_PRICE_GROUP}>+ Add new group</option>
+              {priceGroups.map((g) => (
+                <option key={g.id} value={g.id}>
+                  {titleCaseWords(g.name)}
+                </option>
+              ))}
+            </select>
+            {priceGroupId === ADD_PRICE_GROUP && (
+              <input
+                type="text"
+                value={newPriceGroupName}
+                onChange={(e) => setNewPriceGroupName(e.target.value)}
+                onBlur={() => setNewPriceGroupName((n) => titleCaseWords(n))}
+                placeholder="New group name"
+                className="w-full mt-2 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500"
+              />
+            )}
+            {existingPriceGroups.length > 0 && (
+              <ul className="mt-2 space-y-1">
+                {existingPriceGroups.map((g) => (
+                  <li key={g.id} className="text-xs text-gray-600">
+                    Current group: {titleCaseWords(g.name)}
+                  </li>
+                ))}
+              </ul>
+            )}
           </div>
 
           {/* Sub-category hidden from UI; still supported by API */}

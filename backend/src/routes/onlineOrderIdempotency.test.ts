@@ -99,6 +99,11 @@ function stubProduct() {
   mock.method(Product, 'findById', (id: unknown) => ({
     lean: async () => (String(id) === PRODUCT_ID ? catalogProduct : null),
   }));
+  mock.method(OnlineOrder, 'find', () => ({
+    select: () => ({ lean: async () => [] }),
+    sort: () => ({ lean: async () => [] }),
+    lean: async () => [],
+  }));
 }
 
 function postOrder(token?: string, body: Record<string, unknown> = placeBody()) {

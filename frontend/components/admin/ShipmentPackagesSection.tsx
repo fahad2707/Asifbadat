@@ -343,7 +343,7 @@ export default function ShipmentPackagesSection({
 
   return (
     <section>
-      <div className="flex items-start justify-between gap-2">
+      <div className="flex items-center justify-between gap-2">
         <div>
           <h3 className={adminUi.sectionTitle}>Packages</h3>
           {helperRemaining && <p className={`${adminUi.helper} mt-0.5`}>{helperRemaining}</p>}
@@ -360,16 +360,12 @@ export default function ShipmentPackagesSection({
         )}
       </div>
 
-      <p className={`${adminUi.helper} mt-2`}>
-        Creating packages does not change inventory or shipment status.
-      </p>
-
       {loading ? (
         <div className="mt-3 flex justify-center py-6">
           <div className="animate-spin rounded-full h-6 w-6 border-2 border-black border-t-transparent" />
         </div>
       ) : loadError ? (
-        <div className="mt-3 rounded-md border border-[#FDECEC] bg-[#FDECEC] px-3 py-2 text-sm text-[#8A100E]">
+        <div className="mt-3 rounded-xl bg-[#FDECEC] px-3 py-2 text-sm text-[#8A100E]">
           {loadError}
           {createBlockedUntilRefresh && (
             <p className="mt-1 text-xs">Create is disabled until the package list loads successfully.</p>
@@ -377,14 +373,14 @@ export default function ShipmentPackagesSection({
         </div>
       ) : (
         <>
-          <div className="mt-3 border border-[#E3E5E8] rounded-md overflow-hidden">
+          <div className="mt-3 border border-[#E3E5E8] rounded-xl overflow-hidden">
             {packages.length === 0 ? (
-              <p className="px-3 py-4 text-sm text-[#6B6C72]">No packages yet.</p>
+              <p className="px-4 py-8 text-center text-sm text-[#6B6C72]">No packages yet. Add boxes below, then print labels.</p>
             ) : (
-              <table className="w-full text-xs">
-                <thead className="bg-[#FAFAFA] text-[#6B6C72]">
+              <table className="w-full text-sm">
+                <thead className={adminUi.tableHead}>
                   <tr>
-                    <th className="px-2 py-1.5 w-8">
+                    <th className="px-3 py-2 w-8">
                       <input
                         type="checkbox"
                         checked={allSelected}
@@ -392,15 +388,15 @@ export default function ShipmentPackagesSection({
                         aria-label="Select all packages"
                       />
                     </th>
-                    <th className="text-left px-2 py-1.5 font-medium">Code</th>
-                    <th className="text-left px-2 py-1.5 font-medium">Created</th>
-                    <th className="text-left px-2 py-1.5 font-medium">Notes</th>
+                    <th className="text-left px-3 py-2">Code</th>
+                    <th className="text-left px-3 py-2">Created</th>
+                    <th className="text-left px-3 py-2">Notes</th>
                   </tr>
                 </thead>
                 <tbody>
                   {packages.map((pkg) => (
                     <tr key={pkg.id} className="border-t border-[#E3E5E8]">
-                      <td className="px-2 py-1.5">
+                      <td className="px-3 py-2">
                         <input
                           type="checkbox"
                           checked={selectedIds.has(pkg.id)}
@@ -408,9 +404,9 @@ export default function ShipmentPackagesSection({
                           aria-label={`Select ${pkg.package_code}`}
                         />
                       </td>
-                      <td className="px-2 py-1.5 font-mono text-[11px]">{pkg.package_code}</td>
-                      <td className="px-2 py-1.5 whitespace-nowrap">{fmtDateTime(pkg.created_at)}</td>
-                      <td className="px-2 py-1.5 max-w-[120px] truncate" title={pkg.notes || undefined}>
+                      <td className="px-3 py-2 font-mono text-xs">{pkg.package_code}</td>
+                      <td className="px-3 py-2 whitespace-nowrap text-[#6B6C72]">{fmtDateTime(pkg.created_at)}</td>
+                      <td className="px-3 py-2 max-w-[140px] truncate text-[#6B6C72]" title={pkg.notes || undefined}>
                         {pkg.notes?.trim() ? pkg.notes : '—'}
                       </td>
                     </tr>
@@ -420,11 +416,10 @@ export default function ShipmentPackagesSection({
             )}
           </div>
 
-          <div className="mt-3 space-y-2 rounded-md border border-[#E3E5E8] px-3 py-2">
-            <p className="text-xs font-medium text-[#1A1A1A]">Create packages</p>
+          <div className="mt-3 rounded-xl bg-[#F4F5F8] px-4 py-3 space-y-3">
             <div className="flex flex-wrap items-end gap-2">
               <label className="text-xs text-[#6B6C72]">
-                Count
+                New boxes
                 <input
                   type="number"
                   min={1}
@@ -432,19 +427,19 @@ export default function ShipmentPackagesSection({
                   value={createCount}
                   disabled={createDisabled}
                   onChange={(e) => setCreateCount(Number(e.target.value))}
-                  className="mt-0.5 block w-20 rounded border border-[#E3E5E8] px-2 py-1 text-sm"
+                  className={`${adminUi.field} mt-1 w-20`}
                 />
               </label>
               <label className="text-xs text-[#6B6C72] flex-1 min-w-[140px]">
-                Notes (optional, all new)
+                Note for new boxes
                 <input
                   type="text"
                   value={createNotes}
                   maxLength={NOTES_MAX}
                   disabled={createDisabled}
                   onChange={(e) => setCreateNotes(e.target.value)}
-                  placeholder="e.g. fragile"
-                  className="mt-0.5 block w-full rounded border border-[#E3E5E8] px-2 py-1 text-sm"
+                  placeholder="Optional"
+                  className={`${adminUi.field} mt-1`}
                 />
               </label>
               <button
@@ -453,7 +448,7 @@ export default function ShipmentPackagesSection({
                 className={adminUi.btnPrimary}
                 onClick={createPackages}
               >
-                {creating ? 'Creating…' : 'Create'}
+                {creating ? 'Creating…' : 'Add packages'}
               </button>
             </div>
             {createBlockedUntilRefresh && (
@@ -468,16 +463,9 @@ export default function ShipmentPackagesSection({
                 </button>
               </p>
             )}
-          </div>
-
-          <div className="mt-3 space-y-2 rounded-md border border-[#E3E5E8] px-3 py-2">
-            <p className="text-xs font-medium text-[#1A1A1A]">Print labels</p>
-            <p className={`${adminUi.helper}`}>
-              Prints existing packages only — does not create packages or change shipment status.
-            </p>
-            <div className="flex flex-wrap items-end gap-2">
+            <div className="flex flex-wrap items-end gap-2 pt-1 border-t border-[#E3E5E8]">
               <label className="text-xs text-[#6B6C72]">
-                Copies each
+                Copies
                 <input
                   type="number"
                   min={1}
@@ -485,7 +473,7 @@ export default function ShipmentPackagesSection({
                   value={copies}
                   disabled={printing || selectedIds.size === 0}
                   onChange={(e) => setCopies(Number(e.target.value))}
-                  className="mt-0.5 block w-20 rounded border border-[#E3E5E8] px-2 py-1 text-sm"
+                  className={`${adminUi.field} mt-1 w-20`}
                 />
               </label>
               <button
@@ -502,7 +490,9 @@ export default function ShipmentPackagesSection({
               >
                 {printing
                   ? 'Generating…'
-                  : `Print ${selectedIds.size || 0} selected${selectedIds.size ? ` · ${totalLabels} label(s)` : ''}`}
+                  : selectedIds.size
+                    ? `Print ${totalLabels} label${totalLabels === 1 ? '' : 's'}`
+                    : 'Print selected'}
               </button>
             </div>
             {selectedIds.size > MAX_LABEL_ENTRIES && (

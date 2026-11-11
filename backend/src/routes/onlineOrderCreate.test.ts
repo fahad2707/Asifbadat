@@ -110,6 +110,10 @@ function stubCreateDeps() {
     sort: () => ({ lean: async () => null }),
     lean: async () => null,
   }));
+  mock.method(OnlineOrder, 'find', () => ({
+    select: () => ({ lean: async () => [] }),
+    lean: async () => [],
+  }));
 }
 
 function postOrder(token?: string, body: Record<string, unknown> = placeBody) {
@@ -232,6 +236,10 @@ test('15 — POST /api/rfq still works without authentication', async () => {
   assertNoMongoConnection();
   let created: Record<string, unknown> | undefined;
   mock.method(RFQ, 'findOne', () => ({ lean: async () => null }));
+  mock.method(RFQ, 'find', () => ({
+    select: () => ({ lean: async () => [] }),
+    lean: async () => [],
+  }));
   mock.method(RFQ, 'create', async (doc: Record<string, unknown>) => {
     created = doc;
     return {
@@ -277,11 +285,11 @@ test('16 — admin OnlineOrder status endpoint remains functional', async () => 
   const res = await request(createApp())
     .put(`/api/online-orders/${ORDER_ID}/status`)
     .set('Authorization', `Bearer ${adminTestToken()}`)
-    .send({ status: 'packed' });
+    .send({ status: 'cancelled' });
 
   assert.equal(res.status, 200);
-  assert.equal(order.status, 'packed');
-  assert.equal(res.body.status, 'packed');
+  assert.equal(order.status, 'cancelled');
+  assert.equal(res.body.status, 'cancelled');
 });
 
 test('17 — historical OnlineOrder without identity fields remains readable', async () => {

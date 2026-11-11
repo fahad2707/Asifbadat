@@ -15,7 +15,7 @@ import CustomerAuthShell from '@/components/auth/CustomerAuthShell';
 import PasswordField from '@/components/auth/PasswordField';
 import toast from 'react-hot-toast';
 
-const LOGIN_CREDENTIALS_ERROR = 'Email id or password is incorrect';
+const LOGIN_CREDENTIALS_ERROR = 'Email, customer ID, or password is incorrect';
 
 async function navigateAfterAuth(
   push: (href: string) => void,
@@ -80,7 +80,7 @@ export default function LoginPage() {
     e.preventDefault();
     setFieldError(null);
     if (!email.trim()) {
-      setFieldError('Email is required');
+      setFieldError('Email or customer ID is required');
       return;
     }
     if (!password) {
@@ -213,16 +213,16 @@ export default function LoginPage() {
 
         <div>
           <label htmlFor="auth-email" className={customerAuthUi.label}>
-            Email
+            {isLogin ? 'Email or customer ID' : 'Email'}
           </label>
           <input
             id="auth-email"
-            type="email"
+            type={isLogin ? 'text' : 'email'}
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             className={customerAuthUi.field}
-            placeholder="you@company.com"
-            autoComplete="email"
+            placeholder={isLogin ? 'you@company.com or C48291' : 'you@company.com'}
+            autoComplete={isLogin ? 'username' : 'email'}
             required
           />
         </div>

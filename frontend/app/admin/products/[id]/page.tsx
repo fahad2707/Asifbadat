@@ -3,20 +3,7 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
-import {
-  ChevronLeft,
-  DollarSign,
-  Package,
-  Layers,
-  TrendingUp,
-  Truck,
-  Edit,
-  Tag,
-  AlertTriangle,
-  Warehouse,
-  History,
-  Activity,
-} from 'lucide-react';
+import { ChevronLeft, Package, Edit, AlertTriangle } from 'lucide-react';
 import adminApi from '@/lib/admin-api';
 import toast from 'react-hot-toast';
 import ProductModal from '@/components/admin/ProductModal';
@@ -28,9 +15,12 @@ interface Product {
   id: string;
   name: string;
   price: number;
-  cost_price?: number;
+  cost_price?: number | null;
   stock_quantity: number;
+  committed_quantity?: number;
+  available_quantity?: number;
   low_stock_threshold?: number;
+  reorder_point?: number;
   product_id?: string;
   category_id?: string;
   category_name?: string;
@@ -42,6 +32,26 @@ interface Product {
   tax_type_configured?: boolean;
   tax_type_label?: string;
   vendor_id?: string;
+  is_active?: boolean;
+}
+
+interface ProductActivity {
+  vendor: { id: string; name: string; phone?: string | null; email?: string | null; supplier_id?: string | null } | null;
+  sales: Array<{
+    date: string;
+    customer_name: string;
+    quantity: number;
+    price: number;
+    source: string;
+    document: string;
+  }>;
+  customer_prices: Array<{
+    customer_id: string;
+    customer_name: string;
+    price: number;
+    last_invoice_date: string | null;
+  }>;
+  price_groups: Array<{ id: string; name: string }>;
 }
 
 export default function Product360Page() {
@@ -50,6 +60,7 @@ export default function Product360Page() {
   const id = params?.id as string;
 
   const [product, setProduct] = useState<Product | null>(null);
+  const [activity, setActivity] = useState<ProductActivity | null>(null);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<TabId>('overview');
   const [showEditModal, setShowEditModal] = useState(false);
@@ -58,8 +69,12 @@ export default function Product360Page() {
   const fetchProductData = async () => {
     if (!id) return;
     try {
-      const res = await adminApi.get(`/products/${id}`);
+      const [res, act] = await Promise.all([
+        adminApi.get(`/products/${id}`),
+        adminApi.get(`/products/${id}/activity`).catch(() => ({ data: null })),
+      ]);
       setProduct(res.data);
+      setActivity(act.data || { vendor: null, sales: [], customer_prices: [], price_groups: [] });
     } catch (e) {
       toast.error('Failed to load product details');
     } finally {
@@ -81,10 +96,16 @@ export default function Product360Page() {
     );
   }
 
-  // Cost and margin info
-  const cost = product.cost_price || Math.round(product.price * 0.75 * 100) / 100;
-  const markupUsd = Math.round((product.price - cost) * 100) / 100;
-  const marginPct = Math.round(((product.price - cost) / product.price) * 1000) / 10;
+  const cost = product.cost_price != null && Number(product.cost_price) > 0 ? Number(product.cost_price) : null;
+  const markupUsd = cost != null ? Math.round((product.price - cost) * 100) / 100 : null;
+  const marginPct =
+    cost != null && product.price > 0 ? Math.round(((product.price - cost) / product.price) * 1000) / 10 : null;
+  const threshold = product.low_stock_threshold ?? product.reorder_point ?? 10;
+  const onHand = product.stock_quantity ?? 0;
+  const committed = product.committed_quantity ?? 0;
+  const available = product.available_quantity ?? Math.max(0, onHand - committed);
+  const reorderLabel = onHand <= 0 ? 'Out of stock' : onHand <= threshold ? 'Low stock' : 'In stock';
+  const unitsSold = (activity?.sales || []).reduce((sum, row) => sum + (row.quantity || 0), 0);
 
   // Liquid glass CSS
   const glassPanelClass = `bg-white border border-[#E2E8F0] rounded-lg p-5`;
@@ -95,8 +116,8 @@ export default function Product360Page() {
       
       {/* Top breadcrumb & quick actions */}
       <div className="flex items-center justify-between">
-        <Link href="/admin/products/active" className="inline-flex items-center gap-1.5 text-xs font-medium text-slate-400 hover:text-white transition-colors">
-          <ChevronLeft className="w-4 h-4" /> Products Directory
+        <Link href="/admin/products" className="inline-flex items-center gap-1.5 text-sm font-medium text-[#6B6C72] hover:text-[#1A1A1A] transition-colors">
+          <ChevronLeft className="w-4 h-4" /> Back to products
         </Link>
         <div className="flex items-center gap-2">
           <Link
@@ -127,25 +148,20 @@ export default function Product360Page() {
             </div>
             <div>
               <div className="flex items-center gap-2 flex-wrap">
-                <h1 className="text-2xl font-black text-white">{product.name}</h1>
-                <span className="text-[9px] bg-teal-500/10 text-teal-400 border border-teal-500/25 px-2 py-0.5 rounded-full font-bold uppercase tracking-wider">
-                  Category: {product.category_name || 'Electricals'}
-                </span>
-                <span className="text-[9px] bg-yellow-500/10 text-yellow-400 border border-yellow-500/25 px-2 py-0.5 rounded-full font-bold uppercase tracking-wider flex items-center gap-1">
-                  ABC Rank A
-                </span>
+                <h1 className="text-2xl font-semibold text-[#1A1A1A]">{product.name}</h1>
+                {product.category_name ? (
+                  <span className="text-[11px] bg-[#F4F5F8] text-[#393A3D] px-2 py-0.5 rounded font-medium">
+                    {product.category_name}
+                  </span>
+                ) : null}
               </div>
-              <p className="text-xs text-slate-500 mt-1">
-                Item ID: <span className="font-mono text-slate-300">{product.product_id || '—'}</span>
+              <p className="text-xs text-[#6B6C72] mt-1">
+                Item ID: <span className="font-mono text-[#1A1A1A]">{product.product_id || '—'}</span>
                 {' · '}
-                SKU: <span className="font-mono text-slate-300">{product.sku?.trim() || '—'}</span>
+                SKU: <span className="font-mono text-[#1A1A1A]">{product.sku?.trim() || '—'}</span>
               </p>
-              {product.sku?.trim() ? (
-                <p className="text-[11px] text-slate-500 mt-2">
-                  Manufacturer/vendor SKU is preserved. Internal codes use {'EDI-<product ID>'} (not UPC/EAN/GTIN).
-                </p>
-              ) : (
-                <div className="mt-3 flex flex-wrap items-center gap-2">
+              {!product.sku?.trim() && (
+                <div className="mt-3">
                   <button
                     type="button"
                     disabled={generatingSku || !product.id}
@@ -153,11 +169,7 @@ export default function Product360Page() {
                       setGeneratingSku(true);
                       try {
                         const { data } = await adminApi.post(`/products/${product.id}/generate-internal-sku`);
-                        toast.success(
-                          data?.created
-                            ? `Internal SKU assigned: ${data.sku}`
-                            : `Existing SKU preserved: ${data.sku}`
-                        );
+                        toast.success(data?.sku ? `SKU assigned: ${data.sku}` : 'SKU assigned');
                         await fetchProductData();
                       } catch {
                         toast.error('Failed to generate internal SKU');
@@ -169,66 +181,75 @@ export default function Product360Page() {
                   >
                     {generatingSku ? 'Generating…' : 'Generate internal SKU'}
                   </button>
-                  <span className="text-[11px] text-slate-500">Assigns {'EDI-<product ID>'} for scanning when no SKU exists.</span>
                 </div>
               )}
               
-              <div className="flex items-center gap-3 mt-4 text-[11px] text-slate-400">
-                <span>Tax type: <span className="font-semibold text-slate-200">{productTaxLabel(product)}</span></span>
-                <span className="text-slate-700">|</span>
-                <span>Active Status: <span className="font-semibold text-teal-400">Live on Web</span></span>
+              <div className="flex items-center gap-3 mt-4 text-[11px] text-[#6B6C72]">
+                <span>Tax type: <span className="font-semibold text-[#1A1A1A]">{productTaxLabel(product)}</span></span>
+                <span className="text-[#C7C7C7]">|</span>
+                <span>
+                  Website:{' '}
+                  <span className="font-semibold text-[#1A1A1A]">
+                    {product.is_active === false ? 'Hidden' : 'On website'}
+                  </span>
+                </span>
               </div>
             </div>
           </div>
 
           {/* Product metrics counters */}
-          <div className="grid grid-cols-2 xl:grid-cols-4 gap-4 p-4 bg-slate-950/40 rounded-2xl border border-white/5 w-full xl:w-auto xl:flex-1 min-w-0 shadow-sm">
+          <div className="grid grid-cols-2 xl:grid-cols-4 gap-4 p-4 bg-[#F4F5F8] rounded-lg border border-[#E3E5E8] w-full xl:w-auto xl:flex-1 min-w-0">
             <div>
-              <span className="text-[10px] font-bold text-slate-500 tracking-wider block uppercase">Warehouse Stock</span>
-              <span className="text-lg font-black text-white block mt-1">{product.stock_quantity.toLocaleString()} units</span>
+              <span className="text-[10px] font-bold text-[#6B6C72] tracking-wider block uppercase">On hand</span>
+              <span className="text-lg font-semibold text-[#1A1A1A] block mt-1">{onHand.toLocaleString()} units</span>
             </div>
             <div>
-              <span className="text-[10px] font-bold text-slate-500 tracking-wider block uppercase">Selling Price</span>
-              <span className="text-lg font-black text-teal-400 block mt-1">${product.price.toFixed(2)}</span>
+              <span className="text-[10px] font-bold text-[#6B6C72] tracking-wider block uppercase">Selling price</span>
+              <span className="text-lg font-semibold text-[#1A1A1A] block mt-1">${product.price.toFixed(2)}</span>
             </div>
             <div>
-              <span className="text-[10px] font-bold text-slate-500 tracking-wider block uppercase">Average Margin</span>
-              <span className="text-lg font-black text-white block mt-1">{marginPct}%</span>
+              <span className="text-[10px] font-bold text-[#6B6C72] tracking-wider block uppercase">Margin</span>
+              <span className="text-lg font-semibold text-[#1A1A1A] block mt-1">
+                {marginPct != null ? `${marginPct}%` : '—'}
+              </span>
             </div>
             <div>
-              <span className="text-[10px] font-bold text-slate-500 tracking-wider block uppercase">Reorder Status</span>
-              <span className="text-lg font-black text-rose-450 block mt-1">
-                {(product.stock_quantity) <= (product.low_stock_threshold || 10) ? (
-                  <span className="text-rose-400 flex items-center gap-1 text-sm font-bold"><AlertTriangle className="w-4 h-4" /> Low stock</span>
+              <span className="text-[10px] font-bold text-[#6B6C72] tracking-wider block uppercase">Stock status</span>
+              <span className="text-sm font-semibold block mt-1">
+                {reorderLabel === 'Low stock' || reorderLabel === 'Out of stock' ? (
+                  <span className="text-[#C81916] inline-flex items-center gap-1">
+                    <AlertTriangle className="w-4 h-4" /> {reorderLabel}
+                  </span>
                 ) : (
-                  <span className="text-emerald-400 text-sm font-semibold">Adequate</span>
+                  <span className="text-[#0B6B0B]">{reorderLabel}</span>
                 )}
               </span>
+              <span className="text-[11px] text-[#8D9096]">Alert at {threshold}</span>
             </div>
           </div>
         </div>
       </div>
 
       {/* Tabs Menu Section */}
-      <div className="flex flex-wrap gap-1.5 p-1 bg-slate-950/60 rounded-2xl border border-white/5 backdrop-blur-md">
+      <div className="flex flex-wrap gap-1 p-1 bg-[#F4F5F8] rounded-md border border-[#E3E5E8]">
         {(
           [
-            { id: 'overview', label: 'Item Overview' },
-            { id: 'inventory', label: 'Warehouse Levels' },
-            { id: 'pricing', label: 'Pricing Calculator' },
-            { id: 'sales', label: 'Sales History' },
-            { id: 'suppliers', label: 'Associated Suppliers' },
-            { id: 'analytics', label: 'Analytics (Velocity)' },
+            { id: 'overview', label: 'Overview' },
+            { id: 'inventory', label: 'Stock' },
+            { id: 'pricing', label: 'Pricing' },
+            { id: 'sales', label: 'Sales' },
+            { id: 'suppliers', label: 'Supplier' },
+            { id: 'analytics', label: 'Activity' },
           ] as const
         ).map((tab) => (
           <button
             key={tab.id}
             type="button"
             onClick={() => setActiveTab(tab.id)}
-            className={`px-4 py-2 rounded-xl text-xs font-semibold tracking-wide transition-all ${
+            className={`px-4 py-2 rounded text-sm font-medium transition-colors ${
               activeTab === tab.id
-                ? 'bg-gradient-to-b from-white/[0.15] to-white/[0.04] text-white border border-white/[0.08] shadow'
-                : 'text-slate-500 hover:text-slate-200'
+                ? 'bg-white text-[#1A1A1A] border border-[#E3E5E8] shadow-sm'
+                : 'text-[#6B6C72] hover:text-[#1A1A1A]'
             }`}
           >
             {tab.label}
@@ -243,134 +264,162 @@ export default function Product360Page() {
         {activeTab === 'overview' && (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-8 text-sm">
             <div className="space-y-4">
-              <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest pb-1.5 border-b border-white/5">Catalog Specifications</h3>
+              <h3 className="text-xs font-semibold text-[#6B6C72] uppercase tracking-wider pb-1.5 border-b border-[#E3E5E8]">Product</h3>
               <div className="grid grid-cols-2 gap-4">
-                <div><span className="text-slate-500 block text-[11px]">SKU / barcode</span><span className="font-mono text-slate-200">{product.sku?.trim() || '—'}</span></div>
-                <div><span className="text-slate-500 block text-[11px]">Product ID</span><span className="font-mono text-slate-200">{product.product_id || '—'}</span></div>
-                <div><span className="text-slate-500 block text-[11px]">Tax type</span><span className="font-semibold text-slate-200">{productTaxLabel(product)}</span></div>
+                <div><span className="text-[#6B6C72] block text-[11px]">SKU</span><span className="font-mono text-[#1A1A1A]">{product.sku?.trim() || '—'}</span></div>
+                <div><span className="text-[#6B6C72] block text-[11px]">Product ID</span><span className="font-mono text-[#1A1A1A]">{product.product_id || '—'}</span></div>
+                <div><span className="text-[#6B6C72] block text-[11px]">Tax type</span><span className="font-semibold text-[#1A1A1A]">{productTaxLabel(product)}</span></div>
               </div>
-              <div className="pt-2"><span className="text-slate-500 block text-[11px]">Sales Description</span><span className="text-slate-200 text-xs">{product.description || '—'}</span></div>
+              <div className="pt-2"><span className="text-[#6B6C72] block text-[11px]">Description</span><span className="text-[#1A1A1A] text-sm">{product.description || '—'}</span></div>
             </div>
           </div>
         )}
 
-        {/* Inventory Levels Tab */}
         {activeTab === 'inventory' && (
           <div className="space-y-4">
-            <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider pb-1.5 border-b border-white/5">Multi-Warehouse Allocation</h3>
+            <h3 className="text-xs font-semibold text-[#6B6C72] uppercase tracking-wider pb-1.5 border-b border-[#E3E5E8]">Stock</h3>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <div className="bg-slate-950/40 p-4 rounded-xl border border-white/5 flex items-center justify-between">
-                <div>
-                  <span className="text-xs text-slate-400 font-bold block mb-1">Philadelphia Main A</span>
-                  <span className="text-slate-500 text-[10px]">Rack Location: B4-S2</span>
-                </div>
-                <span className="text-lg font-black text-white">{Math.ceil(product.stock_quantity * 0.7)} units</span>
+              <div className="p-4 rounded-md border border-[#E3E5E8]">
+                <span className="text-xs text-[#6B6C72] block mb-1">On hand</span>
+                <span className="text-lg font-semibold text-[#1A1A1A]">{onHand.toLocaleString()} units</span>
               </div>
-              <div className="bg-slate-950/40 p-4 rounded-xl border border-white/5 flex items-center justify-between">
-                <div>
-                  <span className="text-xs text-slate-400 font-bold block mb-1">Dallas Fulfillment B</span>
-                  <span className="text-slate-500 text-[10px]">Rack Location: C1-S4</span>
-                </div>
-                <span className="text-lg font-black text-white">{Math.floor(product.stock_quantity * 0.3)} units</span>
+              <div className="p-4 rounded-md border border-[#E3E5E8]">
+                <span className="text-xs text-[#6B6C72] block mb-1">Committed to open orders</span>
+                <span className="text-lg font-semibold text-[#1A1A1A]">{committed.toLocaleString()} units</span>
               </div>
-              <div className="bg-slate-950/40 p-4 rounded-xl border border-white/5 flex items-center justify-between">
-                <div>
-                  <span className="text-xs text-slate-450 font-bold block mb-1">Reserved to Orders</span>
-                  <span className="text-slate-500 text-[10px]">Processing queues</span>
-                </div>
-                <span className="text-lg font-black text-yellow-400">4 units</span>
+              <div className="p-4 rounded-md border border-[#E3E5E8]">
+                <span className="text-xs text-[#6B6C72] block mb-1">Available</span>
+                <span className="text-lg font-semibold text-[#1A1A1A]">{available.toLocaleString()} units</span>
               </div>
             </div>
           </div>
         )}
 
-        {/* Pricing Calculator Tab */}
         {activeTab === 'pricing' && (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-8 text-sm">
             <div className="space-y-4">
-              <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider pb-1.5 border-b border-white/5">Cost and Tiered Pricing</h3>
+              <h3 className="text-xs font-semibold text-[#6B6C72] uppercase tracking-wider pb-1.5 border-b border-[#E3E5E8]">Catalog price</h3>
               <div className="grid grid-cols-2 gap-4">
-                <div><span className="text-slate-500 block text-[11px]">Primary Vendor Cost</span><span className="font-bold text-slate-200">${cost.toFixed(2)}</span></div>
-                <div><span className="text-slate-500 block text-[11px]">Standard retail price</span><span className="font-bold text-teal-400">${product.price.toFixed(2)}</span></div>
-                <div><span className="text-slate-500 block text-[11px]">Preferred Wholesale</span><span className="font-semibold text-slate-200">${(product.price * 0.85).toFixed(2)}</span></div>
-                <div><span className="text-slate-500 block text-[11px]">Contract Dealer</span><span className="font-semibold text-slate-200">${(product.price * 0.80).toFixed(2)}</span></div>
+                <div>
+                  <span className="text-[#6B6C72] block text-[11px]">Cost</span>
+                  <span className="font-semibold text-[#1A1A1A]">{cost != null ? `$${cost.toFixed(2)}` : '—'}</span>
+                </div>
+                <div>
+                  <span className="text-[#6B6C72] block text-[11px]">Selling price</span>
+                  <span className="font-semibold text-[#1A1A1A]">${product.price.toFixed(2)}</span>
+                </div>
               </div>
+              {activity?.price_groups?.length ? (
+                <div>
+                  <span className="text-[#6B6C72] block text-[11px] mb-1">Price groups</span>
+                  <ul className="text-sm text-[#1A1A1A] space-y-1">
+                    {activity.price_groups.map((g) => (
+                      <li key={g.id}>{g.name}</li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
             </div>
-            <div className="bg-slate-950/40 p-4 rounded-xl border border-white/5 space-y-2">
-              <h4 className="text-xs font-bold text-slate-400 uppercase tracking-widest">Margin overview</h4>
-              <div className="flex justify-between items-center text-xs">
-                <span>Profit Margins Margin ($):</span>
-                <span className="font-bold text-white">${markupUsd.toFixed(2)}</span>
-              </div>
-              <div className="flex justify-between items-center text-xs">
-                <span>Profit Margins Margin (%):</span>
-                <span className="font-black text-teal-400">{marginPct}%</span>
-              </div>
+            <div className="p-4 rounded-md border border-[#E3E5E8] space-y-3">
+              <h4 className="text-xs font-semibold text-[#6B6C72] uppercase">Margin</h4>
+              {cost != null ? (
+                <>
+                  <div className="flex justify-between text-sm">
+                    <span>Profit per unit</span>
+                    <span className="font-semibold">${markupUsd!.toFixed(2)}</span>
+                  </div>
+                  <div className="flex justify-between text-sm">
+                    <span>Margin</span>
+                    <span className="font-semibold">{marginPct}%</span>
+                  </div>
+                </>
+              ) : (
+                <p className="text-sm text-[#6B6C72]">Add a cost on the product to see margin.</p>
+              )}
+              {activity?.customer_prices?.length ? (
+                <div className="pt-3 border-t border-[#E3E5E8]">
+                  <h4 className="text-xs font-semibold text-[#6B6C72] uppercase mb-2">Last invoice price by customer</h4>
+                  <ul className="space-y-1 text-sm">
+                    {activity.customer_prices.map((row) => (
+                      <li key={row.customer_id} className="flex justify-between gap-3">
+                        <span className="truncate">{row.customer_name}</span>
+                        <span className="font-mono">${row.price.toFixed(2)}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ) : (
+                <p className="text-sm text-[#6B6C72] pt-2">No customer-specific prices yet. Those appear after the product is invoiced.</p>
+              )}
             </div>
           </div>
         )}
 
-        {/* Sales History Tab */}
         {activeTab === 'sales' && (
           <div className="space-y-4">
-            <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider pb-1.5 border-b border-white/5">Recent sales log</h3>
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs">
-                <thead>
-                  <tr className="border-b border-white/5 text-slate-500">
-                    <th className="py-2">Date</th>
-                    <th className="py-2">B2B Customer</th>
-                    <th className="py-2 text-right">Quantity</th>
-                    <th className="py-2 text-right">Selling Price</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr className="border-b border-white/5 hover:bg-white/[0.01]">
-                    <td className="py-2 text-slate-400">{new Date(Date.now() - 3600000 * 48).toLocaleDateString()}</td>
-                    <td className="py-2 text-white font-semibold">Orion B2B Traders</td>
-                    <td className="py-2 text-right font-mono">10 units</td>
-                    <td className="py-2 text-right font-bold">${product.price.toFixed(2)}</td>
-                  </tr>
-                  <tr className="border-b border-white/5 hover:bg-white/[0.01]">
-                    <td className="py-2 text-slate-400">{new Date(Date.now() - 3600000 * 96).toLocaleDateString()}</td>
-                    <td className="py-2 text-white font-semibold">ABC Trading Corp</td>
-                    <td className="py-2 text-right font-mono">4 units</td>
-                    <td className="py-2 text-right font-bold">${product.price.toFixed(2)}</td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
+            <h3 className="text-xs font-semibold text-[#6B6C72] uppercase tracking-wider pb-1.5 border-b border-[#E3E5E8]">Sales</h3>
+            {!activity?.sales?.length ? (
+              <p className="text-sm text-[#6B6C72]">No invoices, POS sales, or online orders for this product yet.</p>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-sm">
+                  <thead>
+                    <tr className="border-b border-[#E3E5E8] text-[#6B6C72] text-xs">
+                      <th className="py-2">Date</th>
+                      <th className="py-2">Customer</th>
+                      <th className="py-2">Document</th>
+                      <th className="py-2 text-right">Qty</th>
+                      <th className="py-2 text-right">Price</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {activity.sales.map((row, i) => (
+                      <tr key={`${row.document}-${i}`} className="border-b border-[#E3E5E8]">
+                        <td className="py-2 text-[#6B6C72]">{new Date(row.date).toLocaleDateString()}</td>
+                        <td className="py-2 text-[#1A1A1A]">{row.customer_name}</td>
+                        <td className="py-2 text-[#6B6C72]">{row.source} · {row.document}</td>
+                        <td className="py-2 text-right font-mono">{row.quantity}</td>
+                        <td className="py-2 text-right font-mono">${row.price.toFixed(2)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
         )}
 
-        {/* Suppliers Tab */}
         {activeTab === 'suppliers' && (
           <div className="space-y-4">
-            <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider pb-1.5 border-b border-white/5">Primary Supplier Vendor</h3>
-            <div className="bg-slate-950/40 p-4 rounded-xl border border-white/5 text-xs flex justify-between items-center">
-              <div>
-                <p className="font-bold text-slate-200">National Electrical Wholesale Co.</p>
-                <p className="text-[10px] text-slate-500">Contract Code: VEND-0982 | Lead Time: 5 days</p>
+            <h3 className="text-xs font-semibold text-[#6B6C72] uppercase tracking-wider pb-1.5 border-b border-[#E3E5E8]">Supplier</h3>
+            {!activity?.vendor ? (
+              <p className="text-sm text-[#6B6C72]">No supplier is linked to this product. Assign one when you edit the product.</p>
+            ) : (
+              <div className="p-4 rounded-md border border-[#E3E5E8] text-sm flex justify-between items-center gap-3">
+                <div>
+                  <p className="font-medium text-[#1A1A1A]">{activity.vendor.name}</p>
+                  <p className="text-xs text-[#6B6C72] mt-1">
+                    {[activity.vendor.supplier_id, activity.vendor.phone, activity.vendor.email].filter(Boolean).join(' · ') || 'Linked supplier'}
+                  </p>
+                </div>
+                <Link href="/admin/purchase-orders" className={glassButtonClass}>Purchase orders</Link>
               </div>
-              <Link href="/admin/purchase-orders" className={glassButtonClass}>Raise Procurement</Link>
-            </div>
+            )}
           </div>
         )}
 
-        {/* Analytics Tab */}
         {activeTab === 'analytics' && (
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs font-semibold text-slate-350">
-            <div className="bg-slate-950/40 p-4 rounded-xl border border-white/5">
-              <span className="text-[10px] font-bold text-slate-500 block uppercase mb-1">Inventory Turn Rate</span>
-              <p className="text-lg font-black text-white">4.8x / Year</p>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
+            <div className="p-4 rounded-md border border-[#E3E5E8]">
+              <span className="text-[11px] font-medium text-[#6B6C72] block uppercase mb-1">Units sold</span>
+              <p className="text-lg font-semibold text-[#1A1A1A]">{unitsSold.toLocaleString()}</p>
+              <p className="text-xs text-[#8D9096] mt-1">From invoices, POS, and online orders</p>
             </div>
-            <div className="bg-slate-950/40 p-4 rounded-xl border border-white/5">
-              <span className="text-[10px] font-bold text-slate-500 block uppercase mb-1">ABC Sales Velocity</span>
-              <p className="text-lg font-black text-teal-400">Class A (Fast Moving)</p>
-            </div>
-            <div className="bg-slate-950/40 p-4 rounded-xl border border-white/5">
-              <span className="text-[10px] font-bold text-slate-500 block uppercase mb-1">Purchase Frequency</span>
-              <p className="text-lg font-black text-white">High (Weekly Restock)</p>
+            <div className="p-4 rounded-md border border-[#E3E5E8]">
+              <span className="text-[11px] font-medium text-[#6B6C72] block uppercase mb-1">Last sold</span>
+              <p className="text-lg font-semibold text-[#1A1A1A]">
+                {activity?.sales?.[0]?.date ? new Date(activity.sales[0].date).toLocaleDateString() : '—'}
+              </p>
             </div>
           </div>
         )}

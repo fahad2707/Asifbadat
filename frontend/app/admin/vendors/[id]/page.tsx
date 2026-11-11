@@ -59,7 +59,11 @@ export default function SupplierDetailPage() {
   const [ledger, setLedger] = useState<LedgerEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
-  const [activeTab, setActiveTab] = useState<'transactions' | 'details' | 'documents'>('transactions');
+  const [activeTab, setActiveTab] = useState<'transactions' | 'details' | 'documents' | 'best-rates'>('transactions');
+  const [bestRates, setBestRates] = useState<
+    Array<{ product_id: string; product_name: string; unit_cost: number; po_number: string }>
+  >([]);
+  const [bestRatesLoading, setBestRatesLoading] = useState(false);
 
   const fetchData = async () => {
     setLoading(true);
@@ -83,6 +87,16 @@ export default function SupplierDetailPage() {
   useEffect(() => {
     if (id) fetchData();
   }, [id]);
+
+  useEffect(() => {
+    if (!id || activeTab !== 'best-rates') return;
+    setBestRatesLoading(true);
+    adminApi
+      .get('/vendors/best-rates', { params: { vendor_id: id } })
+      .then((res) => setBestRates(res.data?.rates || []))
+      .catch(() => toast.error('Failed to load best rates'))
+      .finally(() => setBestRatesLoading(false));
+  }, [id, activeTab]);
 
   const handleUploadDocuments = async (files: FileList | null) => {
     if (!files || !supplier) return;
@@ -198,6 +212,15 @@ export default function SupplierDetailPage() {
           </button>
           <button
             type="button"
+            onClick={() => setActiveTab('best-rates')}
+            className={`pb-2 text-xs font-bold uppercase tracking-wider transition-all border-b-2 ${
+              activeTab === 'best-rates' ? 'border-teal-500 text-teal-400' : 'border-transparent text-slate-500 hover:text-slate-350'
+            }`}
+          >
+            Best rates
+          </button>
+          <button
+            type="button"
             onClick={() => setActiveTab('documents')}
             className={`pb-2 text-xs font-bold uppercase tracking-wider transition-all border-b-2 ${
               activeTab === 'documents' ? 'border-teal-500 text-teal-400' : 'border-transparent text-slate-500 hover:text-slate-350'
@@ -248,6 +271,41 @@ export default function SupplierDetailPage() {
                 </tbody>
               </table>
             </div>
+          )}
+        </div>
+      )}
+
+      {activeTab === 'best-rates' && (
+        <div className="bg-white border border-[#E2E8F0] rounded-lg overflow-hidden">
+          <div className="px-4 py-3 border-b border-white/5 bg-slate-950/60">
+            <p className="text-xs font-bold uppercase tracking-wider text-slate-300">Products this supplier currently wins</p>
+            <p className="text-[10px] text-slate-500 mt-1">Lowest PO unit cost wins. If another supplier posts a cheaper PO, the product moves there.</p>
+          </div>
+          {bestRatesLoading ? (
+            <div className="flex justify-center py-12">
+              <div className="animate-spin rounded-full h-8 w-8 border-2 border-teal-500 border-t-transparent" />
+            </div>
+          ) : bestRates.length === 0 ? (
+            <div className="py-16 text-center text-slate-500 text-xs font-semibold">No winning rates yet. Receive a purchase order with unit costs first.</div>
+          ) : (
+            <table className="w-full border-collapse">
+              <thead className="bg-slate-950/60 text-slate-400 border-b border-white/5">
+                <tr>
+                  <th className="text-left py-3 px-4 text-[10px] font-bold uppercase tracking-wider">Product</th>
+                  <th className="text-right py-3 px-4 text-[10px] font-bold uppercase tracking-wider">Best unit cost</th>
+                  <th className="text-left py-3 px-4 text-[10px] font-bold uppercase tracking-wider">From PO</th>
+                </tr>
+              </thead>
+              <tbody>
+                {bestRates.map((row) => (
+                  <tr key={row.product_id} className="border-b border-white/5">
+                    <td className="py-3 px-4 text-xs text-slate-200 font-semibold">{row.product_name || row.product_id}</td>
+                    <td className="py-3 px-4 text-xs text-right font-mono font-bold">${Number(row.unit_cost).toFixed(2)}</td>
+                    <td className="py-3 px-4 text-xs font-mono text-slate-400">{row.po_number || '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           )}
         </div>
       )}

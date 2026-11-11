@@ -7,60 +7,20 @@ import Invoice from '../models/Invoice';
 import { authenticateAdmin, authenticateUser, AuthRequest } from '../middleware/auth';
 import { onlineCheckoutLimiter, onlineTrackLimiter } from '../middleware/rateLimit';
 import { logSecurityEvent } from '../utils/securityLog';
-import { httpErrorFromPayment, paymentApplication } from '../services/paymentApplication';
 import { isUserLinkedToApprovedCustomer } from '../utils/customerAccount';
 import Customer from '../models/Customer';
-import { createStockMovement, StockMovementWriteError } from '../utils/createStockMovement';
-import { StockMovementType } from '../shared/enums';
 import {
   checkoutPayloadMatches,
   formatOnlineOrderCreateResponse,
   isCheckoutSubmissionDuplicateKey,
   waitForCommittedCheckoutOrder,
 } from '../utils/onlineOrderIdempotency';
+import { DOC_PREFIX, nextPrefixedNumber } from '../utils/documentNumbers';
 
 const router = express.Router();
 
-/** Operational reference for OnlineOrder delivery SALE movements (mirrors wholesale Invoice). */
-const ONLINE_ORDER_REFERENCE_TYPE = 'OnlineOrder';
-
-type DeliveryLine = { product_id?: unknown; quantity?: unknown };
-
-function aggregateDeliveryInventoryQuantities(items: DeliveryLine[] | undefined): Map<string, number> {
-  const totals = new Map<string, number>();
-  for (const item of items || []) {
-    if (!item.product_id) continue;
-    const pid = String(item.product_id);
-    if (!mongoose.Types.ObjectId.isValid(pid)) continue;
-    const raw = item.quantity;
-    if (raw == null || raw === '') continue;
-    const qty = typeof raw === 'number' ? raw : Number(raw);
-    if (!Number.isFinite(qty) || !Number.isInteger(qty) || qty === 0) continue;
-    totals.set(pid, (totals.get(pid) || 0) + qty);
-  }
-  return totals;
-}
-
-function isSkippedProductType(productType: unknown): boolean {
-  return productType === 'service' || productType === 'non_inventory';
-}
-
-async function withDeliveryInventoryTransaction<T>(
-  work: (session: mongoose.ClientSession) => Promise<T>
-): Promise<T> {
-  const session = await mongoose.startSession();
-  session.startTransaction();
-  try {
-    const result = await work(session);
-    await session.commitTransaction();
-    return result;
-  } catch (error) {
-    await session.abortTransaction();
-    throw error;
-  } finally {
-    session.endSession();
-  }
-}
+const QUOTATION_REVIEW_ERROR =
+  'Website orders are reviewed as quotations. Draft a quotation, convert it to an invoice, then ship. Stock is deducted when the shipment is marked delivered.';
 
 const placeOrderSchema = z.object({
   checkout_submission_id: z.string().trim().min(8).max(128),
@@ -89,18 +49,15 @@ const placeOrderSchema = z.object({
 });
 
 async function getNextOrderNumber(): Promise<string> {
-  const last = await OnlineOrder.findOne().sort({ created_at: -1 }).lean();
-  if (!last) return 'WEB-0001';
-  const match = (last as any).order_number?.match(/WEB-(\d+)/);
-  const next = match ? parseInt(match[1]) + 1 : 1;
-  return `WEB-${String(next).padStart(4, '0')}`;
+  return nextPrefixedNumber(OnlineOrder, 'order_number', DOC_PREFIX.onlineOrder);
 }
 
-/** Phase 2M-A — adjacency-only OnlineOrder status machine (backend-enforced). */
+/** Website orders are quotations until converted. Only cancel is allowed from the order itself. */
 const ONLINE_ORDER_ALLOWED_TRANSITIONS: Record<string, readonly string[]> = {
-  confirmed: ['packed', 'cancelled'],
-  packed: ['dispatched', 'cancelled'],
-  dispatched: ['delivered', 'cancelled'],
+  confirmed: ['cancelled'],
+  quoted: ['cancelled'],
+  packed: ['cancelled'],
+  dispatched: ['cancelled'],
 };
 
 function isAllowedOnlineOrderTransition(from: string, to: string): boolean {
@@ -197,7 +154,7 @@ router.post('/', onlineCheckoutLimiter, authenticateUser, async (req: AuthReques
         tax_amount: Math.round(totalTax * 100) / 100,
         total_amount: totalAmount,
         payment_method: body.payment_method,
-        payment_status: body.payment_method === 'card' ? 'paid' : 'pending',
+        payment_status: 'pending',
         card_last4: body.card_last4 || undefined,
         card_brand: body.card_brand || undefined,
         status: 'confirmed',
@@ -262,6 +219,7 @@ router.get('/track/:orderNumber', onlineTrackLimiter, async (req, res) => {
       order_number: o.order_number,
       customer_name: o.customer_name,
       status: o.status,
+      quotation_number: o.quotation_number,
       items: o.items,
       subtotal: o.subtotal,
       tax_amount: o.tax_amount,
@@ -307,6 +265,8 @@ router.get('/my-orders', authenticateUser, async (req: AuthRequest, res) => {
         payment_method: o.payment_method,
         payment_status: o.payment_status,
         status: o.status,
+        quotation_id: o.quotation_id?.toString(),
+        quotation_number: o.quotation_number,
         status_history: (o.status_history || []).map((h: any) => ({
           status: h.status,
           timestamp: h.timestamp,
@@ -348,6 +308,9 @@ router.get('/', authenticateAdmin, async (req: AuthRequest, res) => {
       status: o.status,
       status_history: o.status_history,
       invoice_id: o.invoice_id?.toString(),
+      quotation_id: o.quotation_id?.toString(),
+      quotation_number: o.quotation_number,
+      customer_id: o.customer_id?.toString(),
       created_at: o.created_at,
     })));
   } catch (error) {
@@ -356,11 +319,63 @@ router.get('/', authenticateAdmin, async (req: AuthRequest, res) => {
   }
 });
 
-// Admin: update order status
+const linkQuotationSchema = z.object({
+  quotation_id: z.string().min(1),
+  quotation_number: z.string().trim().max(80).optional(),
+});
+
+/** Admin: attach a quotation (same lightbox as RFQ). Does not invoice or take stock. */
+router.post('/:id/link-quotation', authenticateAdmin, async (req: AuthRequest, res) => {
+  try {
+    if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+      return res.status(404).json({ error: 'Order not found' });
+    }
+    const data = linkQuotationSchema.parse(req.body);
+    if (!mongoose.Types.ObjectId.isValid(data.quotation_id)) {
+      return res.status(400).json({ error: 'Invalid quotation' });
+    }
+    const quote = await Invoice.findById(data.quotation_id).select('invoice_type invoice_number').lean();
+    if (!quote || (quote as { invoice_type?: string }).invoice_type !== 'quotation') {
+      return res.status(400).json({ error: 'That document is not a quotation' });
+    }
+    const quotationNumber =
+      data.quotation_number?.trim() || (quote as { invoice_number?: string }).invoice_number || '';
+    const updated = await OnlineOrder.findOneAndUpdate(
+      { _id: req.params.id, status: { $nin: ['cancelled', 'delivered'] } },
+      {
+        $set: {
+          quotation_id: data.quotation_id,
+          quotation_number: quotationNumber,
+          status: 'quoted',
+        },
+        $push: { status_history: { status: 'quoted', timestamp: new Date() } },
+      },
+      { new: true }
+    );
+    if (!updated) {
+      const existing = await OnlineOrder.findById(req.params.id).select('status').lean();
+      if (!existing) return res.status(404).json({ error: 'Order not found' });
+      return res.status(400).json({ error: 'This order can no longer be linked to a quotation' });
+    }
+    res.json({
+      ok: true,
+      quotation_id: data.quotation_id,
+      quotation_number: quotationNumber,
+    });
+  } catch (error: any) {
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({ error: error.errors[0]?.message || 'Invalid request' });
+    }
+    console.error('Link online-order quotation:', error);
+    res.status(500).json({ error: 'Failed to link quotation' });
+  }
+});
+
+// Admin: cancel (or legacy status). Packed/dispatched/delivered are not used for new website orders.
 router.put('/:id/status', authenticateAdmin, async (req: AuthRequest, res) => {
   try {
     const { status } = req.body;
-    const validStatuses = ['confirmed', 'packed', 'dispatched', 'delivered', 'cancelled'];
+    const validStatuses = ['confirmed', 'quoted', 'packed', 'dispatched', 'delivered', 'cancelled'];
     if (!validStatuses.includes(status)) {
       return res.status(400).json({ error: 'Invalid status' });
     }
@@ -377,207 +392,18 @@ router.put('/:id/status', authenticateAdmin, async (req: AuthRequest, res) => {
       return res.status(400).json({ error: 'Cancelled orders cannot be modified' });
     }
 
+    if (status === 'delivered' || status === 'packed' || status === 'dispatched' || status === 'quoted') {
+      return res.status(400).json({
+        error: status === 'quoted' ? 'Link a quotation instead of setting quoted directly' : QUOTATION_REVIEW_ERROR,
+      });
+    }
+
     if (!isAllowedOnlineOrderTransition(fromStatus, status)) {
       return res.status(400).json({
         error: `Invalid status transition from ${fromStatus} to ${status}`,
       });
     }
 
-    // Delivered: invoice + payment stay outside Mongo txn (paymentApplication has no session).
-    // Stock decrement + SALE movement + delivered claim commit together or roll back together.
-    // Claim requires status === 'dispatched' so a concurrent cancel cannot be overwritten later,
-    // and a cancel-first race causes claim failure → existing compensation.
-    if (status === 'delivered') {
-      const invoiceNumber = `INV-WEB-${order.order_number.replace('WEB-', '')}`;
-      const LOCATION_OF_SALE = '511 W Germantown Pike, Plymouth Meeting, PA 19462-1303';
-      let inv;
-      try {
-        inv = await Invoice.create({
-          invoice_number: invoiceNumber,
-          customer_name: order.customer_name,
-          customer_phone: order.customer_phone,
-          customer_email: order.customer_email,
-          customer_address: [order.address_line1, order.address_line2, order.city, order.state, order.zip].filter(Boolean).join(', '),
-          location_of_sale: LOCATION_OF_SALE,
-          invoice_type: 'invoice',
-          invoice_date: new Date(),
-          due_date: new Date(),
-          subtotal_amount: order.subtotal,
-          tax_amount: order.tax_amount,
-          total_amount: order.total_amount,
-          amount_paid: 0,
-          terms: 'Paid',
-          payment_status: 'unpaid',
-          source: 'ONLINE',
-          items: order.items.map((i: any) => ({
-            product_id: i.product_id,
-            product_name: i.product_name,
-            quantity: i.quantity,
-            price: i.price,
-            subtotal: i.subtotal,
-          })),
-        });
-      } catch (invErr) {
-        console.error('Auto invoice error:', invErr);
-        return res.status(500).json({ error: 'Failed to create invoice for delivered order' });
-      }
-
-      let receiptId = '';
-      try {
-        const applied = await paymentApplication.applyPaymentToInvoice({
-          invoiceId: (inv as any)._id.toString(),
-          amount: order.total_amount,
-          paymentMethod: order.payment_method === 'cod' ? 'COD' : 'Credit Card',
-          customerName: order.customer_name,
-        });
-        receiptId = String(applied?.receipt?.id || '').trim();
-      } catch (payErr) {
-        await Invoice.findByIdAndDelete((inv as any)._id).catch((delErr) => {
-          console.error('Rollback newly created delivery invoice failed:', delErr);
-        });
-        const mapped = httpErrorFromPayment(payErr);
-        if (mapped) return res.status(mapped.status).json(mapped.body);
-        console.error('Delivery payment application error:', payErr);
-        return res.status(500).json({ error: 'Failed to apply payment for delivered order' });
-      }
-
-      const invoiceId = (inv as any)._id as mongoose.Types.ObjectId;
-      const setFields: Record<string, unknown> = {
-        status: 'delivered',
-        invoice_id: invoiceId,
-      };
-      if (order.payment_method === 'cod') {
-        setFields.payment_status = 'paid';
-      }
-
-      try {
-        await withDeliveryInventoryTransaction(async (session) => {
-          const claimed = await OnlineOrder.findOneAndUpdate(
-            {
-              _id: order._id,
-              status: 'dispatched',
-            },
-            {
-              $set: setFields,
-              $push: { status_history: { status: 'delivered', timestamp: new Date() } },
-            },
-            { session, new: true }
-          );
-          if (!claimed) {
-            throw Object.assign(
-              new Error('Order is no longer dispatched; delivery claim failed'),
-              { status: 400 }
-            );
-          }
-
-          const qtyByProduct = aggregateDeliveryInventoryQuantities(order.items as DeliveryLine[]);
-          const adminId =
-            typeof req.userId === 'string' && mongoose.Types.ObjectId.isValid(req.userId)
-              ? req.userId
-              : undefined;
-
-          for (const [productId, qty] of qtyByProduct) {
-            if (qty <= 0) continue;
-            const product = await Product.findById(productId).session(session);
-            if (!product) {
-              throw Object.assign(new Error('Product not found for online order delivery'), {
-                status: 400,
-              });
-            }
-            if (isSkippedProductType((product as any).product_type)) continue;
-
-            const delta = -qty;
-            const updated = await Product.findOneAndUpdate(
-              { _id: productId },
-              { $inc: { stock_quantity: delta } },
-              { session, new: true }
-            );
-            if (!updated) {
-              throw new Error('Product not found during delivery inventory update');
-            }
-            const after = Number((updated as any).stock_quantity);
-            const before = after - delta;
-            await createStockMovement({
-              session,
-              productId,
-              movementType: StockMovementType.SALE,
-              quantityBefore: before,
-              quantityChange: delta,
-              quantityAfter: after,
-              referenceType: ONLINE_ORDER_REFERENCE_TYPE,
-              referenceId: order._id as mongoose.Types.ObjectId,
-              referenceNumber: order.order_number,
-              reason: `Online Order ${order.order_number} delivered`,
-              adminId,
-            });
-          }
-        });
-      } catch (deliveryErr: any) {
-        // Inventory txn already aborted. Compensate accounting outside the session.
-        if (!receiptId) {
-          console.error('Delivery inventory failed but payment receipt id is missing', {
-            orderId: order._id?.toString?.(),
-            invoiceId: invoiceId.toString(),
-            deliveryError: deliveryErr?.message || deliveryErr,
-          });
-          return res.status(500).json({
-            error: 'Delivery failed after payment; receipt id missing — manual accounting cleanup required',
-          });
-        }
-
-        try {
-          await paymentApplication.deleteReceiptLifecycle(receiptId);
-        } catch (compErr) {
-          console.error('Delivery accounting compensation failed (receipt still applied)', {
-            orderId: order._id?.toString?.(),
-            invoiceId: invoiceId.toString(),
-            receiptId,
-            deliveryError: deliveryErr?.message || deliveryErr,
-            compensationError: (compErr as Error)?.message || compErr,
-          });
-          const mapped = httpErrorFromPayment(compErr);
-          if (mapped) {
-            return res.status(500).json({
-              error: 'Delivery failed after payment; receipt compensation failed — manual cleanup required',
-              detail: mapped.body?.error || mapped.body,
-            });
-          }
-          return res.status(500).json({
-            error: 'Delivery failed after payment; receipt compensation failed — manual cleanup required',
-          });
-        }
-
-        try {
-          await Invoice.findByIdAndDelete(invoiceId);
-        } catch (delErr) {
-          console.error('Delivery accounting compensation: unpaid invoice delete failed', {
-            orderId: order._id?.toString?.(),
-            invoiceId: invoiceId.toString(),
-            receiptId,
-            deliveryError: deliveryErr?.message || deliveryErr,
-            invoiceDeleteError: (delErr as Error)?.message || delErr,
-          });
-          return res.status(500).json({
-            error: 'Delivery failed after payment; receipt reversed but unpaid invoice delete failed — manual cleanup required',
-          });
-        }
-
-        if (deliveryErr instanceof StockMovementWriteError) {
-          return res.status(deliveryErr.status).json({ error: deliveryErr.message });
-        }
-        if (deliveryErr?.status === 400) {
-          return res.status(400).json({
-            error: deliveryErr.message || 'Order is no longer dispatched; delivery claim failed',
-          });
-        }
-        console.error('Delivery inventory transaction error:', deliveryErr);
-        return res.status(500).json({ error: 'Failed to update status' });
-      }
-
-      return res.json({ message: 'Order marked as delivered', status: 'delivered' });
-    }
-
-    // Non-delivery transitions: conditional claim only — never stale document.save().
     const updated = await OnlineOrder.findOneAndUpdate(
       { _id: order._id, status: fromStatus },
       {
@@ -599,18 +425,18 @@ router.put('/:id/status', authenticateAdmin, async (req: AuthRequest, res) => {
   }
 });
 
-// Admin: get order summary counts
 router.get('/summary', authenticateAdmin, async (req: AuthRequest, res) => {
   try {
-    const [confirmed, packed, dispatched, delivered, cancelled, total] = await Promise.all([
+    const [confirmed, quoted, packed, dispatched, delivered, cancelled, total] = await Promise.all([
       OnlineOrder.countDocuments({ status: 'confirmed' }),
+      OnlineOrder.countDocuments({ status: 'quoted' }),
       OnlineOrder.countDocuments({ status: 'packed' }),
       OnlineOrder.countDocuments({ status: 'dispatched' }),
       OnlineOrder.countDocuments({ status: 'delivered' }),
       OnlineOrder.countDocuments({ status: 'cancelled' }),
       OnlineOrder.countDocuments(),
     ]);
-    res.json({ confirmed, packed, dispatched, delivered, cancelled, total });
+    res.json({ confirmed, quoted, packed, dispatched, delivered, cancelled, total });
   } catch (error) {
     res.status(500).json({ error: 'Failed to get summary' });
   }

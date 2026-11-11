@@ -3,7 +3,25 @@ import mongoose from 'mongoose';
 import { z } from 'zod';
 import CreditMemo from '../models/CreditMemo';
 import { authenticateAdmin, AuthRequest } from '../../../middleware/auth';
-import { approveCreditMemo, cancelCreditMemo, generateCreditMemoNumber, CreditMemoInventoryError } from '../services/creditMemoService';
+import {
+  approveCreditMemo,
+  cancelCreditMemo,
+  generateCreditMemoNumber,
+  markCreditMemoDeliveredToVendor,
+  markCreditMemoDispatched,
+  markCreditMemoReceived,
+  CreditMemoInventoryError,
+} from '../services/creditMemoService';
+import {
+  CreditMemoFromInvoiceError,
+  buildValidatedCustomerCreditItems,
+  loadCustomerInvoicesForCredit,
+} from '../services/creditMemoFromInvoice';
+import {
+  CreditMemoFromPoError,
+  buildValidatedVendorCreditItems,
+  loadVendorPosForCredit,
+} from '../services/creditMemoFromPurchaseOrder';
 import { buildBusinessDocumentPdf } from '../../../utils/businessDocPdf';
 import { sendPdfResponse } from '../../../utils/pdfHelpers';
 
@@ -34,6 +52,9 @@ async function generateCreditMemoPDFBuffer(cm: any): Promise<Buffer> {
       { label: 'Date', value: created },
       { label: 'Reason', value: String(cm.reason || '—').replace(/_/g, ' ') },
       { label: 'Status', value: String(cm.status || '—') },
+      ...(cm.reference_invoice_id?.invoice_number
+        ? [{ label: 'Invoice', value: String(cm.reference_invoice_id.invoice_number) }]
+        : []),
     ],
     items,
     totals: [
@@ -62,6 +83,7 @@ const itemSchema = z.object({
 const createSchema = z.object({
   type: z.enum(['VENDOR', 'CUSTOMER']),
   reference_invoice_id: z.string().optional(),
+  reference_purchase_order_id: z.string().optional(),
   reference_shipment_id: z.string().optional(),
   vendor_id: z.string().optional(),
   customer_id: z.string().optional(),
@@ -73,8 +95,47 @@ const createSchema = z.object({
 });
 
 // Generate credit memo number
-router.get('/generate-number', authenticateAdmin, (req, res) => {
-  res.json({ credit_memo_number: generateCreditMemoNumber() });
+router.get('/generate-number', authenticateAdmin, async (req, res) => {
+  try {
+    const type = String(req.query.type || '').toUpperCase() === 'VENDOR' ? 'VENDOR' : 'CUSTOMER';
+    res.json({ credit_memo_number: await generateCreditMemoNumber(type) });
+  } catch {
+    res.status(500).json({ error: 'Failed to generate credit memo number' });
+  }
+});
+
+router.get('/customer-invoices', authenticateAdmin, async (req: AuthRequest, res) => {
+  try {
+    const customerId = typeof req.query.customer_id === 'string' ? req.query.customer_id : '';
+    if (!mongoIdOrUndef(customerId)) {
+      return res.status(400).json({ error: 'Select a customer' });
+    }
+    const invoices = await loadCustomerInvoicesForCredit(customerId);
+    res.json({ invoices });
+  } catch (e: any) {
+    if (e instanceof CreditMemoFromInvoiceError) {
+      return res.status(e.status).json({ error: e.message });
+    }
+    console.error('Customer invoices for credit:', e);
+    res.status(500).json({ error: 'Failed to load customer invoices' });
+  }
+});
+
+router.get('/vendor-pos', authenticateAdmin, async (req: AuthRequest, res) => {
+  try {
+    const vendorId = typeof req.query.vendor_id === 'string' ? req.query.vendor_id : '';
+    if (!mongoIdOrUndef(vendorId)) {
+      return res.status(400).json({ error: 'Select a supplier' });
+    }
+    const purchase_orders = await loadVendorPosForCredit(vendorId);
+    res.json({ purchase_orders });
+  } catch (e: any) {
+    if (e instanceof CreditMemoFromPoError) {
+      return res.status(e.status).json({ error: e.message });
+    }
+    console.error('Vendor POs for credit:', e);
+    res.status(500).json({ error: 'Failed to load purchase orders' });
+  }
 });
 
 // List credit memos
@@ -93,6 +154,7 @@ router.get('/', authenticateAdmin, async (req: AuthRequest, res) => {
         .populate('vendor_id', 'name supplier_id')
         .populate('customer_id', 'name phone')
         .populate('reference_invoice_id', 'invoice_number total_amount')
+        .populate('reference_purchase_order_id', 'po_number total_amount')
         .sort({ created_at: -1 })
         .skip(skip)
         .limit(Number(limit))
@@ -106,6 +168,9 @@ router.get('/', authenticateAdmin, async (req: AuthRequest, res) => {
         credit_memo_number: cm.credit_memo_number,
         type: cm.type,
         reference_invoice_id: cm.reference_invoice_id?._id?.toString(),
+        reference_invoice_number: cm.reference_invoice_id?.invoice_number,
+        reference_purchase_order_id: cm.reference_purchase_order_id?._id?.toString(),
+        reference_po_number: cm.reference_purchase_order_id?.po_number,
         reference_shipment_id: cm.reference_shipment_id?.toString(),
         vendor_id: cm.vendor_id?._id?.toString(),
         vendor_name: cm.vendor_id?.name,
@@ -121,6 +186,9 @@ router.get('/', authenticateAdmin, async (req: AuthRequest, res) => {
         notes: cm.notes,
         created_at: cm.created_at,
         approved_at: cm.approved_at,
+        received_at: cm.received_at,
+        dispatched_at: cm.dispatched_at,
+        delivered_at: cm.delivered_at,
         items: cm.items,
       })),
       pagination: { page: Number(page), limit: Number(limit), total, total_pages: Math.ceil(total / Number(limit)) },
@@ -137,6 +205,7 @@ router.get('/:id/pdf', authenticateAdmin, async (req: AuthRequest, res) => {
     const cm = await CreditMemo.findById(req.params.id)
       .populate('vendor_id', 'name')
       .populate('customer_id', 'name')
+      .populate('reference_invoice_id', 'invoice_number')
       .lean();
     if (!cm) return res.status(404).json({ error: 'Credit memo not found' });
     const buffer = await generateCreditMemoPDFBuffer(cm);
@@ -155,6 +224,7 @@ router.get('/:id', authenticateAdmin, async (req: AuthRequest, res) => {
       .populate('vendor_id')
       .populate('customer_id')
       .populate('reference_invoice_id')
+      .populate('reference_purchase_order_id', 'po_number')
       .populate('items.product_id', 'name sku barcode')
       .lean();
     if (!cm) return res.status(404).json({ error: 'Credit memo not found' });
@@ -164,6 +234,9 @@ router.get('/:id', authenticateAdmin, async (req: AuthRequest, res) => {
       credit_memo_number: c.credit_memo_number,
       type: c.type,
       reference_invoice_id: c.reference_invoice_id?._id?.toString(),
+      reference_invoice_number: c.reference_invoice_id?.invoice_number,
+      reference_purchase_order_id: c.reference_purchase_order_id?._id?.toString(),
+      reference_po_number: c.reference_purchase_order_id?.po_number,
       reference_shipment_id: c.reference_shipment_id?.toString(),
       vendor_id: c.vendor_id?._id?.toString(),
       vendor_name: c.vendor_id?.name,
@@ -181,6 +254,9 @@ router.get('/:id', authenticateAdmin, async (req: AuthRequest, res) => {
       notes: c.notes,
       created_at: c.created_at,
       approved_at: c.approved_at,
+      received_at: c.received_at,
+      dispatched_at: c.dispatched_at,
+      delivered_at: c.delivered_at,
       items: c.items,
     });
   } catch (e) {
@@ -205,7 +281,49 @@ router.post('/', authenticateAdmin, async (req: AuthRequest, res) => {
       }
     }
 
-    const items = data.items.map((i) => {
+    let sourceItems = data.items;
+    let affectsInventory = data.affects_inventory;
+    let referenceInvoiceId = mongoIdOrUndef(data.reference_invoice_id);
+    let referencePurchaseOrderId = mongoIdOrUndef(data.reference_purchase_order_id);
+    let extraNotes = '';
+    if (data.type === 'VENDOR') {
+      if (!referencePurchaseOrderId) {
+        return res.status(400).json({ error: 'Choose the purchase order this credit is for' });
+      }
+      const built = await buildValidatedVendorCreditItems({
+        vendorId: mongoIdOrUndef(data.vendor_id) as string,
+        purchaseOrderId: referencePurchaseOrderId,
+        reason: data.reason,
+        requested: data.items.map((i) => ({
+          product_id: i.product_id,
+          quantity: i.quantity,
+          unit_price: i.unit_price,
+        })),
+      });
+      sourceItems = built.items;
+      affectsInventory = built.affects_inventory;
+      extraNotes = built.po_number ? `PO ${built.po_number}` : '';
+    }
+    if (data.type === 'CUSTOMER') {
+      if (!referenceInvoiceId) {
+        return res.status(400).json({ error: 'Choose the invoice this credit is for' });
+      }
+      const built = await buildValidatedCustomerCreditItems({
+        customerId: mongoIdOrUndef(data.customer_id) as string,
+        invoiceId: referenceInvoiceId,
+        reason: data.reason,
+        requested: data.items.map((i) => ({
+          product_id: i.product_id,
+          quantity: i.quantity,
+          unit_price: i.unit_price,
+        })),
+      });
+      sourceItems = built.items;
+      affectsInventory = built.affects_inventory;
+      extraNotes = built.invoice_number ? `Invoice ${built.invoice_number}` : '';
+    }
+
+    const items = sourceItems.map((i) => {
       const taxAmount = (i.quantity * i.unit_price * (i.tax_percent || 0)) / 100;
       const total = i.quantity * i.unit_price + taxAmount;
       return {
@@ -221,21 +339,22 @@ router.post('/', authenticateAdmin, async (req: AuthRequest, res) => {
     const subtotal = items.reduce((s, i) => s + i.quantity * i.unit_price, 0);
     const tax_amount = items.reduce((s, i) => s + i.tax_amount, 0);
     const total_amount = subtotal + tax_amount;
-    const referenceInvoiceId = mongoIdOrUndef(data.reference_invoice_id);
     let notes = data.notes || '';
     if (data.reference_invoice_id && !referenceInvoiceId) {
       notes = [notes, `Reference: ${data.reference_invoice_id}`].filter(Boolean).join('\n');
     }
+    if (extraNotes) notes = [notes, extraNotes].filter(Boolean).join('\n');
 
     const cm = await CreditMemo.create({
-      credit_memo_number: generateCreditMemoNumber(),
+      credit_memo_number: await generateCreditMemoNumber(data.type),
       type: data.type,
       reference_invoice_id: referenceInvoiceId,
+      reference_purchase_order_id: referencePurchaseOrderId,
       reference_shipment_id: mongoIdOrUndef(data.reference_shipment_id),
       vendor_id: data.type === 'VENDOR' ? mongoIdOrUndef(data.vendor_id) : undefined,
       customer_id: data.type === 'CUSTOMER' ? mongoIdOrUndef(data.customer_id) : undefined,
       reason: data.reason,
-      affects_inventory: data.affects_inventory,
+      affects_inventory: affectsInventory,
       subtotal,
       tax_amount,
       total_amount,
@@ -255,6 +374,9 @@ router.post('/', authenticateAdmin, async (req: AuthRequest, res) => {
       created_at: cm.created_at,
     });
   } catch (e: any) {
+    if (e instanceof CreditMemoFromInvoiceError) return res.status(e.status).json({ error: e.message });
+    if (e instanceof CreditMemoFromPoError) return res.status(e.status).json({ error: e.message });
+    if (e instanceof CreditMemoInventoryError) return res.status(e.status).json({ error: e.message });
     if (e.name === 'ZodError') return res.status(400).json({ error: e.errors?.[0]?.message || 'Validation error' });
     if (e.name === 'CastError' || e.name === 'ValidationError') {
       return res.status(400).json({ error: e.message || 'Invalid credit memo data' });
@@ -318,6 +440,45 @@ router.put('/:id', authenticateAdmin, async (req: AuthRequest, res) => {
 });
 
 // Approve
+router.post('/:id/mark-dispatched', authenticateAdmin, async (req: AuthRequest, res) => {
+  try {
+    const result = await markCreditMemoDispatched(req.params.id, req.userId!);
+    if (!result.success) return res.status(400).json({ error: result.error });
+    res.json({ success: true, message: 'Return marked dispatched' });
+  } catch (e: any) {
+    if (e instanceof CreditMemoInventoryError) {
+      return res.status(e.status).json({ error: e.message });
+    }
+    console.error('Mark credit memo dispatched:', e);
+    res.status(500).json({ error: 'Failed to mark dispatched' });
+  }
+});
+
+router.post('/:id/mark-delivered', authenticateAdmin, async (req: AuthRequest, res) => {
+  try {
+    const result = await markCreditMemoDeliveredToVendor(req.params.id, req.userId!);
+    if (!result.success) return res.status(400).json({ error: result.error });
+    res.json({ success: true, message: 'Marked delivered to supplier' });
+  } catch (e) {
+    console.error('Mark credit memo delivered:', e);
+    res.status(500).json({ error: 'Failed to mark delivered' });
+  }
+});
+
+router.post('/:id/mark-received', authenticateAdmin, async (req: AuthRequest, res) => {
+  try {
+    const result = await markCreditMemoReceived(req.params.id, req.userId!);
+    if (!result.success) return res.status(400).json({ error: result.error });
+    res.json({ success: true, message: 'Return marked received' });
+  } catch (e: any) {
+    if (e instanceof CreditMemoInventoryError) {
+      return res.status(e.status).json({ error: e.message });
+    }
+    console.error('Mark credit memo received:', e);
+    res.status(500).json({ error: 'Failed to mark received' });
+  }
+});
+
 router.post('/:id/approve', authenticateAdmin, async (req: AuthRequest, res) => {
   try {
     const result = await approveCreditMemo(req.params.id, req.userId!);

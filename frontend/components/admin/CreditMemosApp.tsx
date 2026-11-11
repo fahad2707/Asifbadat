@@ -13,6 +13,8 @@ import { exportCreditMemosToExcel } from '@/lib/export-credit-memos-excel';
 import { toastBarcodeNotFound, toastProductAdded } from '@/lib/barcode-feedback';
 
 import CreditMemoDrawer from '@/components/admin/CreditMemoDrawer';
+import CustomerCreditMemoLightbox from '@/components/admin/CustomerCreditMemoLightbox';
+import VendorCreditMemoLightbox from '@/components/admin/VendorCreditMemoLightbox';
 import { moneyOut, moneyPlain } from '@/lib/moneyTone';
 
 interface CreditMemoItem {
@@ -30,6 +32,8 @@ interface CreditMemo {
   credit_memo_number: string;
   type: 'VENDOR' | 'CUSTOMER';
   reference_invoice_id?: string;
+  reference_invoice_number?: string;
+  reference_po_number?: string;
   vendor_id?: string;
   vendor_name?: string;
   customer_id?: string;
@@ -58,6 +62,9 @@ export default function CreditMemosApp({ lockedType }: { lockedType: 'VENDOR' | 
   const [statusFilter, setStatusFilter] = useState<string>('');
   const [search, setSearch] = useState('');
   const [showModal, setShowModal] = useState(false);
+  const [customerWizardOpen, setCustomerWizardOpen] = useState(false);
+  const [wizardCustomerId, setWizardCustomerId] = useState('');
+  const [vendorWizardOpen, setVendorWizardOpen] = useState(false);
   const [editId, setEditId] = useState<string | null>(null);
   const [detailId, setDetailId] = useState<string | null>(null);
   const [vendors, setVendors] = useState<{ id: string; name: string }[]>([]);
@@ -113,8 +120,16 @@ export default function CreditMemosApp({ lockedType }: { lockedType: 'VENDOR' | 
     const newParam = searchParams?.get('new');
     const customerId = searchParams?.get('customer_id');
     if (newParam !== '1') return;
-    // Quick command (/admin/credit-memos?new=1) opens a blank memo; a customer_id preselects the customer.
-    if (customerId) setForm((f) => ({ ...f, type: lockedType === 'VENDOR' ? 'VENDOR' : 'CUSTOMER', customer_id: lockedType === 'CUSTOMER' ? customerId : f.customer_id }));
+    if (lockedType === 'CUSTOMER') {
+      setWizardCustomerId(customerId || '');
+      setCustomerWizardOpen(true);
+      return;
+    }
+    if (lockedType === 'VENDOR') {
+      setVendorWizardOpen(true);
+      return;
+    }
+    if (customerId) setForm((f) => ({ ...f, type: 'VENDOR', customer_id: f.customer_id }));
     setShowModal(true);
   }, [searchParams, lockedType]);
 
@@ -198,6 +213,15 @@ export default function CreditMemosApp({ lockedType }: { lockedType: 'VENDOR' | 
 
   const openNew = () => {
     setEditId(null);
+    if (lockedType === 'CUSTOMER') {
+      setWizardCustomerId('');
+      setCustomerWizardOpen(true);
+      return;
+    }
+    if (lockedType === 'VENDOR') {
+      setVendorWizardOpen(true);
+      return;
+    }
     setForm({
       type: lockedType,
       vendor_id: '',
@@ -447,6 +471,12 @@ export default function CreditMemosApp({ lockedType }: { lockedType: 'VENDOR' | 
                   <th className="text-left py-3.5 px-4 text-[10px] font-bold uppercase tracking-wider">Type</th>
                   <th className="text-left py-3.5 px-4 text-[10px] font-bold uppercase tracking-wider">Vendor / Customer</th>
                   <th className="text-left py-3.5 px-4 text-[10px] font-bold uppercase tracking-wider">Reason</th>
+                  {lockedType === 'CUSTOMER' && (
+                    <th className="text-left py-3.5 px-4 text-[10px] font-bold uppercase tracking-wider">Invoice</th>
+                  )}
+                  {lockedType === 'VENDOR' && (
+                    <th className="text-left py-3.5 px-4 text-[10px] font-bold uppercase tracking-wider">PO</th>
+                  )}
                   <th className="text-right py-3.5 px-4 text-[10px] font-bold uppercase tracking-wider">Total</th>
                   <th className="text-left py-3.5 px-4 text-[10px] font-bold uppercase tracking-wider">Status</th>
                   <th className="text-left py-3.5 px-4 text-[10px] font-bold uppercase tracking-wider">Created</th>
@@ -456,7 +486,7 @@ export default function CreditMemosApp({ lockedType }: { lockedType: 'VENDOR' | 
               <tbody>
                 {filteredList.length === 0 ? (
                   <tr>
-                      <td colSpan={9} className="py-16 text-center text-slate-500 text-xs font-semibold">
+                      <td colSpan={lockedType === 'CUSTOMER' || lockedType === 'VENDOR' ? 10 : 9} className="py-16 text-center text-slate-500 text-xs font-semibold">
                       No credit memos found. Create a credit memo to get started.
                     </td>
                   </tr>
@@ -484,6 +514,12 @@ export default function CreditMemosApp({ lockedType }: { lockedType: 'VENDOR' | 
                       <td className="py-3 px-4 text-xs text-slate-300">
                         <span className="inline-flex px-2 py-0.5 rounded text-[10px] border border-white/10 bg-slate-950/40">{cm.reason}</span>
                       </td>
+                      {lockedType === 'CUSTOMER' && (
+                        <td className="py-3 px-4 text-xs font-mono text-slate-300">{cm.reference_invoice_number || '—'}</td>
+                      )}
+                      {lockedType === 'VENDOR' && (
+                        <td className="py-3 px-4 text-xs font-mono text-slate-300">{cm.reference_po_number || '—'}</td>
+                      )}
                       <td className={`py-3 px-4 text-xs text-right font-extrabold font-mono ${moneyOut}`}>${Number(cm.total_amount).toLocaleString('en-US', { minimumFractionDigits: 2 })}</td>
                       <td className="py-3 px-4 text-xs">
                         <span
@@ -497,14 +533,20 @@ export default function CreditMemosApp({ lockedType }: { lockedType: 'VENDOR' | 
                                   : 'bg-blue-500/10 text-blue-40 border-blue-500/20'
                           }`}
                         >
-                          {cm.status}
+                          {cm.type === 'CUSTOMER' && cm.status === 'ADJUSTED'
+                            ? 'Received'
+                            : cm.type === 'VENDOR' && cm.status === 'ADJUSTED'
+                              ? 'Dispatched'
+                              : cm.type === 'VENDOR' && cm.status === 'CLOSED'
+                                ? 'Delivered'
+                                : cm.status}
                         </span>
                       </td>
                       <td className="py-3 px-4 text-xs text-slate-450 font-mono">{formatDate(cm.created_at)}</td>
                       <td className="py-3 px-4 text-right text-xs" onClick={(e) => e.stopPropagation()}>
                         <div className="flex items-center justify-end gap-2 flex-wrap">
                           <button type="button" onClick={() => setDetailId(cm.id)} className="text-[#0077C5] hover:underline text-xs font-medium">View</button>
-                          {cm.status === 'DRAFT' && (
+                          {cm.status === 'DRAFT' && lockedType !== 'VENDOR' && (
                             <button type="button" onClick={() => openEdit(cm.id)} className="text-[#0077C5] hover:underline text-xs font-medium">Edit</button>
                           )}
                           <button
@@ -553,8 +595,30 @@ export default function CreditMemosApp({ lockedType }: { lockedType: 'VENDOR' | 
         )}
       </div>
 
+      <VendorCreditMemoLightbox
+        open={vendorWizardOpen}
+        onClose={() => setVendorWizardOpen(false)}
+        onSaved={(id) => {
+          setVendorWizardOpen(false);
+          fetchList();
+          setDetailId(id);
+        }}
+      />
+
+      <CustomerCreditMemoLightbox
+        open={customerWizardOpen}
+        initialCustomerId={wizardCustomerId}
+        onClose={() => setCustomerWizardOpen(false)}
+        onSaved={(id) => {
+          setCustomerWizardOpen(false);
+          fetchList();
+          setDetailId(id);
+        }}
+      />
+
       <CreditMemoDrawer
         memoId={detailId}
+        partyType={lockedType}
         onClose={() => setDetailId(null)}
         onEdit={openEdit}
         onChanged={fetchList}

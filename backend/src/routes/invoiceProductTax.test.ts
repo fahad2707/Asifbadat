@@ -328,6 +328,9 @@ function stubInvoiceNumber() {
     limit() {
       return this;
     },
+    select() {
+      return this;
+    },
     lean: async () => [],
   }));
 }

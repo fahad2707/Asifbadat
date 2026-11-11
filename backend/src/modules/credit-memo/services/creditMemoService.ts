@@ -6,6 +6,7 @@ import Customer from '../../../models/Customer';
 import LedgerEntry from '../../../models/LedgerEntry';
 import { StockMovementType } from '../../../shared/enums';
 import { createStockMovement, StockMovementWriteError } from '../../../utils/createStockMovement';
+import { DOC_PREFIX, nextPrefixedNumber } from '../../../utils/documentNumbers';
 
 const CREDIT_MEMO_REFERENCE_TYPE = 'CreditMemo';
 
@@ -19,8 +20,9 @@ export class CreditMemoInventoryError extends Error {
   }
 }
 
-function generateCreditMemoNumber(): string {
-  return 'CM-' + Date.now().toString(36).toUpperCase() + '-' + Math.random().toString(36).substring(2, 6).toUpperCase();
+async function generateCreditMemoNumber(type: 'VENDOR' | 'CUSTOMER' = 'CUSTOMER'): Promise<string> {
+  const prefix = type === 'VENDOR' ? DOC_PREFIX.vendorCreditMemo : DOC_PREFIX.customerCreditMemo;
+  return nextPrefixedNumber(CreditMemo, 'credit_memo_number', prefix);
 }
 
 /**
@@ -187,9 +189,9 @@ const RG_LINKED_INVENTORY_ERROR =
   'Credit memos linked to a return shipment cannot affect inventory; set affects_inventory to false before approving';
 
 /**
- * Approve credit memo: claim DRAFT → APPROVED, post ledger, update AP/AR,
- * optionally apply signed inventory. Conditional claim prevents concurrent
- * double inventory application.
+ * Approve credit memo: claim DRAFT → APPROVED, post ledger, update AP/AR.
+ * Vendor memos also apply inventory here. Customer memos wait for
+ * markCreditMemoReceived so stock updates only after goods are received.
  *
  * RG-linked memos (reference_shipment_id set) must never apply inventory —
  * shipment receipt already wrote SHIPMENT_IN. Invalid combo is rejected
@@ -297,7 +299,81 @@ export async function approveCreditMemo(
       );
     }
 
-    if (claimed.affects_inventory && claimed.items && claimed.items.length > 0) {
+    // Inventory waits: customer mark-received, vendor mark-dispatched.
+
+    await session.commitTransaction();
+    return { success: true };
+  } catch (e) {
+    await session.abortTransaction();
+    throw e;
+  } finally {
+    session.endSession();
+  }
+}
+
+/**
+ * Customer credit memo: APPROVED → ADJUSTED and apply inventory.
+ * Only this step puts returned goods back on the shelf.
+ */
+export async function markCreditMemoReceived(
+  creditMemoId: string,
+  userId: string
+): Promise<{ success: boolean; error?: string }> {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+  try {
+    if (!mongoose.Types.ObjectId.isValid(creditMemoId)) {
+      await session.abortTransaction();
+      return { success: false, error: 'Credit memo not found' };
+    }
+    if (!mongoose.Types.ObjectId.isValid(userId)) {
+      await session.abortTransaction();
+      return { success: false, error: 'Invalid admin' };
+    }
+
+    const objId = new mongoose.Types.ObjectId(creditMemoId);
+    const adminId = new mongoose.Types.ObjectId(userId);
+    const receivedAt = new Date();
+
+    const current = await CreditMemo.findById(objId).session(session);
+    if (!current) {
+      await session.abortTransaction();
+      return { success: false, error: 'Credit memo not found' };
+    }
+    if (current.type !== 'CUSTOMER') {
+      await session.abortTransaction();
+      return { success: false, error: 'Only customer credit memos are marked received' };
+    }
+    if (current.status !== 'APPROVED') {
+      await session.abortTransaction();
+      return { success: false, error: 'Approve the credit memo before marking it received' };
+    }
+    if (!current.affects_inventory) {
+      await session.abortTransaction();
+      return { success: false, error: 'This credit memo does not return inventory' };
+    }
+    if (isRgLinkedInventoryConflict(current)) {
+      await session.abortTransaction();
+      return { success: false, error: RG_LINKED_INVENTORY_ERROR };
+    }
+
+    const claimed = await CreditMemo.findOneAndUpdate(
+      { _id: objId, status: 'APPROVED', type: 'CUSTOMER', affects_inventory: true },
+      {
+        $set: {
+          status: 'ADJUSTED',
+          received_at: receivedAt,
+          received_by: adminId,
+        },
+      },
+      { session, new: true }
+    );
+    if (!claimed) {
+      await session.abortTransaction();
+      return { success: false, error: 'This credit memo was already marked received' };
+    }
+
+    if (claimed.items && claimed.items.length > 0) {
       await applyCreditMemoInventory(
         {
           type: claimed.type,
@@ -321,6 +397,103 @@ export async function approveCreditMemo(
 }
 
 /**
+ * Vendor credit memo: APPROVED → ADJUSTED and apply inventory (stock leaves the warehouse).
+ */
+export async function markCreditMemoDispatched(
+  creditMemoId: string,
+  userId: string
+): Promise<{ success: boolean; error?: string }> {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+  try {
+    if (!mongoose.Types.ObjectId.isValid(creditMemoId) || !mongoose.Types.ObjectId.isValid(userId)) {
+      await session.abortTransaction();
+      return { success: false, error: 'Credit memo not found' };
+    }
+    const objId = new mongoose.Types.ObjectId(creditMemoId);
+    const adminId = new mongoose.Types.ObjectId(userId);
+    const current = await CreditMemo.findById(objId).session(session);
+    if (!current) {
+      await session.abortTransaction();
+      return { success: false, error: 'Credit memo not found' };
+    }
+    if (current.type !== 'VENDOR') {
+      await session.abortTransaction();
+      return { success: false, error: 'Only supplier credit memos are marked dispatched' };
+    }
+    if (current.status !== 'APPROVED') {
+      await session.abortTransaction();
+      return { success: false, error: 'Approve the credit memo before marking it dispatched' };
+    }
+    if (!current.affects_inventory) {
+      await session.abortTransaction();
+      return { success: false, error: 'This credit memo does not return inventory' };
+    }
+    if (isRgLinkedInventoryConflict(current)) {
+      await session.abortTransaction();
+      return { success: false, error: RG_LINKED_INVENTORY_ERROR };
+    }
+    const claimed = await CreditMemo.findOneAndUpdate(
+      { _id: objId, status: 'APPROVED', type: 'VENDOR', affects_inventory: true },
+      { $set: { status: 'ADJUSTED', dispatched_at: new Date(), dispatched_by: adminId } },
+      { session, new: true }
+    );
+    if (!claimed) {
+      await session.abortTransaction();
+      return { success: false, error: 'This credit memo was already dispatched' };
+    }
+    if (claimed.items && claimed.items.length > 0) {
+      await applyCreditMemoInventory(
+        {
+          type: claimed.type,
+          credit_memo_number: claimed.credit_memo_number,
+          items: claimed.items.map((i) => ({ product_id: i.product_id, quantity: i.quantity })),
+        },
+        objId,
+        adminId,
+        session
+      );
+    }
+    await session.commitTransaction();
+    return { success: true };
+  } catch (e) {
+    await session.abortTransaction();
+    throw e;
+  } finally {
+    session.endSession();
+  }
+}
+
+/** Vendor credit memo: ADJUSTED → CLOSED after the vendor has the goods. No further stock change. */
+export async function markCreditMemoDeliveredToVendor(
+  creditMemoId: string,
+  userId: string
+): Promise<{ success: boolean; error?: string }> {
+  if (!mongoose.Types.ObjectId.isValid(creditMemoId) || !mongoose.Types.ObjectId.isValid(userId)) {
+    return { success: false, error: 'Credit memo not found' };
+  }
+  const updated = await CreditMemo.findOneAndUpdate(
+    { _id: creditMemoId, type: 'VENDOR', status: 'ADJUSTED' },
+    {
+      $set: {
+        status: 'CLOSED',
+        delivered_at: new Date(),
+        delivered_by: new mongoose.Types.ObjectId(userId),
+      },
+    },
+    { new: true }
+  );
+  if (!updated) {
+    const current = await CreditMemo.findById(creditMemoId);
+    if (!current) return { success: false, error: 'Credit memo not found' };
+    if (current.type !== 'VENDOR') return { success: false, error: 'Only supplier credit memos use this step' };
+    if (current.status === 'CLOSED') return { success: false, error: 'Already marked delivered to the supplier' };
+    return { success: false, error: 'Mark the return as dispatched before marking it delivered' };
+  }
+  return { success: true };
+}
+
+/**
  * Cancel credit memo.
  * DRAFT → CANCELLED is allowed (no inventory/ledger applied yet).
  * APPROVED → CANCELLED is rejected until a real stock/ledger reversal exists.
@@ -332,7 +505,7 @@ export async function cancelCreditMemo(creditMemoId: string): Promise<{ success:
   if (cm.status === 'CLOSED' || cm.status === 'CANCELLED') {
     return { success: false, error: 'Credit memo cannot be cancelled' };
   }
-  if (cm.status === 'APPROVED') {
+  if (cm.status === 'APPROVED' || cm.status === 'ADJUSTED') {
     return {
       success: false,
       error:

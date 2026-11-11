@@ -26,6 +26,11 @@ export function usesMigratedWholesaleInventory(doc: { source?: unknown; invoice_
   return doc.source === 'WHOLESALE' && doc.invoice_type === DOCUMENT_TYPE_INVOICE;
 }
 
+/** Stock already left the warehouse (legacy create, pickup, or delivered shipment). */
+export function invoiceInventoryCommitted(doc: { inventory_applied?: unknown }): boolean {
+  return doc.inventory_applied !== false;
+}
+
 function optionalAdminId(adminId?: string): mongoose.Types.ObjectId | undefined {
   if (!adminId || !mongoose.Types.ObjectId.isValid(adminId)) return undefined;
   return new mongoose.Types.ObjectId(adminId);
@@ -150,18 +155,57 @@ function firstCreated<T>(created: T | T[]): T {
 
 export async function createWholesaleInvoiceWithInventory(
   fields: Record<string, unknown>,
-  adminId?: string
+  _adminId?: string
 ) {
-  const stockDeltas = new Map<string, number>();
-  for (const [productId, qty] of aggregateInvoiceInventoryQuantities(fields.items as InvoiceInventoryLine[])) {
-    stockDeltas.set(productId, -qty);
-  }
-
+  aggregateInvoiceInventoryQuantities(fields.items as InvoiceInventoryLine[]);
+  const payload = {
+    ...fields,
+    inventory_applied: false,
+    fulfillment_method: 'unfulfilled',
+  };
   return withTransaction(async (session) => {
-    const created = await Invoice.create([fields], { session });
-    const invoice = firstCreated(created) as { _id: mongoose.Types.ObjectId; invoice_number: string };
-    await applyStockDeltas(stockDeltas, invoice, adminId, session);
-    return invoice;
+    const created = await Invoice.create([payload], { session });
+    return firstCreated(created);
+  });
+}
+
+export async function applyDeferredWholesaleSaleInventory(opts: {
+  invoiceId: mongoose.Types.ObjectId | string;
+  fulfillmentMethod: 'store_pickup' | 'shipment';
+  adminId?: string;
+}): Promise<{ applied: boolean; invoice_number?: string }> {
+  const invoiceId = toObjectId(opts.invoiceId, 'invoice_id');
+  return withTransaction(async (session) => {
+    const claimed = await Invoice.findOneAndUpdate(
+      {
+        _id: invoiceId,
+        inventory_applied: false,
+        invoice_type: DOCUMENT_TYPE_INVOICE,
+      },
+      {
+        $set: {
+          inventory_applied: true,
+          fulfillment_method: opts.fulfillmentMethod,
+        },
+      },
+      { session, new: true }
+    );
+    if (!claimed) {
+      return { applied: false };
+    }
+    const stockDeltas = new Map<string, number>();
+    for (const [productId, qty] of aggregateInvoiceInventoryQuantities(
+      (claimed as { items?: InvoiceInventoryLine[] }).items
+    )) {
+      stockDeltas.set(productId, -qty);
+    }
+    await applyStockDeltas(
+      stockDeltas,
+      { _id: claimed._id as mongoose.Types.ObjectId, invoice_number: claimed.invoice_number },
+      opts.adminId,
+      session
+    );
+    return { applied: true, invoice_number: claimed.invoice_number };
   });
 }
 
@@ -255,12 +299,7 @@ export async function convertQuotationWithInventory(opts: {
   adminId?: string;
 }) {
   const quoteId = toObjectId(opts.quoteId, 'quotation_id');
-  const stockDeltas = new Map<string, number>();
-  for (const [productId, qty] of aggregateInvoiceInventoryQuantities(
-    opts.invoiceFields.items as InvoiceInventoryLine[]
-  )) {
-    stockDeltas.set(productId, -qty);
-  }
+  aggregateInvoiceInventoryQuantities(opts.invoiceFields.items as InvoiceInventoryLine[]);
 
   return withTransaction(async (session) => {
     const claimed = await Invoice.findOneAndUpdate(
@@ -277,9 +316,16 @@ export async function convertQuotationWithInventory(opts: {
       );
     }
 
-    const created = await Invoice.create([opts.invoiceFields], { session });
-    const invoice = firstCreated(created) as { _id: mongoose.Types.ObjectId; invoice_number: string };
-    await applyStockDeltas(stockDeltas, invoice, opts.adminId, session);
-    return invoice;
+    const created = await Invoice.create(
+      [
+        {
+          ...opts.invoiceFields,
+          inventory_applied: false,
+          fulfillment_method: 'unfulfilled',
+        },
+      ],
+      { session }
+    );
+    return firstCreated(created);
   });
 }

@@ -40,9 +40,13 @@ const createSchema = z.object({
 });
 
 // Generate shipment number
-router.get('/generate-number', authenticateAdmin, (req, res) => {
-  const type = (req.query.type as string) === 'GROUND_RG' ? 'GROUND_RG' : 'GROUND';
-  res.json({ shipment_number: generateShipmentNumber(type) });
+router.get('/generate-number', authenticateAdmin, async (req, res) => {
+  try {
+    const type = (req.query.type as string) === 'GROUND_RG' ? 'GROUND_RG' : 'GROUND';
+    res.json({ shipment_number: await generateShipmentNumber(type) });
+  } catch {
+    res.status(500).json({ error: 'Failed to generate shipment number' });
+  }
 });
 
 function handlePackageRouteError(res: express.Response, e: unknown, logLabel: string) {
@@ -186,7 +190,7 @@ router.post('/', authenticateAdmin, async (req: AuthRequest, res) => {
     }));
 
     const shipment = await Shipment.create({
-      shipment_number: generateShipmentNumber(type),
+      shipment_number: await generateShipmentNumber(type),
       shipment_type: type,
       linked_invoice_id: data.linked_invoice_id || undefined,
       linked_return_request_id: data.linked_return_request_id || undefined,
@@ -233,12 +237,50 @@ router.patch('/:id/status', authenticateAdmin, async (req: AuthRequest, res) => 
       return res.status(400).json({ error: 'Cannot change status of completed shipment' });
     }
     const update: any = { status };
-    if (status === 'DISPATCHED') update.dispatch_date = new Date();
+    if (status === 'DISPATCHED' || status === 'IN_TRANSIT') update.dispatch_date = new Date();
     await Shipment.findByIdAndUpdate(req.params.id, update);
     res.json({ success: true, status });
   } catch (e) {
     console.error('Update shipment status:', e);
     res.status(500).json({ error: 'Failed to update status' });
+  }
+});
+
+router.patch('/:id', authenticateAdmin, async (req: AuthRequest, res) => {
+  try {
+    const schema = z.object({
+      transporter_name: z.string().optional(),
+      vehicle_number: z.string().optional(),
+      lr_number: z.string().optional(),
+      freight_charge: z.number().min(0).optional(),
+      weight_kg: z.number().min(0).optional(),
+      volume_cbm: z.number().min(0).optional(),
+      dispatch_date: z.string().optional(),
+      expected_delivery_date: z.string().optional(),
+      notes: z.string().optional(),
+    });
+    const data = schema.parse(req.body);
+    const shipment = await Shipment.findById(req.params.id);
+    if (!shipment) return res.status(404).json({ error: 'Shipment not found' });
+    if (shipment.status === 'DELIVERED' || shipment.status === 'RETURNED' || shipment.status === 'FAILED') {
+      return res.status(400).json({ error: 'Cannot edit a completed shipment' });
+    }
+    const update: Record<string, unknown> = {};
+    for (const key of Object.keys(data) as Array<keyof typeof data>) {
+      const value = data[key];
+      if (value === undefined) continue;
+      if (key === 'dispatch_date' || key === 'expected_delivery_date') {
+        update[key] = value ? new Date(String(value)) : undefined;
+      } else {
+        update[key] = value;
+      }
+    }
+    await Shipment.findByIdAndUpdate(req.params.id, update);
+    res.json({ success: true });
+  } catch (e: any) {
+    if (e.name === 'ZodError') return res.status(400).json({ error: e.errors?.[0]?.message || 'Validation error' });
+    console.error('Update shipment:', e);
+    res.status(500).json({ error: 'Failed to update shipment' });
   }
 });
 
