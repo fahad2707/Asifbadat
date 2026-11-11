@@ -1108,7 +1108,7 @@ export function ProductsAdminView({ initialView = 'all' }: { initialView?: Produ
         <ProductModal
           product={editingProduct ? { ...editingProduct, low_stock_threshold: editingProduct.low_stock_threshold ?? 10 } : null}
           onClose={() => { setShowModal(false); setEditingProduct(null); }}
-          onSuccess={fetchProducts}
+          onSuccess={() => { void fetchProducts(); }}
         />
       )}
     </div>

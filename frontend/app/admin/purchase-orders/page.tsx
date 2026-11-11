@@ -446,7 +446,7 @@ function PurchaseOrdersPageInner() {
         <div className="flex items-center gap-2.5 flex-wrap">
           <button
             type="button"
-            onClick={openCreatePo}
+            onClick={() => openCreatePo()}
             className="inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-[#0F9F8F] hover:bg-[#0B8275] border-transparent text-white rounded-xl text-xs font-bold shadow-sm transition-all"
           >
             <Plus className="w-3.5 h-3.5" />
