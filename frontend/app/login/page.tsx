@@ -90,8 +90,11 @@ export default function LoginPage() {
 
     setLoading(true);
     try {
+      const identifier = email.trim().replace(/\s+/g, '');
+      const isCustomerId = /^C\d{4,6}$/i.test(identifier);
       const response = await api.post('/auth/login', {
-        email: email.trim(),
+        email: identifier,
+        ...(isCustomerId ? { customer_code: identifier, username: identifier } : {}),
         password,
       });
       setAuth(response.data.user, response.data.token);

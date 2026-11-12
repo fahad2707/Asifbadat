@@ -18,11 +18,8 @@ import {
   accountStatusFromDocument,
 } from '../utils/customerAccount';
 import { z } from 'zod';
-import crypto from 'crypto';
-import bcrypt from 'bcryptjs';
-import { fallbackCustomerCode, randomCustomerCode } from '../utils/customerCode';
-import { onlinePasswordFromName } from '../utils/onlineLoginCredentials';
-import { sendOnlineAccessEmail } from '../utils/mail';
+import { generateCustomerCode } from '../utils/customerCode';
+import { provisionOnlineLogin, type ProvisionedLogin } from '../utils/provisionOnlineUser';
 
 function customerAccountFields(c: {
   account_status?: unknown;
@@ -55,82 +52,6 @@ const storage = multer.diskStorage({
 });
 const upload = multer({ storage, limits: { fileSize: 15 * 1024 * 1024 } }); // 15MB
 
-const BCRYPT_ROUNDS = 12;
-
-type ProvisionedLogin = {
-  username: string;
-  password: string;
-  emailed: boolean;
-  email: string | null;
-};
-
-async function provisionOnlineLogin(customer: any): Promise<ProvisionedLogin | null> {
-  if (customer.user_id) return null;
-
-  if (!customer.customer_code) {
-    customer.customer_code = await generateCustomerCode();
-  }
-
-  const password = onlinePasswordFromName(String(customer.name || ''));
-  const password_hash = await bcrypt.hash(password, BCRYPT_ROUNDS);
-
-  let email: string | undefined = String(customer.email || '').trim().toLowerCase() || undefined;
-  if (email) {
-    const emailTaken = await User.findOne({
-      email: { $regex: new RegExp(`^${email.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') },
-    });
-    if (emailTaken) email = undefined;
-  }
-
-  const phoneRaw = String(customer.phone || '').trim();
-  let phone = phoneRaw || undefined;
-  if (phone) {
-    const phoneTaken = await User.findOne({ phone });
-    if (phoneTaken) phone = undefined;
-  }
-  if (!phone) {
-    phone = `acct:cust:${crypto.createHash('sha256').update(String(customer._id)).digest('hex').slice(0, 20)}`;
-  }
-
-  const user = await User.create({
-    name: customer.name,
-    ...(email ? { email } : {}),
-    phone,
-    password_hash,
-    email_verified: true,
-  });
-  customer.user_id = user._id;
-
-  let emailed = false;
-  const mailTo = String(customer.email || '').trim();
-  if (mailTo) {
-    try {
-      emailed = await sendOnlineAccessEmail(mailTo, {
-        name: customer.name,
-        username: String(customer.customer_code),
-        password,
-      });
-    } catch (err) {
-      console.error('Online access email failed:', err);
-    }
-  }
-
-  return {
-    username: String(customer.customer_code),
-    password,
-    emailed,
-    email: mailTo || null,
-  };
-}
-
-async function generateCustomerCode(): Promise<string> {
-  for (let i = 0; i < 20; i++) {
-    const code = randomCustomerCode();
-    const exists = await Customer.findOne({ customer_code: code });
-    if (!exists) return code;
-  }
-  return fallbackCustomerCode();
-}
 
 function catalogPriceDiffers(lastPrice: number, catalogPrice: number | null | undefined): boolean {
   if (catalogPrice == null || Number.isNaN(Number(catalogPrice))) return false;

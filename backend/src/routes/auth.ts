@@ -14,7 +14,12 @@ import {
   type CustomerLinkResult,
 } from '../utils/customerAccount';
 import { isSmtpConfigured, sendPasswordResetEmail } from '../utils/mail';
-import { looksLikeCustomerCode } from '../utils/onlineLoginCredentials';
+import {
+  looksLikeCustomerCode,
+  onlinePasswordFromName,
+  pickLoginIdentifier,
+} from '../utils/onlineLoginCredentials';
+import { provisionOnlineLogin } from '../utils/provisionOnlineUser';
 import { logSecurityEvent } from '../utils/securityLog';
 import {
   loginLimiter,
@@ -395,32 +400,37 @@ router.post('/login', loginLimiter, async (req, res) => {
 
     const schema = z
       .object({
-        email: z.string().trim().min(1).max(320).optional(),
-        phone: phoneSchema.optional(),
+        email: z.string().max(320).optional(),
+        username: z.string().max(320).optional(),
+        customer_code: z.string().max(32).optional(),
+        phone: z.string().max(32).optional(),
         password: z.string().min(1).max(128),
       })
-      .refine((data) => data.email || data.phone, {
+      .refine((data) => pickLoginIdentifier(data), {
         message: 'Email, customer ID, or phone is required',
         path: ['email'],
       });
 
-    const { email, phone, password } = schema.parse(req.body);
+    const parsed = schema.parse(req.body);
+    const { password } = parsed;
+    const identifier = pickLoginIdentifier(parsed);
 
     let user = null as Awaited<ReturnType<typeof User.findOne>>;
-    const identifier = email?.trim() || '';
-    if (phone && !identifier) {
-      user = await User.findOne({ phone });
-    } else if (identifier.includes('@')) {
-      user = await findUserByEmail(identifier);
-    } else if (looksLikeCustomerCode(identifier)) {
+    if (looksLikeCustomerCode(identifier)) {
       const customer = await Customer.findOne({
         customer_code: { $regex: new RegExp(`^${escapeRegex(identifier)}$`, 'i') },
-      })
-        .select('user_id')
-        .lean();
+      });
       if (customer?.user_id) {
-        user = await User.findById((customer as { user_id: unknown }).user_id);
+        user = await User.findById(customer.user_id);
+      } else if (customer && password === onlinePasswordFromName(String(customer.name || ''))) {
+        await provisionOnlineLogin(customer);
+        await customer.save();
+        if (customer.user_id) user = await User.findById(customer.user_id);
       }
+    } else if (identifier.includes('@')) {
+      user = await findUserByEmail(identifier);
+    } else if (parsed.phone || phoneSchema.safeParse(identifier).success) {
+      user = await User.findOne({ phone: parsed.phone || identifier });
     } else {
       user = (await findUserByEmail(identifier)) || (await User.findOne({ phone: identifier }));
     }
