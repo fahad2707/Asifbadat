@@ -500,8 +500,6 @@ router.post('/:id/fulfill', authenticateAdmin, async (req: AuthRequest, res) => 
       const live = await Invoice.findById(invoice._id).lean();
       return res.json({
         id: String(invoice._id),
-        fulfillment_method: 'store_pickup',
-        inventory_applied: true,
         ...fulfillmentPayload(live || { fulfillment_method: 'store_pickup', inventory_applied: true }),
       });
     }

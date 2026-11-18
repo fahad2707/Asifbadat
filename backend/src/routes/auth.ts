@@ -26,7 +26,8 @@ import {
   registerLimiter,
   forgotPasswordLimiter,
 } from '../middleware/rateLimit';
-import mongoose from 'mongoose';
+import mongoose, { type HydratedDocument } from 'mongoose';
+import type { IUser } from '../models/User';
 
 const router = express.Router();
 
@@ -415,7 +416,7 @@ router.post('/login', loginLimiter, async (req, res) => {
     const { password } = parsed;
     const identifier = pickLoginIdentifier(parsed);
 
-    let user = null as Awaited<ReturnType<typeof User.findOne>>;
+    let user: HydratedDocument<IUser> | null = null;
     if (looksLikeCustomerCode(identifier)) {
       const customer = await Customer.findOne({
         customer_code: { $regex: new RegExp(`^${escapeRegex(identifier)}$`, 'i') },
