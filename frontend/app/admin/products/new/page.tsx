@@ -8,6 +8,12 @@ import adminApi, { uploadApi } from '@/lib/admin-api';
 import toast from 'react-hot-toast';
 import NumberInput from '@/components/admin/NumberInput';
 import { minSellingPrice, sellingBelowMin } from '@/lib/min-selling-price';
+import TobaccoComplianceProfileFields from '@/components/admin/TobaccoComplianceProfileFields';
+import {
+  emptyTobaccoComplianceForm,
+  tobaccoPayloadFromForm,
+  type TobaccoComplianceFormValue,
+} from '@/lib/tobacco-compliance';
 
 interface Category {
   id: string | number;
@@ -43,6 +49,7 @@ export default function NewProductPage() {
   });
   const [marginPct, setMarginPct] = useState('');
   const [marginUsd, setMarginUsd] = useState('');
+  const [tobacco, setTobacco] = useState<TobaccoComplianceFormValue>(emptyTobaccoComplianceForm());
 
   useEffect(() => {
     adminApi
@@ -116,6 +123,7 @@ export default function NewProductPage() {
         sub_category_id: form.sub_category_id || undefined,
         stock_quantity: parseInt(form.stock_quantity, 10) || 0,
         low_stock_threshold: parseInt(form.low_stock_threshold, 10) || 10,
+        ...tobaccoPayloadFromForm(tobacco),
       });
       toast.success('Product added. It will appear on the website in the selected category.');
       router.push('/admin/products');
@@ -320,6 +328,8 @@ export default function NewProductPage() {
             />
           </div>
         </div>
+
+        <TobaccoComplianceProfileFields value={tobacco} onChange={setTobacco} />
 
         <div className="flex gap-3 pt-4">
           <button

@@ -16,6 +16,7 @@ import Category from '../models/Category';
 import SubCategory from '../models/SubCategory';
 import StockMovement from '../models/StockMovement';
 import { executeImport } from './productImportService';
+import { identifierLock } from '../utils/identifierLock';
 import { StockMovementType } from '../shared/enums';
 import {
   OPENING_STOCK_REASON,
@@ -66,6 +67,16 @@ function stubImportHarness(opts: {
   };
 
   mock.method(mongoose, 'startSession', async () => session);
+  mock.method(identifierLock, 'acquire', async () => ({
+    ownerRunId: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
+    ownerPid: 1,
+    ownerHost: 'test',
+    ownerStartedAt: 'start',
+    databaseName: 'express_distributors_dev',
+    purpose: 'product-csv-import' as const,
+    acquiredAt: '2026-01-01T00:00:00.000Z',
+  }));
+  mock.method(identifierLock, 'release', async () => true);
   mock.method(Product, 'distinct', async () => []);
   mock.method(Product, 'findOne', () => ({ lean: async () => null }));
   mock.method(Product, 'find', () => ({

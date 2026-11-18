@@ -8,6 +8,7 @@ import adminApi from '@/lib/admin-api';
 import { isAdminAuthRedirectError } from '@/lib/admin-auth-redirect';
 import toast from 'react-hot-toast';
 import { adminUi } from '@/lib/admin-ui';
+import { invoiceLineTaxDisplayLabel, TAX_DECISION_NOT_CONFIRMED_LABEL } from '@/lib/tax-type';
 
 export interface InvoiceHistoryTarget {
   id: string;
@@ -48,6 +49,8 @@ interface InvoiceDetail {
     tax_type_label?: string;
     tax_amount?: number;
     total?: number;
+    tax_exempt?: boolean;
+    tax_snapshot?: { money_decision?: string; role?: string; reporting?: string } | null;
   }[];
   fulfillment_method?: 'unfulfilled' | 'store_pickup' | 'shipment' | null;
   inventory_applied?: boolean | null;
@@ -273,7 +276,16 @@ export default function InvoiceHistoryDrawer({ invoiceId, refreshKey = 0, onClos
                 {!quote && <div className="flex justify-between gap-4"><dt className="text-[#6B6C72]">Due</dt><dd>{fmtDate(invoice.due_date)}</dd></div>}
                 <div className="flex justify-between gap-4"><dt className="text-[#6B6C72]">Terms</dt><dd>{invoice.terms || '—'}</dd></div>
                 <div className="flex justify-between gap-4"><dt className="text-[#6B6C72]">Subtotal</dt><dd className="tabular-nums">{money(Number(invoice.subtotal_amount ?? total - Number(invoice.tax_amount || 0)))}</dd></div>
-                <div className="flex justify-between gap-4"><dt className="text-[#6B6C72]">Tax</dt><dd className="tabular-nums">{money(Number(invoice.tax_amount || 0))}</dd></div>
+                <div className="flex justify-between gap-4">
+                  <dt className="text-[#6B6C72]">{quote ? 'Estimated tax' : 'Tax'}</dt>
+                  <dd className="text-right tabular-nums">
+                    {money(Number(invoice.tax_amount || 0))}
+                    {quote ? <span className="block text-xs font-normal text-[#6B6C72]">Not recorded sales tax</span> : null}
+                    {(invoice.items || []).some((item) => item.tax_snapshot?.money_decision === 'incomplete') ? (
+                      <span className="block text-xs font-normal text-[#8A4500]">{TAX_DECISION_NOT_CONFIRMED_LABEL}</span>
+                    ) : null}
+                  </dd>
+                </div>
                 <div className="flex justify-between gap-4"><dt className="text-[#6B6C72]">Total</dt><dd className="tabular-nums font-medium">{money(total)}</dd></div>
                 {!quote && (
                   <div className="flex justify-between gap-4">
@@ -330,7 +342,7 @@ export default function InvoiceHistoryDrawer({ invoiceId, refreshKey = 0, onClos
                             {money(Number(item.price || 0))}
                             {item.taxable === true ? ' T' : ''}
                           </td>
-                          <td className="px-2 py-1.5 text-[#6B6C72]">{item.tax_type_label || (item.taxable === false ? 'No Tax' : '—')}</td>
+                          <td className="px-2 py-1.5 text-[#6B6C72]">{invoiceLineTaxDisplayLabel(item)}</td>
                           <td className="px-2 py-1.5 text-right tabular-nums">{money(Number(item.total ?? (Number(item.subtotal || 0) + Number(item.tax_amount || 0))))}</td>
                         </tr>
                       ))}

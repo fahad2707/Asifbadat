@@ -9,6 +9,7 @@ import {
   shouldWriteOpeningStockMovement,
   writeOpeningStockMovement,
 } from '../utils/openingStockMovement';
+import { identifierLock } from '../utils/identifierLock';
 
 /** Turn `automotive` → `Automotive`; keep `Candy and Snacks` as-is. */
 export function prettyCategoryName(filenameBase: string): string {
@@ -47,6 +48,11 @@ export async function importCategoryXlsFiles(
 ): Promise<ImportCategoryXlsResult> {
   const printSummary = options?.printSummary !== false;
   await connectDB();
+  const lock = await identifierLock.acquire({
+    databaseName: mongoose.connection.name || '',
+    purpose: 'category-xls-import',
+  });
+  try {
 
   let totalProducts = 0;
   let totalErrors = 0;
@@ -204,4 +210,9 @@ export async function importCategoryXlsFiles(
   }
 
   return { totalProducts, totalErrors, categoryStats };
+  } finally {
+    await identifierLock.release(lock).catch(() => {
+      console.error('Product identifier lock could not be released.');
+    });
+  }
 }

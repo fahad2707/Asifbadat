@@ -30,6 +30,20 @@ export interface IProduct extends Document {
    * ObjectId = assigned TaxType.
    */
   tax_type_id?: mongoose.Types.ObjectId | null;
+  /**
+   * PA tobacco reporting classification. Explicit admin value only — never inferred.
+   * Default `unknown` for existing products and unverified new products.
+   */
+  tobacco_class?: 'unknown' | 'cigarette' | 'little_cigar' | 'otp' | 'non_tobacco';
+  /** Sticks per cigarette pack when tobacco_class is cigarette. Unset until configured. */
+  cigarette_pack_size?: 20 | 25;
+  /** How this product's stock_quantity is stored. Unset until configured. */
+  stock_unit?: 'pack' | 'carton' | 'case' | 'other';
+  /**
+   * Reportable cigarette packs represented by one stock unit.
+   * Unset until an admin sets a positive integer. Never defaulted to 1.
+   */
+  packs_per_stock_unit?: number;
   created_at: Date;
   updated_at: Date;
 }
@@ -57,6 +71,22 @@ const ProductSchema = new Schema<IProduct>(
     is_active: { type: Boolean, default: true },
     tax_rate: { type: Number, default: 0 }, // Tax percentage — POS / online snapshot source
     tax_type_id: { type: Schema.Types.ObjectId, ref: 'TaxType', default: undefined },
+    tobacco_class: {
+      type: String,
+      enum: ['unknown', 'cigarette', 'little_cigar', 'otp', 'non_tobacco'],
+      default: 'unknown',
+    },
+    cigarette_pack_size: { type: Number, enum: [20, 25], default: undefined },
+    stock_unit: { type: String, enum: ['pack', 'carton', 'case', 'other'], default: undefined },
+    packs_per_stock_unit: {
+      type: Number,
+      min: 1,
+      default: undefined,
+      validate: {
+        validator: (v: unknown) => v == null || (Number.isInteger(v) && Number(v) >= 1),
+        message: 'packs_per_stock_unit must be a positive integer',
+      },
+    },
   },
   {
     timestamps: { createdAt: 'created_at', updatedAt: 'updated_at' },

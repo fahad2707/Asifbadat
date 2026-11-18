@@ -1,21 +1,34 @@
 /**
- * Map retail barcodes from an Excel file onto Product.sku and Product.barcode.
+ * Map retail barcodes from an Excel file onto an empty Product.sku or
+ * Product.barcode. A non-empty SKU or barcode that differs from the sheet is
+ * reported and left unchanged. PLU is never written.
  *
  * The sheet is expected to have a product name column and a barcode/UPC column
  * (headers are auto-detected). Rows are matched to the DB by:
  * 1) MongoDB _id if the sheet has a matching id column, else
  * 2) exact normalized name (one unique product in DB required per row).
  *
+ * Conflicts are decided for the whole sheet before any write. A dry run is
+ * the default. Writing requires both `--apply` and
+ * `--confirm-database=<the connected database name>` on this run, and the
+ * same local-machine checks used by the cleanup scripts. `--apply` alone
+ * does not write. Production, mongodb+srv, remote, and uncertain servers
+ * are refused before any product is changed.
+ *
  *   cd backend
  *   SKU_EXCEL_PATH="/path/to/Asif badat.xlsx" npx tsx src/db/apply-sku-barcode-from-excel.ts
- *   SKU_EXCEL_PATH="..." npx tsx src/db/apply-sku-barcode-from-excel.ts --apply
+ *   SKU_EXCEL_PATH="..." npx tsx src/db/apply-sku-barcode-from-excel.ts --apply --confirm-database=<database name>
  */
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
 import xlsx from 'xlsx';
 import mongoose from 'mongoose';
 import connectDB from './connection';
 import Product from '../models/Product';
+import { connectedTarget } from './cleanupRunner';
+import { planSkuBarcodeUpdates, type SkuBarcodeProduct } from '../utils/skuBarcodeImport';
+import { runSkuBarcodeExcelImport } from '../utils/skuBarcodeExcelRun';
 
 function normName(s: string): string {
   return String(s ?? '')
@@ -121,7 +134,6 @@ async function main() {
   const argPath = process.argv.find((a) => a.startsWith('--file='))?.replace('--file=', '');
   const filePath = (process.env.SKU_EXCEL_PATH || argPath || path.join(__dirname, '../../../Asif badat.xlsx'))
     .trim();
-  const apply = process.argv.includes('--apply');
   const headerRow0 = Math.max(0, parseInt(process.env.SHEET_HEADER_ROW || '0', 10) || 0);
   const sheetName = (process.env.SHEET_NAME || '').trim() || null;
 
@@ -130,11 +142,6 @@ async function main() {
     console.error('Set SKU_EXCEL_PATH or: npx tsx src/db/apply-sku-barcode-from-excel.ts --file="/full/path/Asif badat.xlsx"');
     process.exit(1);
   }
-  if (!process.env.MONGODB_URI?.trim()) {
-    console.error('Set MONGODB_URI in .env (and MONGODB_DB_NAME if needed).');
-    process.exit(1);
-  }
-
   const buf = fs.readFileSync(filePath);
   const wb = xlsx.read(buf, { type: 'buffer' });
   const sName = sheetName || wb.SheetNames[0]!;
@@ -156,7 +163,20 @@ async function main() {
   }
   console.log('Using sheet:', sName, '| name column index:', col.nameIdx, '| code column:', col.codeIdx, '| _id column:', col.idIdx);
 
-  await connectDB();
+  const code = await runSkuBarcodeExcelImport({
+    argv: process.argv.slice(2),
+    env: {
+      MONGODB_URI: process.env.MONGODB_URI,
+      NODE_ENV: process.env.NODE_ENV,
+      npm_lifecycle_script: process.env.npm_lifecycle_script,
+    },
+    localHostnames: [os.hostname()].filter(Boolean),
+    connect: connectDB,
+    readEvidence: () => connectedTarget.read(),
+    disconnect: () => mongoose.disconnect(),
+    log: (line) => console.log(line),
+    error: (line) => console.error(line),
+    loadPlan: async () => {
   const products = await Product.find({})
     .select('_id name sku barcode plu')
     .lean();
@@ -169,13 +189,14 @@ async function main() {
     byName.set(n, a);
   }
 
-  let updated = 0;
   const skipped: string[] = [];
   const errors: string[] = [];
-  const would: { row: number; productId: string; name: string; old: { sku?: string; bar?: string }; newCode: string }[] = [];
+  const matched: Array<{ product: SkuBarcodeProduct; proposed: string }> = [];
   /** Reject the same name / same _id twice in the file with two different barcodes. */
   const sheetNameToCode = new Map<string, string>();
   const sheetIdToCode = new Map<string, string>();
+  const blockedIds = new Set<string>();
+  const blockedNames = new Set<string>();
 
   for (let r = headerRow0 + 1; r < rows.length; r++) {
     const row = rows[r] as unknown[];
@@ -198,6 +219,7 @@ async function main() {
         errors.push(
           `row ${r + 1}: duplicate Mongo _id in the sheet with two different barcodes (${prior} vs ${code})`
         );
+        blockedIds.add(idCell);
         continue;
       }
       sheetIdToCode.set(idCell, code);
@@ -209,6 +231,7 @@ async function main() {
           errors.push(
             `row ${r + 1}: duplicate name in the sheet with two different barcodes ("${nameCell}": ${prior} vs ${code})`
           );
+          blockedNames.add(nKey);
           continue;
         }
         sheetNameToCode.set(nKey, code);
@@ -244,59 +267,36 @@ async function main() {
       match = cands[0]!;
     }
 
-    const otherSku = await Product.findOne({ _id: { $ne: match._id }, $or: [{ sku: code }, { barcode: code }] }).lean();
-    if (otherSku) {
-      errors.push(
-        `row ${r + 1}: code "${code}" already on another product (id: ${(otherSku as { _id: { toString: () => string } })._id.toString()})`
-      );
+    const product: SkuBarcodeProduct = {
+      id: String(match._id),
+      sku: String(match.sku || ''),
+      barcode: String(match.barcode || ''),
+      plu: String(match.plu || ''),
+    };
+    if (blockedIds.has(product.id) || (nameCell && blockedNames.has(normName(nameCell)))) {
       continue;
     }
-    if (String(match.sku) === code && String(match.barcode) === code) {
-      skipped.push(`row ${r + 1}: product ${String(match._id)} already has sku/barcode = ${code}`);
-      continue;
-    }
-
-    would.push({
-      row: r + 1,
-      productId: String(match._id),
-      name: match.name,
-      old: { sku: match.sku, bar: match.barcode },
-      newCode: code,
-    });
-    if (apply) {
-      try {
-        await Product.updateOne(
-          { _id: match._id },
-          { $set: { sku: code, barcode: code, updated_at: new Date() } }
-        );
-        updated++;
-      } catch (e) {
-        errors.push(`row ${r + 1} update error: ${e instanceof Error ? e.message : e}`);
-      }
-    }
+    matched.push({ product, proposed: code });
   }
 
-  console.log('\n--- Plan (use --apply to write) ---');
-  console.log(JSON.stringify(would.slice(0, 80), null, 2));
-  if (would.length > 80) console.log(`... and ${would.length - 80} more changes`);
-  console.log('\nSummary: planned updates:', would.length, '| applied:', apply ? updated : 0, '| dry run:', !apply);
-  if (errors.length) {
-    console.log('\nErrors / blocked:', errors.length);
-    for (const e of errors.slice(0, 40)) console.log(' ', e);
-    if (errors.length > 40) console.log('  ...', errors.length - 40, 'more');
+  const catalog: SkuBarcodeProduct[] = products.map((product) => ({
+    id: String(product._id),
+    sku: String(product.sku || ''),
+    barcode: String(product.barcode || ''),
+    plu: String(product.plu || ''),
+  }));
+  const nameById = new Map(products.map((product) => [String(product._id), normName(product.name)]));
+  const usable = matched.filter(
+    (row) => !blockedIds.has(row.product.id) && !blockedNames.has(nameById.get(row.product.id) || '')
+  );
+  const plan = planSkuBarcodeUpdates(usable, catalog);
+  for (const id of plan.skipped) {
+    skipped.push(`product ${id}: sku and barcode already equal the proposed code`);
   }
-  if (skipped.length) {
-    console.log('\nSkipped (info):', Math.min(15, skipped.length), 'of', skipped.length);
-    for (const s of skipped.slice(0, 15)) console.log(' ', s);
-  }
-  if (!apply && would.length) {
-    console.log('\n-> Re-run with --apply after reviewing the list above.\n');
-  }
-  await mongoose.disconnect();
-  if (apply && would.length > 0 && updated < would.length) {
-    process.exit(1);
-  }
-  process.exit(0);
+  return { plan, errors, skipped };
+    },
+  });
+  process.exit(code);
 }
 
 main().catch((e) => {

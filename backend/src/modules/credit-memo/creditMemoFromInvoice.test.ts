@@ -101,6 +101,51 @@ test('validate rejects quotations and other customers', () => {
   );
 });
 
+/**
+ * FUTURE GUARD — taxPercentFromInvoiceLine is intentionally unchanged.
+ *
+ * A confirmed percent rate of 0, and a confirmed non-taxable line with tax_amount 0,
+ * both stay 0. An incomplete wholesale snapshot can also store tax_amount 0 with
+ * zero_confirmed false. This function does not read tax_snapshot, so that incomplete
+ * 0 becomes 0% as well.
+ *
+ * A later credit-memo change must look at the snapshot before calling this function.
+ * When money_decision is incomplete, or zero_confirmed is false and the decision is
+ * not confirmed_non_taxable or a confirmed percent rate, it must not store tax_percent 0
+ * as a confirmed zero. Legacy lines without tax_snapshot keep today's derivation.
+ * Existing credit memos are not rewritten and historical invoices are not backfilled.
+ */
+test('incomplete snapshot zero is currently indistinguishable from a confirmed zero', () => {
+  const confirmedPercentZero = taxPercentFromInvoiceLine({
+    quantity: 1,
+    price: 10,
+    tax_rate_type: 'percent',
+    tax_rate: 0,
+    tax_amount: 0,
+  });
+  const confirmedNonTaxable = taxPercentFromInvoiceLine({
+    quantity: 1,
+    price: 10,
+    tax_amount: 0,
+  });
+  const incompleteLine = {
+    quantity: 1,
+    price: 10,
+    tax_amount: 0,
+    tax_snapshot: {
+      version: 1,
+      money_decision: 'incomplete',
+      zero_confirmed: false,
+      posted_tax_cents: 0,
+    },
+  };
+  const incompleteSnapshot = taxPercentFromInvoiceLine(incompleteLine);
+  assert.equal(confirmedPercentZero, 0);
+  assert.equal(confirmedNonTaxable, 0);
+  assert.equal(incompleteSnapshot, 0);
+  assert.equal(incompleteSnapshot, confirmedNonTaxable);
+});
+
 test('stock comes back only when the invoice already took stock and the reason is a return', () => {
   assert.equal(shouldCreditInventory({ reason: 'RETURN', invoice: { inventory_applied: true } }), true);
   assert.equal(shouldCreditInventory({ reason: 'RETURN', invoice: { inventory_applied: false } }), false);

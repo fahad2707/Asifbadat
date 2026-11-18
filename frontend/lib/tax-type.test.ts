@@ -13,6 +13,8 @@ import {
   CUSTOMER_EXEMPT_TAX_LABEL,
   customerIsCurrentlyExempt,
   inheritInvoiceLineTax,
+  invoiceLineTaxDisplayLabel,
+  TAX_DECISION_NOT_CONFIRMED_LABEL,
 } from './tax-type';
 
 const gst = {
@@ -74,6 +76,32 @@ test('3/4 — stored snapshot recalculation is independent of live exemption hel
   assert.equal(noneSnap.taxable, false);
   assert.equal(noneSnap.tax_type_label, 'No Tax');
   assert.notEqual(noneSnap.tax_exempt, true);
+});
+
+test('incomplete snapshot is not labeled No Tax, and the ledger amount stays visible beside it', () => {
+  assert.equal(
+    invoiceLineTaxDisplayLabel({
+      tax_type_label: 'No Tax',
+      taxable: false,
+      tax_snapshot: { money_decision: 'incomplete', role: 'transaction' },
+    }),
+    TAX_DECISION_NOT_CONFIRMED_LABEL
+  );
+  assert.equal(
+    invoiceLineTaxDisplayLabel({ tax_type_label: 'No Tax', taxable: false, tax_type_configured: true }),
+    'No Tax'
+  );
+  assert.equal(
+    invoiceLineTaxDisplayLabel({ tax_type_label: 'No Tax', tax_type_configured: false }),
+    TAX_DECISION_NOT_CONFIRMED_LABEL
+  );
+  assert.equal(
+    invoiceLineTaxDisplayLabel({
+      tax_type_label: 'GST — 18%',
+      tax_snapshot: { money_decision: 'confirmed_taxable', role: 'estimate' },
+    }),
+    'Estimate · GST — 18%'
+  );
 });
 
 test('invoice editor keeps edit-mode snapshot lines and syncs live exemption for new lines', () => {

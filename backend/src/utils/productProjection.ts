@@ -25,6 +25,7 @@
 
 import type mongoose from 'mongoose';
 import { staffTaxTypeFields } from './productTaxType';
+import { staffTobaccoComplianceFields } from './productTobaccoCompliance';
 
 type PopulatedRef = { _id: mongoose.Types.ObjectId | string; name?: string; slug?: string; rate?: number; rate_type?: string };
 
@@ -52,6 +53,10 @@ export interface RawProductDoc {
   is_active?: boolean | 'false' | 0;
   tax_rate?: number;
   tax_type_id?: mongoose.Types.ObjectId | string | PopulatedRef | null;
+  tobacco_class?: string;
+  cigarette_pack_size?: number | null;
+  stock_unit?: string | null;
+  packs_per_stock_unit?: number | null;
   created_at?: Date | string;
   updated_at?: Date | string;
 }
@@ -167,6 +172,7 @@ export function toStaffProduct(product: RawProductDoc) {
     created_at: product.created_at,
     updated_at: product.updated_at,
     ...staffTaxTypeFields(product),
+    ...staffTobaccoComplianceFields(product),
   } as const;
 }
 
@@ -181,6 +187,17 @@ export const INTERNAL_PRODUCT_FIELDS = [
   'low_stock_threshold',
   'committed_quantity',
   'plu',
+  'tobacco_class',
+  'cigarette_pack_size',
+  'stock_unit',
+  'packs_per_stock_unit',
+  'tobacco_profile_complete',
+  'tobacco_profile_issues',
+  'cigarette_reporting_ready',
+  'cigarette_reporting_applicable',
+  'cigarette_reporting_issues',
+  'tobacco_compliance_complete',
+  'tobacco_compliance_issues',
   // updated_at is also omitted from public to minimize surface
   'updated_at',
 ] as const;

@@ -1,35 +1,28 @@
+/**
+ * Delete the product catalogue: Products, Categories, SubCategories, and customer
+ * product prices. LOCAL development databases only.
+ *
+ * SAFEGUARDS
+ *   npm run db:clear-products-categories
+ *       Dry run (the default). Prints the database, host, each collection, its
+ *       document count and what would happen. Changes nothing.
+ *
+ *   npm run db:clear-products-categories -- --confirm-database=<database name> --acknowledge-catalogue-deletion
+ *       Executes. Both flags are required and must be typed on every run; a
+ *       confirmation stored in the package.json script is refused.
+ *
+ * It refuses, without opening a connection, when MONGODB_URI is not a MongoDB server
+ * on this machine or NODE_ENV is "production". After connecting it refuses again
+ * unless the server itself reports that it runs on this machine.
+ * Cloudinary images are never deleted; only the image URLs stored on the records.
+ */
 import connectDB from './connection';
-import Category from '../models/Category';
-import CustomerProductPrice from '../models/CustomerProductPrice';
-import Product from '../models/Product';
-import SubCategory from '../models/SubCategory';
+import { productsAndCategoriesCleanupConfig } from './cleanupPlans';
+import { createCleanupDeps, runGuardedCleanup } from './cleanupRunner';
 
-async function clearProductsAndCategories() {
-  console.log('🔄 Connecting to MongoDB...');
-  await connectDB();
-  console.log('🗑️  Clearing Products, Categories, SubCategories, and customer product prices...\n');
-
-  try {
-    const cppRes = await CustomerProductPrice.deleteMany({});
-    console.log(`  CustomerProductPrices: ${cppRes.deletedCount} document(s) deleted`);
-
-    const prodRes = await Product.deleteMany({});
-    console.log(`  Products: ${prodRes.deletedCount} document(s) deleted`);
-
-    const catRes = await Category.deleteMany({});
-    console.log(`  Categories: ${catRes.deletedCount} document(s) deleted`);
-
-    const subRes = await SubCategory.deleteMany({});
-    console.log(`  SubCategories: ${subRes.deletedCount} document(s) deleted`);
-  } catch (err: any) {
-    console.error(`ERROR - ${err.message}`);
-  }
-
-  console.log('\n✅ Products and categories cleared.');
-  process.exit(0);
-}
-
-clearProductsAndCategories().catch((err) => {
-  console.error('Failed to clear data:', err);
-  process.exit(1);
-});
+runGuardedCleanup(productsAndCategoriesCleanupConfig, createCleanupDeps(connectDB))
+  .then((code) => process.exit(code))
+  .catch((err) => {
+    console.error('Failed to clear products and categories:', err);
+    process.exit(1);
+  });

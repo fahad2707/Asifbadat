@@ -13,6 +13,7 @@ import {
   hasInvoiceLineTaxSnapshot,
   invoiceTaxTotals,
 } from '../utils/invoiceLineTax';
+import { attachWholesaleTaxSnapshots } from '../utils/wholesaleTaxSnapshot';
 import { authenticateAdmin, AuthRequest } from '../middleware/auth';
 import nodemailer from 'nodemailer';
 import { buildInvoicePdfBuffer } from '../utils/invoicePdfLayout';
@@ -391,11 +392,19 @@ router.post('/', authenticateAdmin, async (req: AuthRequest, res) => {
       inheritFromProduct,
       customerExempt,
     });
-    const items = built.items;
-    const { subtotal_amount, tax_amount, total_amount } = invoiceTaxTotals(items, {
+    const { subtotal_amount, tax_amount, total_amount } = invoiceTaxTotals(built.items, {
       usedLineTax: built.usedLineTax,
       fallbackTaxAmount: Number(body.tax_amount) || 0,
     });
+    const stamped = attachWholesaleTaxSnapshots({
+      mode: 'create',
+      items: built.items,
+      productsById,
+      customerExempt,
+      documentType: docType === DOCUMENT_TYPE_QUOTATION ? 'quotation' : 'invoice',
+      documentTax: tax_amount,
+    });
+    const items = stamped.items;
 
     const floorErr = sellingPriceFloorError(items, productsById);
     if (floorErr) return res.status(400).json({ error: floorErr });
@@ -421,6 +430,7 @@ router.post('/', authenticateAdmin, async (req: AuthRequest, res) => {
       payment_status: 'unpaid',
       source: 'WHOLESALE' as const,
       items,
+      ...(stamped.tax_reconciliation ? { tax_reconciliation: stamped.tax_reconciliation } : {}),
     };
 
     const inv =
@@ -660,16 +670,25 @@ router.put('/:id', authenticateAdmin, async (req: AuthRequest, res) => {
         inheritFromProduct,
         customerExempt,
       });
-      const items = built.items;
       const usedLineTax = built.usedLineTax || existingHasLineTax;
       const fallbackTax =
         body.tax_amount !== undefined && body.tax_amount !== null
           ? Number(body.tax_amount) || 0
           : Number((invoice as any).tax_amount) || 0;
-      const { subtotal_amount, tax_amount, total_amount: proposedTotal } = invoiceTaxTotals(items, {
+      const { subtotal_amount, tax_amount, total_amount: proposedTotal } = invoiceTaxTotals(built.items, {
         usedLineTax,
         fallbackTaxAmount: fallbackTax,
       });
+      const stamped = attachWholesaleTaxSnapshots({
+        mode: 'edit',
+        items: built.items,
+        existingItems,
+        productsById,
+        customerExempt,
+        documentType: isQuotationType(invoice.invoice_type) ? 'quotation' : 'invoice',
+        documentTax: tax_amount,
+      });
+      const items = stamped.items;
 
       const floorErr = sellingPriceFloorError(items, productsById);
       if (floorErr) return res.status(400).json({ error: floorErr });
@@ -714,6 +733,7 @@ router.put('/:id', authenticateAdmin, async (req: AuthRequest, res) => {
             tax_amount,
             total_amount: proposedTotal,
             payment_status: migratedState.payment_status,
+            ...(stamped.tax_reconciliation ? { tax_reconciliation: stamped.tax_reconciliation } : {}),
           },
           adminId: req.userId,
         });
@@ -737,6 +757,7 @@ router.put('/:id', authenticateAdmin, async (req: AuthRequest, res) => {
       invoice.subtotal_amount = subtotal_amount;
       invoice.tax_amount = tax_amount;
       invoice.total_amount = proposedTotal;
+      if (stamped.tax_reconciliation) invoice.tax_reconciliation = stamped.tax_reconciliation;
     }
     // Never overwrite amount_paid on edit. Status comes from the canonical helper.
     const state = invoiceFinancialState(invoice);
@@ -820,9 +841,9 @@ router.post('/:id/convert', authenticateAdmin, async (req: AuthRequest, res) => 
       return res.status(400).json({ error: `This quotation was already converted to ${mark.converted_invoice_number}.` });
     }
 
-    const items = copyInvoiceLineSnapshots((quote as any).items || []);
-    const usedLineTax = items.some((item) => hasInvoiceLineTaxSnapshot(item));
-    const totals = invoiceTaxTotals(items, {
+    const copiedItems = copyInvoiceLineSnapshots((quote as any).items || []);
+    const usedLineTax = copiedItems.some((item) => hasInvoiceLineTaxSnapshot(item));
+    const totals = invoiceTaxTotals(copiedItems, {
       usedLineTax,
       fallbackTaxAmount: Number((quote as any).tax_amount) || 0,
     });
@@ -831,6 +852,15 @@ router.post('/:id/convert', authenticateAdmin, async (req: AuthRequest, res) => 
     const total_amount = usedLineTax
       ? totals.total_amount
       : Number((quote as any).total_amount) || subtotal_amount + tax_amount;
+    const stamped = attachWholesaleTaxSnapshots({
+      mode: 'convert',
+      items: copiedItems,
+      existingItems: (quote as any).items || [],
+      documentType: 'invoice',
+      documentTax: tax_amount,
+      estimateDocumentId: quote._id.toString(),
+    });
+    const items = stamped.items;
     const invoice_number = await nextPrefixedNumber(
       Invoice,
       'invoice_number',
@@ -867,6 +897,7 @@ router.post('/:id/convert', authenticateAdmin, async (req: AuthRequest, res) => 
         payment_status: 'unpaid',
         source: 'WHOLESALE',
         items,
+        ...(stamped.tax_reconciliation ? { tax_reconciliation: stamped.tax_reconciliation } : {}),
       },
     });
 

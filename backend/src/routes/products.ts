@@ -24,12 +24,25 @@ import {
   ensureInternalSkuForProduct,
   generateProductId,
   InternalSkuError,
-  migrateProductIdAndSku,
+  planProductCodeMigration,
+  executeApprovedProductCodeMigration,
   resolveCreateProductId,
 } from '../utils/productCodes';
+import {
+  PUBLIC_TARGET_REFUSAL,
+  backfillRuntime,
+  readBackfillIntent,
+  summarizeProductCodePlan,
+} from '../utils/productCodeBackfill';
+import { migrationJournal } from '../utils/migrationJournal';
 import { toPublicProduct, toStaffProduct } from '../utils/productProjection';
 import { isUserLinkedToApprovedCustomer } from '../utils/customerAccount';
 import { parseTaxTypeIdInput, staffTaxTypeFields } from '../utils/productTaxType';
+import {
+  applyTobaccoComplianceToMongoUpdate,
+  parseTobaccoComplianceBody,
+  tobaccoComplianceCreateFields,
+} from '../utils/productTobaccoCompliance';
 import {
   optionalOpeningAdminId,
   shouldWriteOpeningStockMovement,
@@ -128,17 +141,124 @@ router.get('/generate-id', authenticateAdmin, async (req, res) => {
   res.json({ product_id, item_id: product_id });
 });
 
-/** One-time / maintenance: assign product_id + move UPCs into sku for full catalog. */
+/**
+ * One-time maintenance: assign product_id and move UPCs into sku.
+ * A normal POST is a dry run. Writing requires `confirmDatabase` in the JSON
+ * body, equal to the connected database name, and a database on this machine.
+ * Query parameters and the admin token alone never authorize a write.
+ */
 router.post('/backfill-codes', authenticateAdmin, async (req, res) => {
   try {
-    const result = await migrateProductIdAndSku();
-    res.json({
-      message: 'Backfill complete',
-      updated: result.updated,
-      examined: result.examined,
-      skippedNoChange: result.skippedNoChange,
-      warnings: result.warnings.slice(0, 100),
-      warningCount: result.warnings.length,
+    const intent = readBackfillIntent(req.body, req.query);
+    if (intent.kind === 'refused') {
+      return res.status(intent.status).json({
+        error: 'Product code backfill did not run. No products were changed.',
+        reason: intent.reason,
+        mode: 'refused',
+        updated: 0,
+      });
+    }
+
+    const assessment = await backfillRuntime.assess();
+    const reportBase = async () => {
+      const plan = await planProductCodeMigration();
+      const summary = summarizeProductCodePlan(plan);
+      const warnings = summary.warnings.slice(0, 100);
+      const running = assessment.safe && assessment.databaseName
+        ? await migrationJournal.listRunning(assessment.databaseName)
+        : [];
+      return {
+        examined: summary.examined,
+        wouldUpdate: summary.wouldUpdate,
+        skippedNoChange: summary.skippedNoChange,
+        fields: summary.fields,
+        manualReview: summary.manualReview,
+        reviews: summary.reviews.slice(0, 50),
+        warnings,
+        warningCount: summary.warnings.length,
+        databaseName: assessment.databaseName ?? null,
+        interruptedRunIds: running.map((journal) => journal.runId),
+        updated: 0,
+      };
+    };
+
+    if (intent.kind === 'dry-run') {
+      const report = await reportBase();
+      return res.json({
+        ...report,
+        mode: 'dry-run',
+        message: assessment.safe
+          ? 'Dry run: no products were changed.'
+          : 'Dry run: no products were changed. Execution is refused on this database target.',
+      });
+    }
+
+    if (!assessment.safe || intent.confirmDatabase !== assessment.databaseName) {
+      const report = await reportBase();
+      const reason = !assessment.safe
+        ? PUBLIC_TARGET_REFUSAL
+        : 'confirmDatabase does not match the connected database.';
+      if (!assessment.safe && assessment.reason) {
+        console.error('Product code backfill refused:', assessment.reason);
+      }
+      return res.status(409).json({
+        ...report,
+        mode: 'refused',
+        error: 'Product code backfill did not run. No products were changed.',
+        reason,
+      });
+    }
+
+    const executed = await executeApprovedProductCodeMigration();
+    const planForReport = executed.plan ?? {
+      examined: 0,
+      skippedNoChange: 0,
+      changes: [],
+      reviews: [],
+      warnings: [],
+      digest: '',
+    };
+    const summary = summarizeProductCodePlan(planForReport);
+    const applied = executed.applied;
+    const report = {
+      examined: summary.examined,
+      wouldUpdate: summary.wouldUpdate,
+      skippedNoChange: summary.skippedNoChange,
+      fields: summary.fields,
+      manualReview: summary.manualReview,
+      reviews: summary.reviews.slice(0, 50),
+      warnings: summary.warnings.slice(0, 100),
+      warningCount: summary.warnings.length,
+      databaseName: assessment.databaseName ?? null,
+      interruptedRunIds: applied.interruptedRunIds,
+      updated: applied.updated,
+    };
+    const execution = {
+      updated: applied.updated,
+      updatedIds: applied.updatedIds,
+      failed: applied.failed,
+      notAttempted: applied.notAttempted,
+    };
+    if (!applied.applied) {
+      return res.status(409).json({
+        ...report,
+        ...execution,
+        mode: 'refused',
+        error:
+          applied.updated === 0
+            ? 'Product code backfill did not run. No products were changed.'
+            : 'Product code backfill stopped. Products already written were not retried.',
+        reason: applied.reason,
+      });
+    }
+    const combined = [...summary.warnings, ...applied.warnings];
+    return res.json({
+      ...report,
+      ...execution,
+      mode: 'executed',
+      warnings: combined.slice(0, 100),
+      warningCount: combined.length,
+      message: `Product code backfill applied to ${applied.updated} product(s).`,
     });
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : 'Backfill failed';
@@ -596,6 +716,10 @@ router.post('/', authenticateAdmin, async (req: AuthRequest, res) => {
       low_stock_threshold: z.coerce.number().int().min(0).optional(),
       is_active: z.boolean().optional(),
       product_id: z.string().optional(),
+      tobacco_class: z.unknown().optional(),
+      cigarette_pack_size: z.unknown().optional(),
+      stock_unit: z.unknown().optional(),
+      packs_per_stock_unit: z.unknown().optional(),
     });
 
     const raw = schema.parse(req.body);
@@ -614,6 +738,13 @@ router.post('/', authenticateAdmin, async (req: AuthRequest, res) => {
     const subCategoryId = toObjectIdOrUndefined(data.sub_category_id);
     const vendorId = toObjectIdOrUndefined(data.vendor_id);
     const taxAssignment = await resolveTaxTypeAssignment(data.tax_type_id);
+    let tobaccoFields;
+    try {
+      tobaccoFields = tobaccoComplianceCreateFields(parseTobaccoComplianceBody(data as Record<string, unknown>));
+    } catch (err: any) {
+      err.status = 400;
+      throw err;
+    }
     const productType = data.product_type || 'inventory';
     const openingQty = data.stock_quantity ?? 0;
     const fields = {
@@ -637,6 +768,7 @@ router.post('/', authenticateAdmin, async (req: AuthRequest, res) => {
       stock_quantity: openingQty,
       low_stock_threshold: data.low_stock_threshold ?? 10,
       is_active: data.is_active !== false,
+      ...tobaccoFields,
     };
 
     const session = await mongoose.startSession();
@@ -702,6 +834,10 @@ router.put('/:id', authenticateAdmin, async (req: AuthRequest, res) => {
       stock_quantity: z.number().int().optional(),
       low_stock_threshold: z.number().int().min(0).optional(),
       is_active: z.boolean().optional(),
+      tobacco_class: z.unknown().optional(),
+      cigarette_pack_size: z.unknown().optional(),
+      stock_unit: z.unknown().optional(),
+      packs_per_stock_unit: z.unknown().optional(),
     });
 
     const data = schema.parse(req.body);
@@ -737,6 +873,21 @@ router.put('/:id', authenticateAdmin, async (req: AuthRequest, res) => {
     delete rest.sub_category_id;
     delete (rest as any).tax_type_id;
     delete (rest as any).stock_quantity;
+    delete (rest as any).tobacco_class;
+    delete (rest as any).cigarette_pack_size;
+    delete (rest as any).stock_unit;
+    delete (rest as any).packs_per_stock_unit;
+    try {
+      applyTobaccoComplianceToMongoUpdate(
+        parseTobaccoComplianceBody(data as Record<string, unknown>),
+        update,
+        unset,
+        existing as { stock_unit?: unknown; packs_per_stock_unit?: unknown }
+      );
+    } catch (err: any) {
+      err.status = 400;
+      throw err;
+    }
     // Product ID is permanent once assigned. First save may keep a generated preview.
     const existingPid = String((existing as any).product_id || '').trim();
     delete (rest as any).product_id;

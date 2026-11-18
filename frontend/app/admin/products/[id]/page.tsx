@@ -8,6 +8,12 @@ import adminApi from '@/lib/admin-api';
 import toast from 'react-hot-toast';
 import ProductModal from '@/components/admin/ProductModal';
 import { productTaxLabel } from '@/lib/tax-type';
+import {
+  STOCK_UNIT_LABELS,
+  TOBACCO_CLASS_LABELS,
+  type StockUnit,
+  type TobaccoClass,
+} from '@/lib/tobacco-compliance';
 
 type TabId = 'overview' | 'inventory' | 'pricing' | 'sales' | 'suppliers' | 'analytics';
 
@@ -31,6 +37,15 @@ interface Product {
   tax_type_id?: string | null;
   tax_type_configured?: boolean;
   tax_type_label?: string;
+  tobacco_class?: string;
+  cigarette_pack_size?: number | null;
+  stock_unit?: string | null;
+  packs_per_stock_unit?: number | null;
+  tobacco_profile_complete?: boolean;
+  cigarette_reporting_ready?: boolean;
+  cigarette_reporting_applicable?: boolean;
+  tobacco_compliance_complete?: boolean;
+  tobacco_compliance_issues?: string[];
   vendor_id?: string;
   is_active?: boolean;
 }
@@ -271,6 +286,57 @@ export default function Product360Page() {
                 <div><span className="text-[#6B6C72] block text-[11px]">Tax type</span><span className="font-semibold text-[#1A1A1A]">{productTaxLabel(product)}</span></div>
               </div>
               <div className="pt-2"><span className="text-[#6B6C72] block text-[11px]">Description</span><span className="text-[#1A1A1A] text-sm">{product.description || '—'}</span></div>
+              <div className="pt-4 space-y-3">
+                <h3 className="text-xs font-semibold text-[#6B6C72] uppercase tracking-wider pb-1.5 border-b border-[#E3E5E8]">Tobacco Compliance Profile</h3>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <span className="text-[#6B6C72] block text-[11px]">Regulatory classification</span>
+                    <span className="font-semibold text-[#1A1A1A]">
+                      {TOBACCO_CLASS_LABELS[(product.tobacco_class as TobaccoClass) || 'unknown'] || 'Unknown (not verified)'}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-[#6B6C72] block text-[11px]">Profile</span>
+                    <span className={`font-semibold ${product.tobacco_profile_complete ? 'text-[#1A1A1A]' : 'text-amber-700'}`}>
+                      {product.tobacco_profile_complete ? 'Classified' : 'Incomplete'}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-[#6B6C72] block text-[11px]">Cigarette reporting</span>
+                    <span className={`font-semibold ${product.cigarette_reporting_ready ? 'text-emerald-700' : 'text-amber-700'}`}>
+                      {product.cigarette_reporting_applicable
+                        ? product.cigarette_reporting_ready
+                          ? 'Ready'
+                          : 'Not ready'
+                        : 'Not applicable'}
+                    </span>
+                  </div>
+                  {product.tobacco_class === 'cigarette' && (
+                    <>
+                      <div>
+                        <span className="text-[#6B6C72] block text-[11px]">Cigarette pack size</span>
+                        <span className="font-semibold text-[#1A1A1A]">
+                          {product.cigarette_pack_size ? `${product.cigarette_pack_size} sticks` : 'Not set'}
+                        </span>
+                      </div>
+                      <div>
+                        <span className="text-[#6B6C72] block text-[11px]">Stock unit</span>
+                        <span className="font-semibold text-[#1A1A1A]">
+                          {product.stock_unit
+                            ? STOCK_UNIT_LABELS[product.stock_unit as StockUnit] || product.stock_unit
+                            : 'Not set'}
+                        </span>
+                      </div>
+                      <div>
+                        <span className="text-[#6B6C72] block text-[11px]">Packs per stock unit</span>
+                        <span className="font-semibold text-[#1A1A1A]">
+                          {product.packs_per_stock_unit != null ? product.packs_per_stock_unit : 'Not set'}
+                        </span>
+                      </div>
+                    </>
+                  )}
+                </div>
+              </div>
             </div>
           </div>
         )}

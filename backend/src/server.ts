@@ -41,6 +41,7 @@ import shipmentRoutes from './modules/shipping/routes/shipments';
 import packageRoutes from './modules/shipping/routes/packages';
 import expenseRoutes from './modules/expenses/routes/expenses';
 import reportRoutes from './modules/reports/routes/reports';
+import complianceRoutes from './routes/compliance';
 import onlineOrderRoutes from './routes/online-orders';
 import rfqRoutes from './routes/rfq';
 
@@ -200,6 +201,7 @@ app.use('/api/packages', packageRoutes);
 app.use('/api/rfq', rfqRoutes);
 app.use('/api/expenses', expenseRoutes);
 app.use('/api/reports', reportRoutes);
+app.use('/api/compliance', complianceRoutes);
 
 // Error handling middleware
 app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {

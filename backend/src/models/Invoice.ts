@@ -18,6 +18,8 @@ export interface IInvoiceItem {
   /** True when this line was zeroed because the customer was tax-exempt at save time. */
   tax_exempt?: boolean;
   total?: number;
+  /** Wholesale tax decision captured beside the line amount. Absent on legacy lines. */
+  tax_snapshot?: Record<string, unknown>;
 }
 
 export interface IInvoice extends Document {
@@ -56,6 +58,12 @@ export interface IInvoice extends Document {
   /** false = stock not taken. true = taken. Absent = legacy (already taken at create). */
   inventory_applied?: boolean;
   linked_shipment_id?: mongoose.Types.ObjectId;
+  /**
+   * Set only when this save wrote wholesale tax snapshots.
+   * header_exceeds_lines means document tax_amount is higher than the line sum.
+   * Absent on legacy documents. Not a backfill.
+   */
+  tax_reconciliation?: 'header_exceeds_lines' | 'lines_match';
   items?: IInvoiceItem[];
   created_at: Date;
   updated_at: Date;
@@ -77,6 +85,7 @@ const InvoiceItemSchema = new Schema<IInvoiceItem>({
   tax_type_label: { type: String },
   tax_exempt: { type: Boolean },
   total: { type: Number },
+  tax_snapshot: { type: Schema.Types.Mixed },
 });
 
 const InvoiceSchema = new Schema<IInvoice>(
@@ -108,6 +117,7 @@ const InvoiceSchema = new Schema<IInvoice>(
     fulfillment_method: { type: String, enum: ['unfulfilled', 'store_pickup', 'shipment'] },
     inventory_applied: { type: Boolean },
     linked_shipment_id: { type: Schema.Types.ObjectId, ref: 'Shipment' },
+    tax_reconciliation: { type: String, enum: ['header_exceeds_lines', 'lines_match'] },
     items: [InvoiceItemSchema],
   },
   {

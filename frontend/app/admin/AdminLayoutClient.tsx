@@ -397,6 +397,11 @@ export default function AdminLayoutClient({ children }: { children: React.ReactN
       label: 'Reports',
       items: [
         { href: '/admin/analytics', label: 'Profit & loss', icon: BarChart3, active: pathMatches(pathname, '/admin/analytics') },
+        { href: '/admin/compliance', label: 'Compliance', icon: FileText, active: pathname === '/admin/compliance' },
+        { href: '/admin/compliance/sales-tax', label: 'Sales tax', icon: Percent, active: pathMatches(pathname, '/admin/compliance/sales-tax') },
+        { href: '/admin/compliance/tobacco', label: 'Tobacco compliance', icon: Package, active: pathMatches(pathname, '/admin/compliance/tobacco') },
+        { href: '/admin/compliance/reports', label: 'Compliance reports', icon: ClipboardList, active: pathMatches(pathname, '/admin/compliance/reports') },
+        { href: '/admin/compliance/settings', label: 'Compliance settings', icon: Settings, active: pathMatches(pathname, '/admin/compliance/settings') },
       ],
     },
   ];

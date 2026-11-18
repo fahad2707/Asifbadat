@@ -45,6 +45,9 @@ interface Product {
   tax_type_configured?: boolean;
   tax_type_label?: string;
   tax_type?: TaxTypeOption | null;
+  tobacco_class?: string;
+  cigarette_reporting_ready?: boolean;
+  tobacco_compliance_complete?: boolean;
 }
 
 interface CategoryOption {
@@ -1023,6 +1026,12 @@ export function ProductsAdminView({ initialView = 'all' }: { initialView?: Produ
                       <span className="font-bold text-[#1A1A1A] hover:text-[#0F9F8F] transition-colors">
                         {titleCaseWords(product.name)}
                       </span>
+                      {product.tobacco_class === 'cigarette' &&
+                        !(product.cigarette_reporting_ready ?? product.tobacco_compliance_complete) && (
+                        <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-amber-50 text-amber-800">
+                          PA reporting not ready
+                        </span>
+                      )}
                     </div>
                   </td>
                   <td className="py-3 px-4 text-[#6B6C72] font-semibold">

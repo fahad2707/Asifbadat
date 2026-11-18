@@ -8,6 +8,7 @@ import { parseCsvRecords } from '../utils/csvParseRecords';
 import mongoose from 'mongoose';
 import Product from '../models/Product';
 import { generateProductId } from '../utils/productCodes';
+import { identifierLock } from '../utils/identifierLock';
 import Category from '../models/Category';
 import SubCategory from '../models/SubCategory';
 import { shouldWriteOpeningStockMovement, writeOpeningStockMovement } from '../utils/openingStockMovement';
@@ -318,6 +319,26 @@ export async function executeImport(
     };
   }
 
+  let lock;
+  try {
+    lock = await identifierLock.acquire({
+      databaseName: mongoose.connection.name || '',
+      purpose: 'product-csv-import',
+    });
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'The product identifier lock could not be acquired. No products were changed.';
+    return {
+      imported: 0,
+      failed: validRows.length,
+      duplicate_skipped: preview.summary.duplicate_skipped,
+      total: preview.summary.total,
+      errors: [{ row: 0, message }],
+      categories_created: 0,
+      subcategories_created: 0,
+    };
+  }
+
+  try {
   const session = await mongoose.startSession();
   session.startTransaction();
   const usedSlugs = new Set<string>(await Product.distinct('slug', {}, { session }));
@@ -471,4 +492,9 @@ export async function executeImport(
     categories_created: transactionAborted ? 0 : categories_created,
     subcategories_created: transactionAborted ? 0 : subcategories_created,
   };
+  } finally {
+    await identifierLock.release(lock).catch(() => {
+      console.error('Product identifier lock could not be released.');
+    });
+  }
 }

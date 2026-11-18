@@ -15,7 +15,9 @@ import {
   emptyInvoiceLineTax,
   hasInvoiceLineTaxSnapshot,
   inheritInvoiceLineTax,
+  invoiceLineTaxDisplayLabel,
   recalculateInvoiceLineTax,
+  TAX_DECISION_NOT_CONFIRMED_LABEL,
   type InvoiceLineTaxState,
 } from '@/lib/tax-type';
 import { minSellingPrice, sellingBelowMin } from '@/lib/min-selling-price';
@@ -136,6 +138,7 @@ interface LineItem extends InvoiceLineTaxState {
   subtotal: number;
   cost_price?: number;
   stock_quantity?: number;
+  tax_snapshot?: { money_decision?: string; role?: string; reporting?: string } | null;
 }
 
 export interface InvoiceInitialItem {
@@ -278,6 +281,7 @@ export default function InvoiceFormLightbox({ isOpen, onClose, onSaved, editId, 
             subtotal,
             cost_price: undefined,
             ...snapshot,
+            tax_snapshot: i.tax_snapshot && typeof i.tax_snapshot === 'object' ? i.tax_snapshot : undefined,
           };
         });
         while (items.length < INITIAL_LINES) items.push(emptyLine());
@@ -1008,7 +1012,7 @@ export default function InvoiceFormLightbox({ isOpen, onClose, onSaved, editId, 
                               )}
                             </td>
                             <td className={`py-2 px-4 text-xs ${line.issue ? 'text-amber-700' : 'text-gray-600'}`}>
-                              {hasProduct ? (line.tax_type_label || '—') : ''}
+                              {hasProduct ? invoiceLineTaxDisplayLabel(line) : ''}
                             </td>
                             <td className="py-2 px-4 text-right">
                               {hasProduct ? (
@@ -1065,7 +1069,10 @@ export default function InvoiceFormLightbox({ isOpen, onClose, onSaved, editId, 
                   <div className="space-y-2 min-w-[220px]">
                     <p className="text-sm text-gray-600">Subtotal: <span className={`font-medium ${moneyIn}`}>${subtotal.toFixed(2)}</span></p>
                     {usesLineTax && (
-                      <p className="text-sm text-gray-600">Product tax: <span className="font-medium text-gray-900">${lineTaxTotal.toFixed(2)}</span></p>
+                      <p className="text-sm text-gray-600">
+                        {documentType === 'quotation' ? 'Estimated product tax' : 'Product tax'}:{' '}
+                        <span className="font-medium text-gray-900">${lineTaxTotal.toFixed(2)}</span>
+                      </p>
                     )}
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">Tax on bill ($)</label>
@@ -1082,7 +1089,14 @@ export default function InvoiceFormLightbox({ isOpen, onClose, onSaved, editId, 
                         className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
                       />
                     </div>
-                    <p className="text-sm text-gray-600">Tax: <span className={`font-medium ${moneyIn}`}>${displayTax.toFixed(2)}</span></p>
+                    <p className="text-sm text-gray-600">
+                      {documentType === 'quotation' ? 'Estimated tax' : 'Tax'}:{' '}
+                      <span className={`font-medium ${moneyIn}`}>${displayTax.toFixed(2)}</span>
+                      {documentType === 'quotation' ? <span className="ml-2 text-xs text-gray-500">Not recorded sales tax</span> : null}
+                      {lines.some((line) => invoiceLineTaxDisplayLabel(line) === TAX_DECISION_NOT_CONFIRMED_LABEL) ? (
+                        <span className="ml-2 text-xs text-amber-800">{TAX_DECISION_NOT_CONFIRMED_LABEL}</span>
+                      ) : null}
+                    </p>
                     <p className={`font-semibold text-base ${moneyIn}`}>Total: ${total.toFixed(2)}</p>
                     <p className="text-xs text-gray-500 max-w-xs">Product tax is inherited from each line. Use Tax on bill for an extra amount on the whole document. T means tax applies.</p>
                   </div>

@@ -1,7 +1,15 @@
+/**
+ * Seed: creates the default admin if it does not exist. Nothing else.
+ *
+ * NON-DESTRUCTIVE. This script never deletes or modifies products, categories
+ * or any other record. It used to delete every Product and Category before
+ * creating the admin; that step seeded nothing and has been removed so the
+ * script is safe to run against a database that already holds a catalogue.
+ * To delete the catalogue deliberately, use `npm run db:clear-products-categories`
+ * (local databases only, with explicit confirmation).
+ */
 import connectDB from './connection';
 import Admin from '../models/Admin';
-import Category from '../models/Category';
-import Product from '../models/Product';
 import bcrypt from 'bcryptjs';
 
 async function seed() {
@@ -9,12 +17,6 @@ async function seed() {
     console.log('🔄 Connecting to MongoDB...');
     await connectDB();
     console.log('✅ Connected! Starting seed...');
-
-    // Clear existing products and categories (you will create your own)
-    console.log('🔄 Clearing existing categories and products...');
-    await Product.deleteMany({});
-    await Category.deleteMany({});
-    console.log('✅ Cleared categories and products!');
 
     // Create default admin only (admin@edinc.com / Admin1234)
     const defaultEmail = 'admin@edinc.com';
@@ -32,7 +34,7 @@ async function seed() {
       console.log('✅ Admin already exists');
     }
 
-    console.log('✅ Seed complete. Add your own categories and products from the admin panel.');
+    console.log('✅ Seed complete. Existing products and categories were not touched.');
     process.exit(0);
   } catch (error: any) {
     console.error('❌ Seeding failed:', error);

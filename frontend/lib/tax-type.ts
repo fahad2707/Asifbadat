@@ -55,6 +55,32 @@ export function customerIsCurrentlyExempt(customer: { tax_exempt?: unknown } | n
 }
 
 export const CUSTOMER_EXEMPT_TAX_LABEL = 'Customer Exempt';
+export const TAX_DECISION_NOT_CONFIRMED_LABEL = 'Tax decision not confirmed';
+
+export function invoiceLineTaxDisplayLabel(line: {
+  tax_type_label?: string;
+  taxable?: boolean;
+  tax_exempt?: boolean;
+  tax_type_configured?: boolean;
+  issue?: InvoiceLineTaxIssue;
+  tax_snapshot?: { money_decision?: string; role?: string } | null;
+}): string {
+  const decision = line.tax_snapshot?.money_decision;
+  if (decision === 'incomplete') return TAX_DECISION_NOT_CONFIRMED_LABEL;
+  if (decision === 'customer_flag_zeroed') return line.tax_type_label || CUSTOMER_EXEMPT_TAX_LABEL;
+  if (decision === 'confirmed_non_taxable') return 'No Tax';
+  if (decision === 'confirmed_taxable') {
+    const label = line.tax_type_label || 'Tax';
+    return line.tax_snapshot?.role === 'estimate' ? `Estimate · ${label}` : label;
+  }
+  if (line.tax_exempt) return line.tax_type_label || CUSTOMER_EXEMPT_TAX_LABEL;
+  if (line.tax_type_configured === false || line.issue === 'amount_unsupported' || line.issue === 'not_configured') {
+    return TAX_DECISION_NOT_CONFIRMED_LABEL;
+  }
+  if (line.tax_type_label) return line.tax_type_label;
+  if (line.taxable === false) return 'No Tax';
+  return '—';
+}
 
 export type InvoiceLineTaxState = {
   taxable: boolean;

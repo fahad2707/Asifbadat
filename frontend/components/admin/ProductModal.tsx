@@ -9,6 +9,13 @@ import toast from 'react-hot-toast';
 import NumberInput from './NumberInput';
 import { minSellingPrice, sellingBelowMin } from '@/lib/min-selling-price';
 import { titleCaseWords } from '@/lib/titleCaseWords';
+import TobaccoComplianceProfileFields from './TobaccoComplianceProfileFields';
+import {
+  emptyTobaccoComplianceForm,
+  tobaccoFormFromProduct,
+  tobaccoPayloadFromForm,
+  type TobaccoComplianceFormValue,
+} from '@/lib/tobacco-compliance';
 
 const ADD_CATEGORY = '__add_category__';
 const ADD_SUB = '__add_sub__';
@@ -28,6 +35,11 @@ interface Product {
   tax_rate?: number;
   tax_type_id?: string | null;
   tax_type_configured?: boolean;
+  tobacco_class?: string;
+  cigarette_pack_size?: number | null;
+  stock_unit?: string | null;
+  packs_per_stock_unit?: number | null;
+  tobacco_compliance_complete?: boolean;
   image_url?: string;
   product_id?: string;
   sku?: string;
@@ -370,6 +382,7 @@ export default function ProductModal({ product, onClose, onSuccess }: ProductMod
   const [priceGroups, setPriceGroups] = useState<PriceGroupOption[]>([]);
   const [priceGroupId, setPriceGroupId] = useState('');
   const [newPriceGroupName, setNewPriceGroupName] = useState('');
+  const [tobacco, setTobacco] = useState<TobaccoComplianceFormValue>(emptyTobaccoComplianceForm());
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Defensive: never call .map/.find on a non-array (e.g. error object from a bad response).
@@ -459,9 +472,11 @@ export default function ProductModal({ product, onClose, onSuccess }: ProductMod
           ? undefined
           : product.tax_type_id ?? null;
       setTaxTypeId(assigned);
+      setTobacco(tobaccoFormFromProduct(product));
       if (product.image_url) setImagePreview(product.image_url);
     } else {
       setTaxTypeId(null);
+      setTobacco(emptyTobaccoComplianceForm());
       void (async () => {
         try {
           const { data } = await adminApi.get('/products/generate-id');
@@ -576,7 +591,15 @@ export default function ProductModal({ product, onClose, onSuccess }: ProductMod
         price: Number(formData.price) || 0,
         stock_quantity: Number(formData.stock_quantity) || 0,
         low_stock_threshold: Number(formData.low_stock_threshold) || 10,
+        ...tobaccoPayloadFromForm(tobacco),
       };
+      delete payload.tobacco_compliance_complete;
+      delete payload.tobacco_compliance_issues;
+      delete payload.tobacco_profile_complete;
+      delete payload.tobacco_profile_issues;
+      delete payload.cigarette_reporting_ready;
+      delete payload.cigarette_reporting_applicable;
+      delete payload.cigarette_reporting_issues;
       if (payload.product_id) payload.product_id = String(payload.product_id).trim();
       else delete payload.product_id;
       if (product?.id) {
@@ -935,6 +958,8 @@ export default function ProductModal({ product, onClose, onSuccess }: ProductMod
               </select>
             </div>
           </div>
+
+          <TobaccoComplianceProfileFields value={tobacco} onChange={setTobacco} />
 
           <div className="grid grid-cols-2 gap-4">
             <div>

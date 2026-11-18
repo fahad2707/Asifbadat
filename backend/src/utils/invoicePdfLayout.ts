@@ -208,7 +208,8 @@ export async function buildInvoicePdfBuffer(
 
   sumRow('Subtotal', fmtMoney(itemTotal));
   if (discount > 0) sumRow('Discount', `-${discount.toFixed(2)}`);
-  sumRow('Tax', fmtMoney(taxAmount));
+  const estimated = invoice.invoice_type === 'quotation';
+  sumRow(estimated ? 'Est. tax' : 'Tax', fmtMoney(taxAmount));
   if (adjustment !== 0) sumRow('Adjustment', fmtMoney(adjustment));
   sumRow('Total due', fmtMoney(grandTotal), true);
 
