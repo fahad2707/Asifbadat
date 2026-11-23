@@ -23,7 +23,6 @@ export function AdminDeskSearch({
   onChange,
   focused,
   onFocus,
-  onBlurContainer,
   compact,
   onNavigate,
 }: {
@@ -31,7 +30,6 @@ export function AdminDeskSearch({
   onChange: (next: string) => void;
   focused: boolean;
   onFocus: () => void;
-  onBlurContainer?: (node: HTMLDivElement | null) => void;
   compact?: boolean;
   onNavigate?: () => void;
 }) {
@@ -39,7 +37,7 @@ export function AdminDeskSearch({
   const [hits, setHits] = useState<DeskHit[]>([]);
   const [searching, setSearching] = useState(false);
   const scanRef = useRef<HTMLInputElement>(null);
-  const boxRef = useRef<HTMLDivElement>(null);
+  const boxNode = useRef<{ el: HTMLDivElement | null }>({ el: null });
   const [panelBox, setPanelBox] = useState<{ top: number; left: number; width: number } | null>(null);
 
   useEffect(() => {
@@ -90,7 +88,7 @@ export function AdminDeskSearch({
       return;
     }
     const place = () => {
-      const el = boxRef.current;
+      const el = boxNode.current.el;
       if (!el) return;
       const r = el.getBoundingClientRect();
       setPanelBox({ top: r.bottom + 8, left: r.left, width: r.width });
@@ -105,8 +103,7 @@ export function AdminDeskSearch({
   }, [showPanel, value, hits.length, searching]);
 
   const setRoot = (node: HTMLDivElement | null) => {
-    boxRef.current = node;
-    onBlurContainer?.(node);
+    boxNode.current.el = node;
   };
 
   const panel = showPanel && panelBox && typeof document !== 'undefined' ? createPortal(
@@ -147,7 +144,7 @@ export function AdminDeskSearch({
   ) : null;
 
   return (
-    <div ref={setRoot} className="relative z-40 flex-1 min-w-0">
+    <div ref={setRoot} data-desk-search="1" className="relative z-40 flex-1 min-w-0">
       <div className="relative">
         <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#8D9096]" />
         <input

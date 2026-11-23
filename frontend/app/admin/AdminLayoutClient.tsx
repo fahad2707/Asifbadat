@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter, usePathname, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import {
@@ -162,7 +162,6 @@ export default function AdminLayoutClient({ children }: { children: React.ReactN
   const [createOpen, setCreateOpen] = useState(false);
   const inbox = useDeskInbox(pathname !== '/admin/login');
 
-  const searchRef = useRef<HTMLDivElement>(null);
   const closeMobileNav = () => setMobileNavOpen(false);
 
   // Hotkeys: Ctrl + K or Cmd + K toggles palette
@@ -197,10 +196,8 @@ export default function AdminLayoutClient({ children }: { children: React.ReactN
   useEffect(() => {
     const clickOutside = (e: MouseEvent) => {
       const target = e.target as HTMLElement | null;
-      if (target?.closest('[data-desk-search-panel]')) return;
-      if (searchRef.current && !searchRef.current.contains(e.target as Node)) {
-        setSearchFocused(false);
-      }
+      if (target?.closest('[data-desk-search-panel],[data-desk-search]')) return;
+      setSearchFocused(false);
     };
     document.addEventListener('mousedown', clickOutside);
     return () => document.removeEventListener('mousedown', clickOutside);
@@ -538,9 +535,6 @@ export default function AdminLayoutClient({ children }: { children: React.ReactN
               focused={searchFocused}
               onFocus={() => setSearchFocused(true)}
               onNavigate={() => setSearchFocused(false)}
-              onBlurContainer={(node) => {
-                searchRef.current = node;
-              }}
             />
           </div>
 
