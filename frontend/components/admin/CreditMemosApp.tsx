@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { Plus, Search, X, Trash2, Download, Printer, ChevronLeft, ChevronRight } from 'lucide-react';
 import adminApi from '@/lib/admin-api';
@@ -121,7 +121,7 @@ export default function CreditMemosApp({ lockedType }: { lockedType: 'VENDOR' | 
     setTypeFilter(lockedType);
   }, [lockedType]);
 
-  const fetchList = async () => {
+  const fetchList = useCallback(async () => {
     try {
       const params: Record<string, string | number> = { page: 1, limit: 1000, type: lockedType };
       if (statusFilter) params.status = statusFilter;
@@ -132,11 +132,11 @@ export default function CreditMemosApp({ lockedType }: { lockedType: 'VENDOR' | 
     } finally {
       setLoading(false);
     }
-  };
+  }, [lockedType, statusFilter]);
 
   useEffect(() => {
     fetchList();
-  }, [typeFilter, statusFilter]);
+  }, [fetchList, typeFilter]);
 
   useEffect(() => {
     setPage(1);

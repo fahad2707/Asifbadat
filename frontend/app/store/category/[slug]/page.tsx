@@ -1,7 +1,8 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
+import Image from 'next/image';
 import Link from 'next/link';
 import { ArrowLeft, ShoppingCart, Star, Package } from 'lucide-react';
 import api from '@/lib/api';
@@ -26,27 +27,29 @@ export default function CategoryPage() {
   const [categoryName, setCategoryName] = useState('');
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    fetchProducts();
-  }, [params.slug]);
+  const slug = params.slug?.toString() || '';
 
-  const fetchProducts = async () => {
+  const fetchProducts = useCallback(async () => {
     try {
-      const response = await api.get(`/products?category=${params.slug}`);
+      const response = await api.get(`/products?category=${slug}`);
       setProducts(response.data.products || []);
 
       try {
-        const catResponse = await api.get(`/categories/${params.slug}`);
+        const catResponse = await api.get(`/categories/${slug}`);
         setCategoryName(catResponse.data.name);
       } catch {
-        setCategoryName(params.slug?.toString().replace(/-/g, ' ') || '');
+        setCategoryName(slug.replace(/-/g, ' '));
       }
     } catch (error) {
       toast.error('Failed to load products');
     } finally {
       setLoading(false);
     }
-  };
+  }, [slug]);
+
+  useEffect(() => {
+    fetchProducts();
+  }, [fetchProducts]);
 
   const handleAddToCart = (product: Product) => {
     const hasPrice = typeof product.price === 'number' && Number.isFinite(product.price);
@@ -112,10 +115,12 @@ export default function CategoryPage() {
               >
                 {product.image_url ? (
                   <div className="h-64 bg-gray-200 overflow-hidden relative">
-                    <img
+                    <Image
                       src={product.image_url}
                       alt={product.name}
-                      className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500"
+                      fill
+                      sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 25vw"
+                      className="object-cover group-hover:scale-110 transition-transform duration-500"
                     />
                     {product.sku && (
                       <span

@@ -120,7 +120,10 @@ export default function CustomerCreditMemoLightbox({
   }, [open, customerId]);
 
   const selected = invoices.find((inv) => inv.id === invoiceId) || null;
-  const returnableLines = selected?.items.filter((line) => line.quantity_remaining > 0) || [];
+  const returnableLines = useMemo(
+    () => selected?.items.filter((line) => line.quantity_remaining > 0) || [],
+    [selected]
+  );
 
   useEffect(() => {
     if (!open || reason !== 'DAMAGED' || !selected) {

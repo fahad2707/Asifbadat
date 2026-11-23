@@ -1,6 +1,6 @@
 'use client';
 
-import { Suspense, useEffect, useRef, useState } from 'react';
+import { Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { ChevronLeft, ChevronRight, Download, Plus, Printer, Search, Trash2, X } from 'lucide-react';
 import adminApi, { uploadApi } from '@/lib/admin-api';
@@ -125,16 +125,16 @@ function PurchaseOrdersPageInner() {
     }
   };
 
-  const fetchVendors = async () => {
+  const fetchVendors = useCallback(async () => {
     try {
       const res = await adminApi.get('/vendors', { params: { limit: 5000 } });
       setVendors(res.data.vendors || []);
     } catch {
       toast.error('Failed to load vendors');
     }
-  };
+  }, []);
 
-  const fetchProducts = async () => {
+  const fetchProducts = useCallback(async () => {
     try {
       const res = await adminApi.get('/products', { params: { limit: 5000 } });
       setProducts(res.data.products || []);
@@ -143,7 +143,7 @@ function PurchaseOrdersPageInner() {
       toast.error('Failed to load products');
       return [] as Product[];
     }
-  };
+  }, []);
 
   const handleCreatedProduct = async (saved?: { id: string }) => {
     setShowAddProduct(false);
@@ -236,7 +236,7 @@ function PurchaseOrdersPageInner() {
       fetchVendors();
       fetchProducts();
     }
-  }, [showCreate]);
+  }, [showCreate, fetchVendors, fetchProducts]);
 
   const selectedVendor = vendors.find((v) => v.id === vendorId);
 
