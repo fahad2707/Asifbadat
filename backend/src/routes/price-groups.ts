@@ -102,7 +102,7 @@ router.post('/', authenticateAdmin, async (req: AuthRequest, res) => {
     const group = await PriceGroup.create({ name, product_ids: productIds });
     res.status(201).json(serializeGroup(group));
   } catch (error: any) {
-    if (error instanceof z.ZodError) return res.status(400).json({ error: error.errors[0].message });
+    if (error instanceof z.ZodError) return res.status(400).json({ error: error.message });
     if (error?.code === 11000) return res.status(400).json({ error: 'A price group with this name already exists' });
     console.error('Create price group error:', error);
     res.status(500).json({ error: 'Failed to create price group' });
@@ -146,7 +146,7 @@ router.post('/:id/products', authenticateAdmin, async (req: AuthRequest, res) =>
       message: `Added ${added} product(s) to price group`,
     });
   } catch (error: any) {
-    if (error instanceof z.ZodError) return res.status(400).json({ error: error.errors[0].message });
+    if (error instanceof z.ZodError) return res.status(400).json({ error: error.message });
     console.error('Add products to price group error:', error);
     res.status(500).json({ error: 'Failed to add products to price group' });
   }
@@ -178,7 +178,7 @@ router.put('/:id', authenticateAdmin, async (req: AuthRequest, res) => {
     if (!group) return res.status(404).json({ error: 'Price group not found' });
     res.json(serializeGroup(group));
   } catch (error: any) {
-    if (error instanceof z.ZodError) return res.status(400).json({ error: error.errors[0].message });
+    if (error instanceof z.ZodError) return res.status(400).json({ error: error.message });
     res.status(500).json({ error: 'Failed to update price group' });
   }
 });

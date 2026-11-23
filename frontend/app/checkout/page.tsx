@@ -80,6 +80,36 @@ export default function CheckoutPage() {
   const [cardName, setCardName] = useState('');
 
   useEffect(() => {
+    const token = typeof window !== 'undefined' ? String(localStorage.getItem('token') || '').trim() : '';
+    if (!token) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(`${API}/user/profile`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (!res.ok || cancelled) return;
+        const data = await res.json();
+        const contact = data?.contact || {};
+        const street = String(contact.shipping_address || contact.address || '').trim();
+        setName((current) => current || contact.name || data?.name || '');
+        setEmail((current) => current || contact.email || data?.email || '');
+        setPhone((current) => current || contact.phone || '');
+        setLine1((current) => current || street);
+        setCity((current) => current || contact.city || '');
+        setState((current) => current || contact.state || '');
+        setZip((current) => current || String(contact.zip || '').replace(/\D/g, '').slice(0, 5));
+        setCardName((current) => current || contact.name || data?.name || '');
+      } catch {
+        /* Checkout remains usable if the saved customer record cannot be loaded. */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
     if (persistItems.length) {
       setCart(toCheckoutItems(persistItems));
       return;

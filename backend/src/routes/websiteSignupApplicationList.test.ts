@@ -111,6 +111,12 @@ function stubList(opts: {
     assert.deepEqual(q, capture.query);
     return opts.total ?? (opts.rows ? opts.rows.length : 0);
   });
+  mock.method(Customer, 'find', () => ({
+    select() {
+      return this;
+    },
+    lean: async () => [],
+  }));
   return capture;
 }
 
@@ -156,7 +162,7 @@ test('admin can list applications', async () => {
   assert.equal(res.body.applications[0].match_kind, 'none');
   assert.equal(res.body.applications[0].customer_id, CUSTOMER_ID);
   assert.deepEqual(res.body.pagination, { page: 1, limit: 50, total: 1, totalPages: 1 });
-  assert.deepEqual(capture.query, {});
+  assert.deepEqual(capture.query, { $or: [{ removed_at: { $exists: false } }, { removed_at: null }] });
   assert.deepEqual(capture.sort, { created_at: -1, _id: -1 });
 });
 
@@ -185,7 +191,10 @@ test('filter pending returns only pending', async () => {
     .set('Authorization', `Bearer ${adminTestToken()}`);
 
   assert.equal(res.status, 200);
-  assert.deepEqual(capture.query, { status: 'pending' });
+  assert.deepEqual(capture.query, {
+    $or: [{ removed_at: { $exists: false } }, { removed_at: null }],
+    status: 'pending',
+  });
   assert.equal(res.body.applications[0].status, 'pending');
 });
 
@@ -208,7 +217,10 @@ test('filter approved returns only approved', async () => {
     .set('Authorization', `Bearer ${adminTestToken()}`);
 
   assert.equal(res.status, 200);
-  assert.deepEqual(capture.query, { status: 'approved' });
+  assert.deepEqual(capture.query, {
+    $or: [{ removed_at: { $exists: false } }, { removed_at: null }],
+    status: 'approved',
+  });
   assert.equal(res.body.applications[0].status, 'approved');
   assert.equal(res.body.applications[0].review_note, 'ok');
 });
@@ -225,7 +237,10 @@ test('filter rejected returns only rejected', async () => {
     .set('Authorization', `Bearer ${adminTestToken()}`);
 
   assert.equal(res.status, 200);
-  assert.deepEqual(capture.query, { status: 'rejected' });
+  assert.deepEqual(capture.query, {
+    $or: [{ removed_at: { $exists: false } }, { removed_at: null }],
+    status: 'rejected',
+  });
   assert.equal(res.body.applications[0].status, 'rejected');
 });
 

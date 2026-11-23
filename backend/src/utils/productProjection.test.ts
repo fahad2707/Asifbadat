@@ -163,6 +163,14 @@ test('staff shape preserves all public fields as a superset', () => {
   }
 });
 
+test('staff shape reports damaged stock separately and the public shape omits it', () => {
+  const staff = toStaffProduct({ ...raw, damaged_quantity: 5 });
+  assert.strictEqual(staff.damaged_quantity, 5);
+  assert.strictEqual(staff.stock_quantity, 20);
+  const pub = toPublicProduct({ ...raw, damaged_quantity: 5 }) as Record<string, unknown>;
+  assert.equal('damaged_quantity' in pub, false);
+});
+
 test('missing cost_price is emitted as null in staff shape (not omitted)', () => {
   const staff = toStaffProduct({ ...raw, cost_price: undefined });
   assert.strictEqual(staff.cost_price, null);

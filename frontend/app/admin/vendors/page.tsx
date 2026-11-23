@@ -9,6 +9,9 @@ import RegionCombobox from '@/components/RegionCombobox';
 import { STATE_PROVINCE_OPTIONS } from '@/lib/regions';
 import toast from 'react-hot-toast';
 import { moneyOut, moneyPlain } from '@/lib/moneyTone';
+import { adminUi } from '@/lib/admin-ui';
+import PurchaseBooksStatement from '@/components/admin/PurchaseBooksStatement';
+import { STATEMENT_PERIODS, type StatementPeriod } from '@/components/admin/statementPeriods';
 
 interface Vendor {
   id: string;
@@ -39,6 +42,8 @@ export default function VendorsPage() {
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState('All');
   const [showModal, setShowModal] = useState(false);
+  const [period, setPeriod] = useState<StatementPeriod>('month');
+  const [statementOpen, setStatementOpen] = useState(false);
   const [editing, setEditing] = useState<Vendor | null>(null);
   const [states, setStates] = useState<string[]>([]);
   const [cities, setCities] = useState<string[]>([]);
@@ -180,7 +185,12 @@ export default function VendorsPage() {
     <div className="space-y-6">
       <div className="flex items-center justify-between gap-4">
         <h1 className="text-[28px] font-normal text-[#1A1A1A] tracking-tight">Vendors</h1>
-        <button
+        <div className="flex items-center gap-2">
+          <select aria-label="Statement period" value={period} onChange={(e) => setPeriod(e.target.value as StatementPeriod)} className="rounded-lg border border-[#E2E8F0] bg-white px-3 py-2 text-xs text-[#0F172A]">
+            {STATEMENT_PERIODS.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
+          </select>
+          <button type="button" onClick={() => setStatementOpen(true)} className={adminUi.btnSecondary}>Statement</button>
+          <button
           type="button"
           onClick={() => {
             setEditing(null);
@@ -191,6 +201,7 @@ export default function VendorsPage() {
         >
           New vendor
         </button>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-3 overflow-hidden rounded-md border border-[#E3E5E8]">
@@ -413,6 +424,7 @@ export default function VendorsPage() {
           </div>
         </div>
       )}
+      {statementOpen && <PurchaseBooksStatement period={period} focus="suppliers" onClose={() => setStatementOpen(false)} />}
     </div>
   );
 }

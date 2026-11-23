@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { ArrowLeft, Send, Package, Check, Pencil } from 'lucide-react';
@@ -8,6 +8,7 @@ import adminApi from '@/lib/admin-api';
 import toast from 'react-hot-toast';
 import NumberInput from '@/components/admin/NumberInput';
 import SearchableProductDropdown, { type ProductOption } from '@/components/admin/SearchableProductDropdown';
+import ProductModal from '@/components/admin/ProductModal';
 
 interface POItem {
   product_id: string;
@@ -92,6 +93,8 @@ export default function PurchaseOrderDetailPage() {
   const [editTax, setEditTax] = useState<number | ''>(0);
   const [editExpectedDate, setEditExpectedDate] = useState('');
   const [products, setProducts] = useState<ProductOption[]>([]);
+  const [showAddProduct, setShowAddProduct] = useState(false);
+  const addProductRowRef = useRef(0);
 
   const fetchPO = async () => {
     try {
@@ -124,23 +127,58 @@ export default function PurchaseOrderDetailPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
+  const mapProductOptions = (
+    list: Array<{ id?: string; _id?: string; name: string; cost_price?: number; sku?: string; product_id?: string; category_name?: string }>
+  ): ProductOption[] =>
+    list.map((p) => ({
+      id: p.id || String(p._id),
+      name: p.name,
+      cost_price: p.cost_price,
+      sku: p.sku,
+      product_id: p.product_id,
+      category_name: p.category_name,
+    }));
+
+  const refreshProducts = async (): Promise<ProductOption[]> => {
+    const res = await adminApi.get('/products', { params: { limit: 5000 } });
+    const mapped = mapProductOptions(res.data?.products || []);
+    setProducts(mapped);
+    return mapped;
+  };
+
   useEffect(() => {
-    adminApi
-      .get('/products', { params: { limit: 5000 } })
-      .then((res) => {
-        const list = res.data?.products || [];
-        setProducts(
-          list.map((p: { id?: string; _id?: string; name: string; cost_price?: number; sku?: string; product_id?: string }) => ({
-            id: p.id || String(p._id),
-            name: p.name,
-            cost_price: p.cost_price,
-            sku: p.sku,
-            product_id: p.product_id,
-          }))
-        );
-      })
-      .catch(() => {});
+    refreshProducts().catch(() => {});
   }, []);
+
+  const handleCreatedProduct = async (saved?: { id: string }) => {
+    setShowAddProduct(false);
+    const idx = addProductRowRef.current;
+    try {
+      const list = await refreshProducts();
+      const created = saved?.id ? list.find((p) => String(p.id) === String(saved.id)) : undefined;
+      if (!created) {
+        toast.error('Product saved. Search for it on the line to add it.');
+        return;
+      }
+      setEditRows((prev) => {
+        const next = [...prev];
+        const current = next[idx] || emptyEditRow();
+        next[idx] = {
+          ...current,
+          product_id: created.id,
+          product_name: created.name,
+          unit_cost:
+            current.unit_cost === '' || current.unit_cost === 0
+              ? Number(created.cost_price) || 0
+              : current.unit_cost,
+          qty: current.qty === '' || current.qty === 0 ? 1 : current.qty,
+        };
+        return next;
+      });
+    } catch {
+      toast.error('Product saved. Search for it on the line to add it.');
+    }
+  };
 
   const startEdit = (source?: PO) => {
     const current = source || po;
@@ -374,6 +412,10 @@ export default function PurchaseOrderDetailPage() {
                         value={row.product_id}
                         displayName={row.product_name}
                         showPrice={false}
+                        onAddProduct={() => {
+                          addProductRowRef.current = idx;
+                          setShowAddProduct(true);
+                        }}
                         onSelect={(p) =>
                           setEditRow(idx, {
                             product_id: p.id,
@@ -579,6 +621,13 @@ export default function PurchaseOrderDetailPage() {
             </div>
           )}
         </>
+      )}
+      {showAddProduct && (
+        <ProductModal
+          product={null}
+          onClose={() => setShowAddProduct(false)}
+          onSuccess={handleCreatedProduct}
+        />
       )}
     </div>
   );

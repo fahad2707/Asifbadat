@@ -1,6 +1,7 @@
 import bcrypt from 'bcryptjs';
 import type { Model } from 'mongoose';
 import Admin from '../models/Admin';
+import AdminNotice from '../models/AdminNotice';
 import AuditLog from '../models/AuditLog';
 import BankAccount from '../models/BankAccount';
 import Category from '../models/Category';
@@ -24,6 +25,7 @@ import PurchaseOrder from '../models/PurchaseOrder';
 import Receipt from '../models/Receipt';
 import Return from '../models/Return';
 import RFQ from '../models/RFQ';
+import StockAdjustmentSheet from '../models/StockAdjustmentSheet';
 import StockMovement from '../models/StockMovement';
 import StoreSettings from '../models/StoreSettings';
 import SubCategory from '../models/SubCategory';
@@ -197,12 +199,14 @@ export const FULL_RESET_MODELS: readonly NamedModel[] = [
   { name: 'Expenses', model: Expense },
   { name: 'ExpenseCategories', model: ExpenseCategory },
   { name: 'Shipments', model: Shipment },
+  { name: 'StockAdjustmentSheets', model: StockAdjustmentSheet },
   { name: 'StockMovements', model: StockMovement },
   { name: 'Payments', model: Payment },
   { name: 'LedgerEntries', model: LedgerEntry },
   { name: 'Returns', model: Return },
   { name: 'POSSales', model: POSSale },
   { name: 'AuditLogs', model: AuditLog, note: 'audit history is permanently lost' },
+  { name: 'AdminNotices', model: AdminNotice },
   { name: 'Products', model: Product },
   { name: 'SubCategories', model: SubCategory },
   { name: 'Categories', model: Category },

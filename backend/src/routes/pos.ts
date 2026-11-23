@@ -38,7 +38,10 @@ async function sendCommittedPosSaleReplay(res: express.Response, sale: { invoice
 }
 
 const POS_CATALOG_ACTIVE = {
-  $nor: [{ is_active: false }, { is_active: 'false' }, { is_active: 0 }],
+  $and: [
+    { $nor: [{ is_active: false }, { is_active: 'false' }, { is_active: 0 }] },
+    { $or: [{ deleted_at: { $exists: false } }, { deleted_at: null }] },
+  ],
 } as const;
 
 // Search product by barcode, PLU, SKU, or name
@@ -393,7 +396,7 @@ router.post('/sale', authenticateAdmin, async (req: AuthRequest, res) => {
     }
   } catch (error: any) {
     if (error instanceof z.ZodError) {
-      return res.status(400).json({ error: error.errors[0].message });
+      return res.status(400).json({ error: error.message });
     }
     console.error('Create POS sale error:', error);
     res.status(500).json({ error: 'Failed to create POS sale' });

@@ -7,7 +7,8 @@ import { ChevronLeft, Package, Edit, AlertTriangle } from 'lucide-react';
 import adminApi from '@/lib/admin-api';
 import toast from 'react-hot-toast';
 import ProductModal from '@/components/admin/ProductModal';
-import { productTaxLabel } from '@/lib/tax-type';
+import { formatTaxTypeLabel, productTaxLabel, type TaxTypeOption } from '@/lib/tax-type';
+import { adminUi } from '@/lib/admin-ui';
 import {
   STOCK_UNIT_LABELS,
   TOBACCO_CLASS_LABELS,
@@ -80,6 +81,10 @@ export default function Product360Page() {
   const [activeTab, setActiveTab] = useState<TabId>('overview');
   const [showEditModal, setShowEditModal] = useState(false);
   const [generatingSku, setGeneratingSku] = useState(false);
+  const [taxTypes, setTaxTypes] = useState<TaxTypeOption[]>([]);
+  const [assignTaxOpen, setAssignTaxOpen] = useState(false);
+  const [assignTaxTypeId, setAssignTaxTypeId] = useState('');
+  const [savingTax, setSavingTax] = useState(false);
 
   const fetchProductData = async () => {
     if (!id) return;
@@ -102,6 +107,38 @@ export default function Product360Page() {
       fetchProductData();
     }
   }, [id]);
+
+  useEffect(() => {
+    adminApi
+      .get('/tax-types')
+      .then((r) => {
+        const taxes = Array.isArray(r.data) ? r.data : [];
+        setTaxTypes(
+          taxes.map((t: TaxTypeOption) => ({
+            id: String(t.id),
+            name: t.name,
+            rate: Number(t.rate) || 0,
+            rate_type: t.rate_type,
+          }))
+        );
+      })
+      .catch(() => setTaxTypes([]));
+  }, []);
+
+  const applyTaxType = async (tax_type_id: string | null, label: string) => {
+    if (!product) return;
+    setSavingTax(true);
+    try {
+      await adminApi.put(`/products/${product.id}`, { tax_type_id });
+      toast.success(tax_type_id ? `Assigned ${label}` : 'Product is no longer in a tax group');
+      setAssignTaxOpen(false);
+      await fetchProductData();
+    } catch {
+      toast.error('Could not update tax');
+    } finally {
+      setSavingTax(false);
+    }
+  };
 
   if (loading || !product) {
     return (
@@ -200,6 +237,30 @@ export default function Product360Page() {
               )}
               
               <div className="flex items-center gap-3 mt-4 text-[11px] text-[#6B6C72]">
+                <label className="inline-flex items-center gap-1.5">
+                  <input
+                    type="checkbox"
+                    aria-label="Taxable"
+                    className="h-3.5 w-3.5 rounded border-[#C7C7C7] accent-black"
+                    checked={Boolean(product.tax_type_id)}
+                    disabled={savingTax}
+                    onChange={(e) => {
+                      if (e.target.checked) {
+                        if (taxTypes.length === 0) {
+                          toast.error('Add a tax type in Catalog first');
+                          return;
+                        }
+                        setAssignTaxTypeId(taxTypes[0].id);
+                        setAssignTaxOpen(true);
+                        return;
+                      }
+                      if (!confirm(`Remove ${product.name} from ${productTaxLabel(product)}? Selling price stays the same.`)) return;
+                      void applyTaxType(null, 'No Tax');
+                    }}
+                  />
+                  Taxable
+                </label>
+                <span className="text-[#C7C7C7]">|</span>
                 <span>Tax type: <span className="font-semibold text-[#1A1A1A]">{productTaxLabel(product)}</span></span>
                 <span className="text-[#C7C7C7]">|</span>
                 <span>
@@ -283,6 +344,10 @@ export default function Product360Page() {
               <div className="grid grid-cols-2 gap-4">
                 <div><span className="text-[#6B6C72] block text-[11px]">SKU</span><span className="font-mono text-[#1A1A1A]">{product.sku?.trim() || '—'}</span></div>
                 <div><span className="text-[#6B6C72] block text-[11px]">Product ID</span><span className="font-mono text-[#1A1A1A]">{product.product_id || '—'}</span></div>
+                <div>
+                  <span className="text-[#6B6C72] block text-[11px]">Taxable</span>
+                  <span className="font-semibold text-[#1A1A1A]">{product.tax_type_id ? 'Yes' : 'No'}</span>
+                </div>
                 <div><span className="text-[#6B6C72] block text-[11px]">Tax type</span><span className="font-semibold text-[#1A1A1A]">{productTaxLabel(product)}</span></div>
               </div>
               <div className="pt-2"><span className="text-[#6B6C72] block text-[11px]">Description</span><span className="text-[#1A1A1A] text-sm">{product.description || '—'}</span></div>
@@ -499,6 +564,35 @@ export default function Product360Page() {
           onClose={() => setShowEditModal(false)}
           onSuccess={() => { fetchProductData(); setShowEditModal(false); }}
         />
+      )}
+
+      {assignTaxOpen && (
+        <div className={adminUi.modalBackdrop} onClick={() => setAssignTaxOpen(false)}>
+          <div className={`${adminUi.modal} max-w-md w-full p-5`} onClick={(e) => e.stopPropagation()}>
+            <h2 className="text-lg font-medium text-[#1A1A1A]">Add to a tax group</h2>
+            <p className="mt-1 text-sm text-[#6B6C72]">Choose which tax group applies. Selling price stays the same.</p>
+            <select aria-label="Tax group" value={assignTaxTypeId} onChange={(e) => setAssignTaxTypeId(e.target.value)} className={`${adminUi.field} mt-4`}>
+              {taxTypes.map((t) => (
+                <option key={t.id} value={t.id}>{formatTaxTypeLabel(t)}</option>
+              ))}
+            </select>
+            <div className="mt-4 flex justify-end gap-2">
+              <button type="button" className={adminUi.btnSecondary} onClick={() => setAssignTaxOpen(false)}>Cancel</button>
+              <button
+                type="button"
+                className={`${adminUi.btnPrimary} disabled:opacity-40`}
+                disabled={!assignTaxTypeId || savingTax}
+                onClick={() => {
+                  const chosen = taxTypes.find((t) => t.id === assignTaxTypeId);
+                  if (!chosen) return;
+                  void applyTaxType(chosen.id, formatTaxTypeLabel(chosen));
+                }}
+              >
+                {savingTax ? 'Saving…' : 'Assign'}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

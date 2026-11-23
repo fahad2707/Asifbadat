@@ -4,7 +4,7 @@ import { Suspense, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { ArrowDown, Package, Search, Trash2, X } from 'lucide-react';
-import adminApi from '@/lib/admin-api';
+import adminApi, { uploadApi } from '@/lib/admin-api';
 import toast from 'react-hot-toast';
 import { StockAttentionBanner } from '@/components/admin/StockAttentionBanner';
 import SearchableProductDropdown, { type ProductOption } from '@/components/admin/SearchableProductDropdown';
@@ -12,14 +12,19 @@ import NumberInput from '@/components/admin/NumberInput';
 import { sellingBelowMin, minSellingPrice } from '@/lib/min-selling-price';
 import { formatStockDifference, physicalCountPreview } from '@/lib/physical-count';
 import { toastBarcodeNotFound, toastProductAdded } from '@/lib/barcode-feedback';
+import InventoryStatement, { type InventoryStatementData } from '@/components/admin/InventoryStatement';
+import MarkDamageModal from '@/components/admin/MarkDamageModal';
 
 interface InventoryItem {
   id: string;
+  product_id?: string;
   sku?: string;
   name: string;
+  image_url?: string;
   category_name?: string;
   sub_category_name?: string;
   stock_quantity: number;
+  damaged_quantity?: number;
   low_stock_threshold: number;
   category_id?: string;
   sub_category_id?: string;
@@ -28,6 +33,15 @@ interface InventoryItem {
   best_vendor_id?: string;
   best_vendor_name?: string;
   best_unit_cost?: number;
+}
+
+function money(amount: number): string {
+  return `$${amount.toFixed(2)}`;
+}
+
+function lineValue(unit: number | undefined, qty: number): string {
+  if (unit == null || !Number.isFinite(unit)) return '—';
+  return money(unit * qty);
 }
 
 interface Category {
@@ -55,6 +69,7 @@ interface AdjustLine {
   quantity_change: number;
   cost_price: number | '';
   selling_price: number | '';
+  line_notes: string;
 }
 
 interface CountLine {
@@ -63,6 +78,34 @@ interface CountLine {
   sku?: string;
   current_stock: number;
   counted_quantity: number | '';
+  line_notes: string;
+}
+
+interface StockSheetLine {
+  product_id: string;
+  product_name: string;
+  sku?: string | null;
+  quantity_before: number;
+  quantity_change: number;
+  quantity_after: number;
+  counted_quantity?: number | null;
+  notes?: string | null;
+  cost_before?: number | null;
+  cost_after?: number | null;
+  price_before?: number | null;
+  price_after?: number | null;
+}
+
+interface StockSheet {
+  id: string;
+  kind: 'adjustment' | 'physical_count';
+  number: string;
+  barcode: string;
+  notes?: string | null;
+  created_at?: string;
+  line_count?: number;
+  lines: StockSheetLine[];
+  barcode_png?: string | null;
 }
 
 interface MovementRow {
@@ -106,9 +149,15 @@ function movementTypeLabel(row: MovementRow): string {
 function movementReferenceLabel(row: MovementRow): string {
   const num = row.reference_number?.trim();
   const type = row.reference_type?.trim();
-  if (num && type) return `${type.replace(/_/g, ' ')} · ${num}`;
+  const typeLabel = type
+    ? type
+        .replace(/_/g, ' ')
+        .toLowerCase()
+        .replace(/\b\w/g, (char) => char.toUpperCase())
+    : '';
+  if (num && typeLabel) return `${typeLabel} · ${num}`;
   if (num) return num;
-  if (type) return type.replace(/_/g, ' ');
+  if (typeLabel) return typeLabel;
   return '—';
 }
 
@@ -124,6 +173,7 @@ function emptyAdjustLine(): AdjustLine {
     quantity_change: 0,
     cost_price: '',
     selling_price: '',
+    line_notes: '',
   };
 }
 
@@ -134,6 +184,7 @@ function emptyCountLine(): CountLine {
     sku: '',
     current_stock: 0,
     counted_quantity: '',
+    line_notes: '',
   };
 }
 
@@ -162,7 +213,9 @@ function InventoryPageInner() {
   const [subCategories, setSubCategories] = useState<SubCategory[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
-  const [filter, setFilter] = useState('All');
+  const [categoryFilter, setCategoryFilter] = useState('');
+  const [subCategoryFilter, setSubCategoryFilter] = useState('');
+  const [reorderFilter, setReorderFilter] = useState<'all' | 'required' | 'good'>('all');
   const [stockFilter, setStockFilter] = useState<'all' | 'low_stock' | 'out_of_stock'>('all');
   const [supplierFilter, setSupplierFilter] = useState('');
   const [selectedReorderIds, setSelectedReorderIds] = useState<Set<string>>(new Set());
@@ -175,6 +228,14 @@ function InventoryPageInner() {
   const [adjustLines, setAdjustLines] = useState<AdjustLine[]>(() => Array.from({ length: ADJUST_LINES }, emptyAdjustLine));
   const [adjustScan, setAdjustScan] = useState('');
   const [adjustNotes, setAdjustNotes] = useState('');
+  // damage modal state
+  const [damageModalProduct, setDamageModalProduct] = useState<any>(null);
+  const openMarkDamage = (p: any) => setDamageModalProduct(p);
+  const closeMarkDamage = () => setDamageModalProduct(null);
+  const reloadAfterDamage = () => {
+    router.refresh();
+    closeMarkDamage();
+  };
   const [adjustSaving, setAdjustSaving] = useState(false);
   const [priceGroups, setPriceGroups] = useState<PriceGroupOption[]>([]);
   const [selectedPriceGroupId, setSelectedPriceGroupId] = useState('');
@@ -190,19 +251,35 @@ function InventoryPageInner() {
   const [countSaving, setCountSaving] = useState(false);
   const countSavingRef = useRef(false);
   const countScanRef = useRef<HTMLInputElement>(null);
+  const trackScanRef = useRef<HTMLInputElement>(null);
+  const [sheetMenu, setSheetMenu] = useState<null | 'adjustment' | 'physical_count'>(null);
+  const [previousKind, setPreviousKind] = useState<null | 'adjustment' | 'physical_count'>(null);
+  const [previousSheets, setPreviousSheets] = useState<StockSheet[]>([]);
+  const [selectedSheetIds, setSelectedSheetIds] = useState<Set<string>>(new Set());
+  const [printSheets, setPrintSheets] = useState<StockSheet[] | null>(null);
+  const [printLoading, setPrintLoading] = useState(false);
+  const [previousLoading, setPreviousLoading] = useState(false);
+  const [invoiceSheet, setInvoiceSheet] = useState<StockSheet | null>(null);
+  const [trackOpen, setTrackOpen] = useState(false);
+  const [trackCode, setTrackCode] = useState('');
+  const [statementMenuOpen, setStatementMenuOpen] = useState(false);
+  const [statementLoading, setStatementLoading] = useState(false);
+  const [statement, setStatement] = useState<InventoryStatementData | null>(null);
   const [historyProduct, setHistoryProduct] = useState<InventoryItem | null>(null);
   const [historyRows, setHistoryRows] = useState<MovementRow[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyTypeFilter, setHistoryTypeFilter] = useState('');
   const [editing, setEditing] = useState<InventoryItem | null>(null);
+  const [imageUploading, setImageUploading] = useState(false);
+  const imageInputRef = useRef<HTMLInputElement>(null);
   const [form, setForm] = useState({
-    item_id: '',
-    item_type: '',
     item_category: '',
     item_subcategory: '',
-    item_name: '',
     reorder_level: '10',
     physical_count: '' as number | '',
+    selling_price: '' as number | '',
+    cost_price: '' as number | '',
+    image_url: '',
   });
 
   const fetchProducts = async () => {
@@ -223,11 +300,14 @@ function InventoryPageInner() {
         const best = rates.get(String(p.id));
         return {
           id: p.id,
+          product_id: p.product_id ? String(p.product_id) : undefined,
           sku: p.sku,
           name: p.name,
+          image_url: p.image_url || undefined,
           category_name: p.category_name,
           sub_category_name: p.sub_category_name,
           stock_quantity: p.stock_quantity ?? 0,
+          damaged_quantity: p.damaged_quantity ?? 0,
           low_stock_threshold: p.low_stock_threshold ?? 10,
           category_id: p.category_id,
           sub_category_id: p.sub_category_id,
@@ -296,7 +376,7 @@ function InventoryPageInner() {
   useEffect(() => {
     (async () => {
       setLoading(true);
-      await Promise.all([fetchProducts(), fetchVendors()]);
+      await Promise.all([fetchProducts(), fetchVendors(), fetchCategories(), fetchSubCategories()]);
       setLoading(false);
     })();
   }, []);
@@ -308,12 +388,20 @@ function InventoryPageInner() {
     }
   }, [showItemModal, showCategoryModal, showSubcategoryModal]);
 
+  const clearSheetQuery = () => {
+    if (searchParams.get('count') === '1' || searchParams.get('adjust') === '1') {
+      router.replace('/admin/inventory');
+    }
+  };
+
   const openAdjust = () => {
     setAdjustLines(Array.from({ length: ADJUST_LINES }, emptyAdjustLine));
     setAdjustScan('');
     setAdjustNotes('');
     setSelectedPriceGroupId('');
     setShowAdjustModal(true);
+    setSheetMenu(null);
+    clearSheetQuery();
     void fetchPriceGroups();
     window.setTimeout(() => adjustScanRef.current?.focus(), 50);
   };
@@ -353,6 +441,7 @@ function InventoryPageInner() {
         sku: p.sku || '',
         current_stock: p.stock_quantity ?? 0,
         quantity_change: 0,
+        line_notes: '',
         ...pricesFromProduct(p),
       }));
       // Keep at least one empty row for manual adds
@@ -421,6 +510,8 @@ function InventoryPageInner() {
     setCountScan('');
     setCountNotes('');
     setShowCountModal(true);
+    setSheetMenu(null);
+    clearSheetQuery();
     window.setTimeout(() => countScanRef.current?.focus(), 50);
   };
 
@@ -430,20 +521,134 @@ function InventoryPageInner() {
     if (searchParams.get('count') === '1') router.replace('/admin/inventory');
   };
 
-  useEffect(() => {
-    if (searchParams.get('count') === '1') openCount();
-    else if (searchParams.get('adjust') === '1') openAdjust();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [searchParams]);
+  const openCountMenu = () => setSheetMenu('physical_count');
+  const openAdjustMenu = () => setSheetMenu('adjustment');
 
-  const generateItemId = async () => {
+  const loadPrevious = async (kind: 'adjustment' | 'physical_count') => {
+    setPreviousKind(kind);
+    setPreviousLoading(true);
+    setSelectedSheetIds(new Set());
+    setSheetMenu(null);
+    clearSheetQuery();
     try {
-      const res = await adminApi.get('/products/generate-id');
-      setForm((f) => ({ ...f, item_id: res.data.item_id }));
-    } catch {
-      setForm((f) => ({ ...f, item_id: 'P' + Math.floor(10000 + Math.random() * 90000) }));
+      const { data } = await adminApi.get<{ sheets: StockSheet[] }>('/inventory/adjustment-sheets', { params: { kind } });
+      setPreviousSheets(data.sheets || []);
+    } catch (err: any) {
+      toast.error(err.response?.data?.error || 'Failed to load saved documents');
+      setPreviousSheets([]);
+    } finally {
+      setPreviousLoading(false);
     }
   };
+
+  const openInvoice = async (id: string) => {
+    try {
+      const { data } = await adminApi.get<StockSheet>(`/inventory/adjustment-sheets/${id}`);
+      setInvoiceSheet(data);
+    } catch (err: any) {
+      toast.error(err.response?.data?.error || 'Failed to open adjustment');
+    }
+  };
+
+  const deleteSheet = async (sheet: StockSheet) => {
+    if (!confirm(`Delete ${sheet.number}? Stock changed by this document will be reversed. It cannot be edited.`)) return;
+    try {
+      await adminApi.delete(`/inventory/adjustment-sheets/${sheet.id}`);
+      toast.success(`${sheet.number} deleted`);
+      if (invoiceSheet?.id === sheet.id) setInvoiceSheet(null);
+      if (previousKind) await loadPrevious(previousKind);
+      fetchProducts();
+    } catch (err: any) {
+      toast.error(err.response?.data?.error || 'Failed to delete adjustment');
+    }
+  };
+
+  const deleteSelectedSheets = async () => {
+    const chosen = previousSheets.filter((sheet) => selectedSheetIds.has(sheet.id));
+    if (chosen.length === 0) return;
+    const ordered = [...chosen].sort(
+      (a, b) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime()
+    );
+    if (
+      !confirm(
+        `Delete ${ordered.length} ${ordered.length === 1 ? 'document' : 'documents'}? Stock changed by them will be reversed.\n\n${ordered.map((sheet) => sheet.number).join('\n')}`
+      )
+    ) {
+      return;
+    }
+    const removed: string[] = [];
+    let stopped: string | null = null;
+    for (const sheet of ordered) {
+      try {
+        await adminApi.delete(`/inventory/adjustment-sheets/${sheet.id}`);
+        removed.push(sheet.number);
+      } catch (err: any) {
+        stopped = `${sheet.number}: ${err.response?.data?.error || 'Could not delete'}`;
+        break;
+      }
+    }
+    if (removed.length) toast.success(`Deleted ${removed.join(', ')}`);
+    if (stopped) toast.error(stopped);
+    if (previousKind) await loadPrevious(previousKind);
+    fetchProducts();
+  };
+
+  const printSelectedSheets = async () => {
+    const chosen = previousSheets.filter((sheet) => selectedSheetIds.has(sheet.id));
+    if (chosen.length === 0) return;
+    setPrintLoading(true);
+    try {
+      const details = await Promise.all(
+        chosen.map((sheet) => adminApi.get<StockSheet>(`/inventory/adjustment-sheets/${sheet.id}`).then((res) => res.data))
+      );
+      setPrintSheets(details);
+    } catch (err: any) {
+      toast.error(err.response?.data?.error || 'Failed to prepare the print');
+    } finally {
+      setPrintLoading(false);
+    }
+  };
+
+  const openStatement = async (period: 'day' | 'week' | 'twoweeks' | 'month' | 'year') => {
+    setStatementMenuOpen(false);
+    const to = new Date();
+    const from = new Date(to);
+    if (period === 'day') from.setDate(from.getDate() - 1);
+    else if (period === 'week') from.setDate(from.getDate() - 7);
+    else if (period === 'twoweeks') from.setDate(from.getDate() - 14);
+    else if (period === 'month') from.setMonth(from.getMonth() - 1);
+    else from.setFullYear(from.getFullYear() - 1);
+    setStatementLoading(true);
+    try {
+      const { data } = await adminApi.get<InventoryStatementData>('/inventory/statement', {
+        params: { from: from.toISOString(), to: to.toISOString() },
+      });
+      setStatement(data);
+    } catch (err: any) {
+      toast.error(err.response?.data?.error || 'Failed to build the inventory statement');
+    } finally {
+      setStatementLoading(false);
+    }
+  };
+
+  const lookupAdjustmentBarcode = async (code: string) => {
+    const trimmed = code.trim();
+    if (!trimmed) return;
+    try {
+      const { data } = await adminApi.get<StockSheet>(`/inventory/adjustment-sheets/barcode/${encodeURIComponent(trimmed)}`);
+      setInvoiceSheet(data);
+      setTrackOpen(false);
+      setTrackCode('');
+    } catch (err: any) {
+      toast.error(err.response?.data?.error || 'No adjustment matches that barcode');
+    }
+  };
+
+  useEffect(() => {
+    if (searchParams.get('count') === '1') openCountMenu();
+    else if (searchParams.get('adjust') === '1') openAdjustMenu();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams]);
 
   const outOfStockCount = items.filter((p) => (p.stock_quantity ?? 0) <= 0).length;
   const lowStockCount = items.filter((p) => {
@@ -451,13 +656,18 @@ function InventoryPageInner() {
     return qty > 0 && qty <= (p.low_stock_threshold || 10);
   }).length;
 
+  const needsReorder = (p: InventoryItem) => (p.stock_quantity ?? 0) <= (p.low_stock_threshold || 10);
+
   const filtered = items
-    .filter(
-      (p) =>
-        !search ||
-        p.name.toLowerCase().includes(search.toLowerCase()) ||
-        (p.sku && p.sku.toLowerCase().includes(search.toLowerCase()))
-    )
+    .filter((p) => {
+      if (!search) return true;
+      const q = search.toLowerCase();
+      return (
+        p.name.toLowerCase().includes(q) ||
+        (p.sku && p.sku.toLowerCase().includes(q)) ||
+        (p.product_id && p.product_id.toLowerCase().includes(q))
+      );
+    })
     .filter((p) => {
       if (stockFilter === 'out_of_stock') return (p.stock_quantity ?? 0) <= 0;
       if (stockFilter === 'low_stock') {
@@ -466,11 +676,14 @@ function InventoryPageInner() {
       }
       return true;
     })
+    .filter((p) => !categoryFilter || p.category_id === categoryFilter)
+    .filter((p) => !subCategoryFilter || p.sub_category_id === subCategoryFilter)
     .filter((p) => {
-      if (!supplierFilter) return true;
-      if (p.best_vendor_id === supplierFilter) return true;
-      return !p.best_vendor_id;
-    });
+      if (reorderFilter === 'required') return needsReorder(p);
+      if (reorderFilter === 'good') return !needsReorder(p);
+      return true;
+    })
+    .filter((p) => !supplierFilter || p.best_vendor_id === supplierFilter);
 
   const supplierOptions = Array.from(
     new Map(
@@ -513,66 +726,101 @@ function InventoryPageInner() {
     router.push(`/admin/purchase-orders?${params.toString()}`);
   };
 
-  const handleSaveItem = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!form.item_name?.trim()) {
-      toast.error('Item name is required');
+  const clearItemForm = () => {
+    setForm({
+      item_category: '',
+      item_subcategory: '',
+      reorder_level: '10',
+      physical_count: '',
+      selling_price: '',
+      cost_price: '',
+      image_url: '',
+    });
+  };
+
+  const handleImageUpload = async (file: File) => {
+    if (!file.type.startsWith('image/')) {
+      toast.error('Please select an image file');
       return;
     }
+    if (file.size > 5 * 1024 * 1024) {
+      toast.error('Image size must be less than 5MB');
+      return;
+    }
+    setImageUploading(true);
     try {
-      if (editing) {
-        await adminApi.put(`/products/${editing.id}`, {
-          name: form.item_name,
-          category_id: form.item_category || undefined,
-          sub_category_id: form.item_subcategory || undefined,
-          low_stock_threshold: parseInt(form.reorder_level, 10) || 10,
-        });
-
-        if (form.physical_count !== '') {
-          const counted = Math.trunc(Number(form.physical_count));
-          if (!Number.isFinite(counted) || counted < 0) {
-            toast.error('Physical count must be a whole number 0 or greater');
-            return;
-          }
-          const current = editing.stock_quantity ?? 0;
-          if (counted !== current) {
-            await adminApi.post('/inventory/physical-count', {
-              lines: [
-                {
-                  product_id: editing.id,
-                  counted_quantity: counted,
-                  expected_current_quantity: current,
-                },
-              ],
-              reason: 'PHYSICAL_COUNT',
-            });
-          }
-        }
-
-        toast.success('Item updated');
-      } else {
-        await adminApi.post('/products', {
-          name: form.item_name,
-          sku: form.item_id || undefined,
-          category_id: form.item_category || undefined,
-          sub_category_id: form.item_subcategory || undefined,
-          low_stock_threshold: parseInt(form.reorder_level, 10) || 10,
-          price: 0.01,
-          stock_quantity: 0,
-        });
-        toast.success('Item added');
+      const body = new FormData();
+      body.append('image', file);
+      const response = await uploadApi.post('/upload/image', body);
+      const imageUrl = response.data?.url;
+      if (!imageUrl) {
+        toast.error('Upload failed');
+        return;
       }
+      setForm((f) => ({ ...f, image_url: imageUrl }));
+      toast.success('Image uploaded');
+    } catch (err: any) {
+      toast.error(err.response?.data?.error || 'Upload failed');
+    } finally {
+      setImageUploading(false);
+    }
+  };
+
+  const handleSaveItem = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editing) return;
+    const selling = form.selling_price === '' ? undefined : Number(form.selling_price);
+    const cost = form.cost_price === '' ? undefined : Number(form.cost_price);
+    if (selling != null && (!Number.isFinite(selling) || selling < 0)) {
+      toast.error('Selling price must be 0 or greater');
+      return;
+    }
+    if (cost != null && (!Number.isFinite(cost) || cost < 0)) {
+      toast.error('Cost price must be 0 or greater');
+      return;
+    }
+    if (selling != null && cost != null && sellingBelowMin(selling, cost)) {
+      toast.error(`Selling price must be at least 5% above cost. Minimum is $${minSellingPrice(cost).toFixed(2)}.`);
+      return;
+    }
+    let counted: number | null = null;
+    if (form.physical_count !== '') {
+      counted = Math.trunc(Number(form.physical_count));
+      if (!Number.isFinite(counted) || counted < 0) {
+        toast.error('Physical count must be a whole number 0 or greater');
+        return;
+      }
+    }
+    try {
+      await adminApi.put(`/products/${editing.id}`, {
+        category_id: form.item_category || null,
+        sub_category_id: form.item_subcategory || null,
+        low_stock_threshold: parseInt(form.reorder_level, 10) || 10,
+        ...(selling != null ? { price: selling } : {}),
+        ...(cost != null ? { cost_price: cost } : {}),
+        image_url: form.image_url || '',
+      });
+
+      if (counted != null) {
+        const current = editing.stock_quantity ?? 0;
+        if (counted !== current) {
+          await adminApi.post('/inventory/physical-count', {
+            lines: [
+              {
+                product_id: editing.id,
+                counted_quantity: counted,
+                expected_current_quantity: current,
+              },
+            ],
+            reason: 'PHYSICAL_COUNT',
+          });
+        }
+      }
+
+      toast.success('Item updated');
       setShowItemModal(false);
       setEditing(null);
-      setForm({
-        item_id: '',
-        item_type: '',
-        item_category: '',
-        item_subcategory: '',
-        item_name: '',
-        reorder_level: '10',
-        physical_count: '',
-      });
+      clearItemForm();
       fetchProducts();
     } catch (err: any) {
       toast.error(err.response?.data?.error || 'Failed to save');
@@ -582,13 +830,13 @@ function InventoryPageInner() {
   const openEdit = (item: InventoryItem) => {
     setEditing(item);
     setForm({
-      item_id: item.sku || item.id,
-      item_type: item.category_id || '',
       item_category: item.category_id || '',
       item_subcategory: item.sub_category_id || '',
-      item_name: item.name,
       reorder_level: String(item.low_stock_threshold ?? 10),
       physical_count: '',
+      selling_price: item.price != null ? item.price : '',
+      cost_price: item.cost_price != null ? item.cost_price : '',
+      image_url: item.image_url || '',
     });
     setShowItemModal(true);
   };
@@ -614,15 +862,7 @@ function InventoryPageInner() {
     let addedNew = false;
     setAdjustLines((prev) => {
       const existingIdx = prev.findIndex((l) => l.product_id === product.id);
-      if (existingIdx !== -1) {
-        const next = [...prev];
-        next[existingIdx] = {
-          ...next[existingIdx],
-          quantity_change: next[existingIdx].quantity_change + 1,
-          current_stock: product.stock_quantity ?? next[existingIdx].current_stock,
-        };
-        return next;
-      }
+      if (existingIdx !== -1) return prev;
       addedNew = true;
       const emptyIdx = prev.findIndex((l) => !l.product_id);
       const line: AdjustLine = {
@@ -630,7 +870,8 @@ function InventoryPageInner() {
         product_name: product.name,
         sku: product.sku,
         current_stock: product.stock_quantity ?? 0,
-        quantity_change: 1,
+        quantity_change: 0,
+        line_notes: '',
         ...pricesFromProduct(product),
       };
       if (emptyIdx === -1) return [...prev, line];
@@ -650,7 +891,7 @@ function InventoryPageInner() {
       if (existingIdx !== -1) {
         next[existingIdx] = {
           ...next[existingIdx],
-          quantity_change: next[existingIdx].quantity_change + (next[index].quantity_change || 1),
+          quantity_change: next[existingIdx].quantity_change || next[index].quantity_change || 0,
         };
         next[index] = emptyAdjustLine();
         return next;
@@ -660,7 +901,8 @@ function InventoryPageInner() {
         product_name: product.name,
         sku: product.sku,
         current_stock: product.stock_quantity ?? 0,
-        quantity_change: next[index].quantity_change || 1,
+        quantity_change: 0,
+        line_notes: next[index].line_notes || '',
         ...pricesFromProduct(product),
       };
       return next;
@@ -681,6 +923,7 @@ function InventoryPageInner() {
         sku: product.sku,
         current_stock: product.stock_quantity ?? 0,
         counted_quantity: '',
+        line_notes: '',
       };
       if (emptyIdx === -1) return [...prev, line];
       const next = [...prev];
@@ -706,6 +949,7 @@ function InventoryPageInner() {
         sku: product.sku,
         current_stock: product.stock_quantity ?? 0,
         counted_quantity: next[index].counted_quantity,
+        line_notes: next[index].line_notes || '',
       };
       return next;
     });
@@ -776,6 +1020,7 @@ function InventoryPageInner() {
           product_id: l.product_id,
           counted_quantity: Math.trunc(Number(l.counted_quantity)),
           expected_current_quantity: l.current_stock,
+          line_notes: l.line_notes.trim() || undefined,
         })),
         reason: 'PHYSICAL_COUNT',
         notes: countNotes || undefined,
@@ -785,8 +1030,9 @@ function InventoryPageInner() {
       toast.success(
         changed
           ? `Physical count saved${ref ? ` · ${ref}` : ''} · ${changed} ${changed === 1 ? 'item' : 'items'} updated`
-          : 'Physical count matches system quantity. No stock change.'
+          : `Physical count saved${ref ? ` · ${ref}` : ''}. No stock change.`
       );
+      if (res.data?.id) void openInvoice(res.data.id);
       fetchProducts();
       setShowCountModal(false);
       if (searchParams.get('count') === '1') router.replace('/admin/inventory');
@@ -895,44 +1141,37 @@ function InventoryPageInner() {
     }
     adjustSavingRef.current = true;
     setAdjustSaving(true);
-    let ok = 0;
-    const failures: string[] = [];
     try {
-      for (const line of valid) {
-        try {
+      const { data } = await adminApi.post<StockSheet>('/inventory/adjustment-sheets', {
+        notes: adjustNotes.trim() || undefined,
+        lines: valid.map((line) => {
           const payload: {
             product_id: string;
             quantity_change: number;
-            notes?: string;
+            line_notes?: string;
             cost_price?: number;
             price?: number;
           } = {
             product_id: line.product_id,
             quantity_change: Math.trunc(Number(line.quantity_change) || 0),
-            notes: adjustNotes || undefined,
+            line_notes: line.line_notes.trim() || undefined,
           };
           if (line.cost_price !== '') payload.cost_price = Number(line.cost_price);
           if (line.selling_price !== '') payload.price = Number(line.selling_price);
-          await adminApi.post('/inventory/adjust', payload);
-          ok += 1;
-        } catch (err: any) {
-          failures.push(err.response?.data?.error || `Could not adjust ${line.product_name}`);
-        }
-      }
+          return payload;
+        }),
+      });
+      toast.success(`Adjustment saved · ${data.number}`);
+      setInvoiceSheet(data);
+      fetchProducts();
+      setShowAdjustModal(false);
+      if (searchParams.get('adjust') === '1') router.replace('/admin/inventory');
+    } catch (err: any) {
+      toast.error(err.response?.data?.error || 'Failed to save adjustment');
     } finally {
       adjustSavingRef.current = false;
       setAdjustSaving(false);
     }
-    if (ok) {
-      toast.success(`Adjusted ${ok} ${ok === 1 ? 'product' : 'products'}`);
-      fetchProducts();
-    }
-    if (failures.length) {
-      toast.error(failures.slice(0, 3).join(' · '));
-      return;
-    }
-    setShowAdjustModal(false);
-    if (searchParams.get('adjust') === '1') router.replace('/admin/inventory');
   };
 
   const handleDelete = async (id: string) => {
@@ -948,12 +1187,74 @@ function InventoryPageInner() {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-        <div>
+      <div className="flex flex-wrap items-center justify-between gap-4">
+        <div className="flex flex-col items-start gap-2">
           <h1 className="text-2xl font-semibold text-[#0F172A] tracking-tight">Inventory management</h1>
-          <p className="text-xs text-slate-400 mt-1">
-            Control buffer levels and log adjustments here. Open History on a product for stock movements.
-          </p>
+          <Link
+            href="/admin/inventory/damaged"
+            className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-[#334155] border border-[#CBD5E1] bg-white hover:bg-[#F8FAFC] font-semibold text-xs"
+          >
+            Damaged products
+          </Link>
+        </div>
+        <div className="flex items-center gap-2.5 flex-wrap justify-end ml-auto">
+          <button
+            type="button"
+            onClick={openCountMenu}
+            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-[#0F9F8F] border border-[#0F9F8F]/30 bg-[#0F9F8F]/5 hover:bg-[#0F9F8F]/10 font-bold text-xs transition-all"
+          >
+            <Package className="w-4 h-4" />
+            Physical count
+          </button>
+          <button
+            type="button"
+            onClick={openAdjustMenu}
+            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-[#334155] border border-[#CBD5E1] bg-white hover:bg-[#F8FAFC] font-bold text-xs transition-all"
+          >
+            Stock adjustments
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setTrackCode('');
+              setTrackOpen(true);
+              window.setTimeout(() => trackScanRef.current?.focus(), 50);
+            }}
+            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-[#334155] border border-[#CBD5E1] bg-white hover:bg-[#F8FAFC] font-bold text-xs transition-all"
+          >
+            Track adjustment
+          </button>
+          <div className="relative">
+            <button
+              type="button"
+              onClick={() => setStatementMenuOpen((open) => !open)}
+              className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-[#334155] border border-[#CBD5E1] bg-white hover:bg-[#F8FAFC] font-bold text-xs transition-all"
+            >
+              Inventory statement
+            </button>
+            {statementMenuOpen && (
+              <div className="absolute right-0 z-20 mt-2 w-44 rounded-xl border border-[#E2E8F0] bg-white py-1 shadow-lg">
+                {(
+                  [
+                    ['day', 'Last day'],
+                    ['week', 'Last week'],
+                    ['twoweeks', 'Last 2 weeks'],
+                    ['month', 'Last month'],
+                    ['year', 'Last year'],
+                  ] as const
+                ).map(([period, label]) => (
+                  <button
+                    key={period}
+                    type="button"
+                    onClick={() => void openStatement(period)}
+                    className="block w-full px-3 py-2 text-left text-xs font-semibold text-[#0F172A] hover:bg-[#F8FAFC]"
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
@@ -972,93 +1273,129 @@ function InventoryPageInner() {
         </p>
       )}
 
-      <div className="bg-white border border-[#E2E8F0] rounded-lg p-4 flex flex-wrap items-center gap-4">
+      <div className="bg-white border border-[#E2E8F0] rounded-lg p-4 flex flex-wrap items-center gap-3">
         <div className="relative flex-1 min-w-[240px]">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
           <input
             type="text"
-            placeholder="Search inventory by item name or SKU code..."
+            placeholder="Search by name, product ID, or SKU..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            className="w-full pl-10 pr-4 py-2 bg-slate-950/60 border border-white/10 rounded-xl text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-teal-500 focus:border-teal-500"
+            className="w-full pl-10 pr-4 py-2 border border-[#E2E8F0] rounded-lg text-xs text-[#0F172A] placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-[#0F9F8F] focus:border-[#0F9F8F]"
           />
         </div>
-        <div className="flex items-center gap-2.5 flex-wrap">
-          <button
-            type="button"
-            onClick={openCount}
-            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-teal-400 border border-teal-500/25 bg-teal-500/5 hover:bg-teal-500/10 font-bold text-xs transition-all"
-          >
-            <Package className="w-4 h-4" />
-            Physical count
-          </button>
-          <button
-            type="button"
-            onClick={openAdjust}
-            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-slate-300 border border-white/10 bg-slate-950/40 hover:bg-white/5 font-bold text-xs transition-all"
-          >
-            Stock adjustments
-          </button>
-          <select
-            value={supplierFilter}
-            onChange={(e) => setSupplierFilter(e.target.value)}
-            className="bg-slate-955/60 border border-white/10 rounded-xl px-3 py-2 text-xs text-slate-200 focus:outline-none focus:ring-1 focus:ring-teal-500"
-          >
-            <option value="">All suppliers</option>
-            {supplierOptions.map(([id, name]) => (
-              <option key={id} value={id}>
-                {name}
-              </option>
+        <select
+          value={categoryFilter}
+          onChange={(e) => {
+            const next = e.target.value;
+            setCategoryFilter(next);
+            setSubCategoryFilter((current) => {
+              if (!current) return '';
+              const stillValid = subCategories.some((s) => s.id === current && (!next || s.category_id === next));
+              return stillValid ? current : '';
+            });
+          }}
+          className="border border-[#E2E8F0] rounded-lg px-3 py-2 text-xs text-[#0F172A] bg-white"
+        >
+          <option value="">All categories</option>
+          {categories.map((c) => (
+            <option key={c.id} value={c.id}>{c.name}</option>
+          ))}
+        </select>
+        <select
+          value={subCategoryFilter}
+          onChange={(e) => setSubCategoryFilter(e.target.value)}
+          className="border border-[#E2E8F0] rounded-lg px-3 py-2 text-xs text-[#0F172A] bg-white"
+        >
+          <option value="">All subcategories</option>
+          {subCategories
+            .filter((s) => !categoryFilter || s.category_id === categoryFilter)
+            .map((s) => (
+              <option key={s.id} value={s.id}>{s.name}</option>
             ))}
-          </select>
+        </select>
+        <select
+          value={reorderFilter}
+          onChange={(e) => setReorderFilter(e.target.value as 'all' | 'required' | 'good')}
+          className="border border-[#E2E8F0] rounded-lg px-3 py-2 text-xs text-[#0F172A] bg-white"
+        >
+          <option value="all">All reorder statuses</option>
+          <option value="required">Reorder required</option>
+          <option value="good">Stock good</option>
+        </select>
+        <select
+          value={supplierFilter}
+          onChange={(e) => setSupplierFilter(e.target.value)}
+          className="border border-[#E2E8F0] rounded-lg px-3 py-2 text-xs text-[#0F172A] bg-white"
+        >
+          <option value="">All suppliers</option>
+          {supplierOptions.map(([id, name]) => (
+            <option key={id} value={id}>{name}</option>
+          ))}
+        </select>
+        {supplierFilter && (
           <button
             type="button"
             onClick={createPoFromSelection}
-            disabled={selectedReorderIds.size === 0}
-            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-white bg-[#0F9F8F] hover:bg-[#0B8275] font-bold text-xs disabled:opacity-50"
+            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-white bg-[#0F9F8F] hover:bg-[#0B8275] font-bold text-xs"
           >
-            Create purchase order ({selectedReorderIds.size})
+            Create new purchase order{selectedReorderIds.size > 0 ? ` (${selectedReorderIds.size})` : ''}
           </button>
-          <select value={filter} onChange={(e) => setFilter(e.target.value)} className="bg-slate-955/60 border border-white/10 rounded-xl px-3 py-2 text-xs text-slate-200 focus:outline-none focus:ring-1 focus:ring-teal-500">
-            <option value="All">All Items</option>
-          </select>
-        </div>
+        )}
       </div>
 
       <div className="bg-white border border-[#E2E8F0] rounded-lg overflow-hidden">
+        <div className="flex flex-wrap gap-8 border-b border-[#E2E8F0] px-4 py-4">
+          <div>
+            <p className="text-[10px] font-bold uppercase tracking-wider text-[#64748B]">Whole inventory purchase value</p>
+            <p className="mt-1 text-xl font-semibold text-[#0F172A]">{money(items.reduce((sum, item) => sum + (item.cost_price != null && Number.isFinite(item.cost_price) ? item.cost_price * (item.stock_quantity || 0) : 0), 0))}</p>
+          </div>
+          <div>
+            <p className="text-[10px] font-bold uppercase tracking-wider text-[#64748B]">Whole inventory estimated sales</p>
+            <p className="mt-1 text-xl font-semibold text-[#0F172A]">{money(items.reduce((sum, item) => sum + (item.price != null && Number.isFinite(item.price) ? item.price * (item.stock_quantity || 0) : 0), 0))}</p>
+          </div>
+          <div>
+            <p className="text-[10px] font-bold uppercase tracking-wider text-[#64748B]">Products</p>
+            <p className="mt-1 text-xl font-semibold text-[#0F172A]">{items.length}</p>
+          </div>
+        </div>
         {loading ? (
           <div className="flex items-center justify-center py-16">
             <div className="animate-spin rounded-full h-8 w-8 border-2 border-teal-500 border-t-transparent" />
           </div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full border-collapse">
-              <thead className="bg-slate-950/60 text-slate-400 border-b border-white/5">
+            <table className="w-full border-collapse min-w-[1280px]">
+              <thead className="bg-[#F8FAFC] text-[#64748B] border-b border-[#E2E8F0]">
                 <tr>
                   <th className="w-10 px-4 py-3.5" />
-                  <th className="text-left py-3.5 px-4 text-[10px] font-bold uppercase tracking-wider">Item ID / SKU</th>
+                  <th className="text-left py-3.5 px-4 text-[10px] font-bold uppercase tracking-wider">Product ID</th>
+                  <th className="text-left py-3.5 px-4 text-[10px] font-bold uppercase tracking-wider">Name</th>
+                  <th className="text-left py-3.5 px-4 text-[10px] font-bold uppercase tracking-wider">SKU</th>
                   <th className="text-left py-3.5 px-4 text-[10px] font-bold uppercase tracking-wider">Category</th>
                   <th className="text-left py-3.5 px-4 text-[10px] font-bold uppercase tracking-wider">Subcategory</th>
-                  <th className="text-left py-3.5 px-4 text-[10px] font-bold uppercase tracking-wider">Item Name</th>
-                  <th className="text-right py-3.5 px-4 text-[10px] font-bold uppercase tracking-wider">Remaining Stock</th>
-                  <th className="text-right py-3.5 px-4 text-[10px] font-bold uppercase tracking-wider">Buffer Level</th>
+                  <th className="text-right py-3.5 px-4 text-[10px] font-bold uppercase tracking-wider">Remaining stock</th>
+                  <th className="text-right py-3.5 px-4 text-[10px] font-bold uppercase tracking-wider">Damaged</th>
+                  <th className="text-right py-3.5 px-4 text-[10px] font-bold uppercase tracking-wider">Buffer level</th>
                   <th className="text-center py-3.5 px-4 text-[10px] font-bold uppercase tracking-wider">Reorder status</th>
                   <th className="text-left py-3.5 px-4 text-[10px] font-bold uppercase tracking-wider">Best supplier</th>
-                  <th className="text-right py-3.5 px-4 text-[10px] font-bold uppercase tracking-wider font-semibold">Actions</th>
+                  <th className="text-right py-3.5 px-4 text-[10px] font-bold uppercase tracking-wider">Purchase value</th>
+                  <th className="text-right py-3.5 px-4 text-[10px] font-bold uppercase tracking-wider">Estimated sale value</th>
+                  <th className="text-right py-3.5 px-4 text-[10px] font-bold uppercase tracking-wider">Actions</th>
                 </tr>
               </thead>
               <tbody>
                 {filtered.length === 0 ? (
                   <tr>
-                    <td colSpan={10} className="py-16 text-center text-slate-500 text-xs font-semibold">
+                    <td colSpan={14} className="py-16 text-center text-slate-500 text-xs font-semibold">
                       No inventory logs detected.
                     </td>
                   </tr>
                 ) : (
                   filtered.map((p) => {
-                    const reorderRequired = p.stock_quantity <= (p.low_stock_threshold || 10);
+                    const reorderRequired = needsReorder(p);
                     return (
-                      <tr key={p.id} className={`border-b border-white/5 transition-colors hover:bg-white/[0.01] ${reorderRequired ? 'bg-rose-500/[0.03]' : ''}`}>
+                      <tr key={p.id} className={`border-b border-[#E2E8F0] transition-colors hover:bg-[#F8FAFC] ${reorderRequired ? 'bg-rose-50/60' : ''}`}>
                         <td className="py-3 px-4">
                           <input
                             type="checkbox"
@@ -1075,40 +1412,50 @@ function InventoryPageInner() {
                             className="h-4 w-4 rounded border-[#C7C7C7] accent-black cursor-pointer"
                           />
                         </td>
-                        <td className="py-3 px-4 text-xs font-mono font-bold text-teal-450">{p.sku || p.id.slice(-6)}</td>
-                        <td className="py-3 px-4 text-xs text-slate-400">{p.category_name || '—'}</td>
-                        <td className="py-3 px-4 text-xs text-slate-400">{p.sub_category_name || '—'}</td>
-                        <td className="py-3 px-4 text-xs font-semibold text-slate-205">{p.name}</td>
-                        <td className={`py-3 px-4 text-xs text-right font-extrabold font-mono ${reorderRequired ? 'text-rose-455' : 'text-slate-100'}`}>{p.stock_quantity}</td>
-                        <td className="py-3 px-4 text-xs text-right font-mono text-slate-400">{p.low_stock_threshold ?? 10}</td>
+                        <td className="py-3 px-4 text-xs font-mono font-semibold text-[#0F172A]">{p.product_id || '—'}</td>
+                        <td className="py-3 px-4 text-xs font-semibold text-[#0F172A]">{p.name}</td>
+                        <td className="py-3 px-4 text-xs font-mono text-[#475569]">{p.sku || '—'}</td>
+                        <td className="py-3 px-4 text-xs text-[#475569]">{p.category_name || '—'}</td>
+                        <td className="py-3 px-4 text-xs text-[#475569]">{p.sub_category_name || '—'}</td>
+                        <td className={`py-3 px-4 text-xs text-right font-extrabold font-mono ${reorderRequired ? 'text-rose-600' : 'text-[#0F172A]'}`}>{p.stock_quantity}</td>
+                        <td className={`py-3 px-4 text-xs text-right font-extrabold font-mono ${(p.damaged_quantity || 0) > 0 ? 'text-red-600' : 'text-[#94A3B8]'}`}>
+                          {(p.damaged_quantity || 0) > 0 ? p.damaged_quantity : '—'}
+                        </td>
+                        <td className="py-3 px-4 text-xs text-right font-mono text-[#475569]">{p.low_stock_threshold ?? 10}</td>
                         <td className="py-3 px-4 text-center text-xs">
                           {reorderRequired ? (
-                            <span className="inline-flex px-2 py-0.5 rounded text-[9px] font-bold border bg-rose-500/10 text-rose-400 border-rose-500/20 uppercase tracking-wider">Required</span>
+                            <span className="inline-flex px-2 py-0.5 rounded text-[9px] font-bold border bg-rose-50 text-rose-700 border-rose-200 uppercase tracking-wider">Required</span>
                           ) : (
-                            <span className="inline-flex px-2 py-0.5 rounded text-[9px] font-bold border border-white/10 bg-slate-950/40 text-slate-450 uppercase tracking-wider">Stock Good</span>
+                            <span className="inline-flex px-2 py-0.5 rounded text-[9px] font-bold border border-[#E2E8F0] bg-[#F8FAFC] text-[#64748B] uppercase tracking-wider">Stock Good</span>
                           )}
                         </td>
-                        <td className="py-3 px-4 text-xs text-slate-200">
-                          {p.best_vendor_name ? (
-                            <>
+                        <td className="py-3 px-4 text-xs text-[#0F172A]">
+                          {p.best_vendor_id && p.best_vendor_name ? (
+                            <button
+                              type="button"
+                              onClick={() => setSupplierFilter(p.best_vendor_id || '')}
+                              className="text-left text-[#0F9F8F] hover:underline font-semibold"
+                            >
                               {p.best_vendor_name}
                               {p.best_unit_cost != null ? (
-                                <span className="block text-[10px] text-slate-400 font-mono">${Number(p.best_unit_cost).toFixed(2)}</span>
+                                <span className="block text-[10px] text-[#64748B] font-mono font-normal">${Number(p.best_unit_cost).toFixed(2)}</span>
                               ) : null}
-                            </>
+                            </button>
                           ) : (
                             '—'
                           )}
                         </td>
+                        <td className="py-3 px-4 text-xs text-right font-mono text-[#0F172A]">{lineValue(p.cost_price, p.stock_quantity)}</td>
+                        <td className="py-3 px-4 text-xs text-right font-mono text-[#0F172A]">{lineValue(p.price, p.stock_quantity)}</td>
                         <td className="py-3 px-4 text-right text-xs">
                           <div className="flex items-center justify-end gap-3">
-                            <button type="button" onClick={() => openHistory(p)} className="text-slate-400 hover:text-teal-350 hover:underline font-semibold">
+                            <button type="button" onClick={() => openHistory(p)} className="text-[#64748B] hover:text-[#0F9F8F] hover:underline font-semibold">
                               History
                             </button>
-                            <button type="button" onClick={() => openEdit(p)} className="text-teal-450 hover:text-teal-350 hover:underline font-semibold">
+                            <button type="button" onClick={() => openEdit(p)} className="text-[#0F9F8F] hover:underline font-semibold">
                               Edit
                             </button>
-                            <button type="button" onClick={() => handleDelete(p.id)} className="text-slate-450 hover:text-rose-400 hover:underline font-semibold">
+                            <button type="button" onClick={() => handleDelete(p.id)} className="text-[#64748B] hover:text-rose-600 hover:underline font-semibold">
                               Deactivate
                             </button>
                           </div>
@@ -1220,6 +1567,7 @@ function InventoryPageInner() {
                             </button>
                           </span>
                         </th>
+                        <th className="text-left py-3 px-4 min-w-[160px]">Notes</th>
                         <th className="w-12 px-4" />
                       </tr>
                     </thead>
@@ -1247,6 +1595,7 @@ function InventoryPageInner() {
                               {hasProduct ? (
                                 <NumberInput
                                   step={1}
+                                  showZero
                                   value={line.quantity_change}
                                   onValueChange={(n) => {
                                     setAdjustLines((prev) => {
@@ -1305,6 +1654,24 @@ function InventoryPageInner() {
                               )}
                             </td>
                             <td className="py-2 px-4">
+                              {hasProduct ? (
+                                <input
+                                  type="text"
+                                  value={line.line_notes}
+                                  onChange={(e) => {
+                                    const value = e.target.value;
+                                    setAdjustLines((prev) => {
+                                      const next = [...prev];
+                                      next[idx] = { ...next[idx], line_notes: value };
+                                      return next;
+                                    });
+                                  }}
+                                  placeholder="Optional"
+                                  className="w-full min-w-[140px] border border-gray-300 rounded px-2 py-1 text-sm"
+                                />
+                              ) : null}
+                            </td>
+                            <td className="py-2 px-4">
                               {hasProduct && (
                                 <button
                                   type="button"
@@ -1328,7 +1695,7 @@ function InventoryPageInner() {
                   </table>
                 </div>
                 <div className="flex items-center justify-between">
-                  <p className="text-xs text-gray-500">Scan or search a product. Positive qty adds stock, negative qty deducts. Cost and selling prices stay as listed unless you change them. Scanning the same product again increases qty.</p>
+                  <p className="text-xs text-gray-500">Scan or search a product. Adjustment qty starts at 0. Positive qty adds stock, negative qty deducts. Cost and selling prices stay as listed unless you change them. Line notes are optional.</p>
                   <button
                     type="button"
                     onClick={() => setAdjustLines((prev) => [...prev, emptyAdjustLine()])}
@@ -1405,6 +1772,7 @@ function InventoryPageInner() {
                         <th className="text-right py-3 px-4 w-36">Physical count</th>
                         <th className="text-right py-3 px-4 w-28">Difference</th>
                         <th className="text-right py-3 px-4 w-36">New system qty</th>
+                        <th className="text-left py-3 px-4 min-w-[160px]">Notes</th>
                         <th className="w-12 px-4" />
                       </tr>
                     </thead>
@@ -1452,6 +1820,24 @@ function InventoryPageInner() {
                             </td>
                             <td className="py-2 px-4 text-right font-mono font-semibold text-gray-900">
                               {hasProduct && preview.newQty != null ? preview.newQty : ''}
+                            </td>
+                            <td className="py-2 px-4">
+                              {hasProduct ? (
+                                <input
+                                  type="text"
+                                  value={line.line_notes}
+                                  onChange={(e) => {
+                                    const value = e.target.value;
+                                    setCountLines((prev) => {
+                                      const next = [...prev];
+                                      next[idx] = { ...next[idx], line_notes: value };
+                                      return next;
+                                    });
+                                  }}
+                                  placeholder="Optional"
+                                  className="w-full min-w-[140px] border border-gray-300 rounded px-2 py-1 text-sm"
+                                />
+                              ) : null}
                             </td>
                             <td className="py-2 px-4">
                               {hasProduct && (
@@ -1582,7 +1968,7 @@ function InventoryPageInner() {
                       <th className="text-right py-2 px-3">Change</th>
                       <th className="text-right py-2 px-3">After</th>
                       <th className="text-left py-2 px-3">Reference</th>
-                      <th className="text-left py-2 px-3">Reason / notes</th>
+                      <th className="text-left py-2 px-3">Notes</th>
                       <th className="text-left py-2 px-3">User</th>
                     </tr>
                   </thead>
@@ -1613,7 +1999,7 @@ function InventoryPageInner() {
                         </td>
                         <td className="py-2 px-3 text-right font-mono">{row.quantity_after ?? '—'}</td>
                         <td className="py-2 px-3 text-xs">{movementReferenceLabel(row)}</td>
-                        <td className="py-2 px-3 text-gray-600">{[row.reason, row.notes].filter(Boolean).join(' · ') || '—'}</td>
+                        <td className="py-2 px-3 text-gray-600">{row.notes?.trim() || '—'}</td>
                         <td className="py-2 px-3">{row.performed_by || '—'}</td>
                       </tr>
                       );
@@ -1628,106 +2014,193 @@ function InventoryPageInner() {
         </div>
       )}
 
-      {showItemModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-955/80 backdrop-blur-sm p-4">
-          <div className="bg-white border border-[#E2E8F0] rounded-lg text-[#0F172A] max-w-lg w-full max-h-[90vh] overflow-y-auto">
-            <div className="flex items-center justify-between p-5 border-b border-white/5">
-              <h2 className="text-lg font-bold text-white">{editing ? 'Edit Inventory Item' : 'New Inventory Item'}</h2>
-              <button type="button" onClick={() => setShowItemModal(false)} className="p-1.5 hover:bg-white/5 rounded-lg text-slate-400 hover:text-white transition-all">
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-            <form onSubmit={handleSaveItem} className="p-5 space-y-4 text-xs">
-              <div className="flex gap-2 items-end">
-                <div className="flex-1 min-w-0">
-                  <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">Item ID *</label>
-                  <input type="text" value={form.item_id} onChange={(e) => setForm((f) => ({ ...f, item_id: e.target.value }))} className="w-full bg-slate-950/60 border border-white/10 rounded-xl px-4 py-2 text-xs text-slate-205 focus:outline-none" />
-                </div>
-                <button type="button" onClick={generateItemId} className="shrink-0 px-3.5 py-2.5 bg-slate-800 border border-white/5 text-slate-350 hover:text-white rounded-xl text-xs font-semibold transition-all">
-                  Generate
+      {showItemModal && editing && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => setShowItemModal(false)}>
+          <div className="bg-white border border-[#E2E8F0] rounded-xl text-[#0F172A] max-w-2xl w-full max-h-[90vh] overflow-y-auto shadow-xl" onClick={(e) => e.stopPropagation()}>
+            <form onSubmit={handleSaveItem} className="p-5 space-y-5">
+              <div className="flex items-start gap-4">
+                <button
+                  type="button"
+                  onClick={() => imageInputRef.current?.click()}
+                  className="relative h-20 w-20 shrink-0 overflow-hidden rounded-lg border border-[#E2E8F0] bg-[#F8FAFC]"
+                  aria-label="Change product picture"
+                >
+                  {form.image_url ? (
+                    <img src={form.image_url} alt="" className="h-full w-full object-cover" />
+                  ) : (
+                    <span className="flex h-full items-center justify-center px-2 text-center text-[10px] font-semibold text-[#64748B]">Add picture</span>
+                  )}
+                  <span className="absolute inset-x-0 bottom-0 bg-black/55 py-0.5 text-[9px] font-semibold text-white">
+                    {imageUploading ? 'Uploading…' : 'Edit'}
+                  </span>
                 </button>
-              </div>
-              <div>
-                <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">Item Type *</label>
-                <select value={form.item_type} onChange={(e) => setForm((f) => ({ ...f, item_type: e.target.value, item_category: e.target.value }))} className="w-full bg-slate-955/60 border border-white/10 rounded-xl px-4 py-2 text-xs text-slate-250 focus:outline-none">
-                  <option value="">Select type</option>
-                  {categories.map((c) => (
-                    <option key={c.id} value={c.id}>{c.name}</option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">Item Category *</label>
-                <select value={form.item_category} onChange={(e) => setForm((f) => ({ ...f, item_category: e.target.value }))} className="w-full bg-slate-955/60 border border-white/10 rounded-xl px-4 py-2 text-xs text-slate-250 focus:outline-none">
-                  <option value="">Select category</option>
-                  {categories.map((c) => (
-                    <option key={c.id} value={c.id}>{c.name}</option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">Item Subcategory *</label>
-                <select value={form.item_subcategory} onChange={(e) => setForm((f) => ({ ...f, item_subcategory: e.target.value }))} className="w-full bg-slate-955/60 border border-white/10 rounded-xl px-4 py-2 text-xs text-slate-250 focus:outline-none">
-                  <option value="">Select subcategory</option>
-                  {subCategories.filter((s) => !form.item_category || s.category_id === form.item_category).map((s) => (
-                    <option key={s.id} value={s.id}>{s.name}</option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">Item Name *</label>
-                <input type="text" value={form.item_name} onChange={(e) => setForm((f) => ({ ...f, item_name: e.target.value }))} className="w-full bg-slate-950/60 border border-white/10 rounded-xl px-4 py-2 text-xs text-slate-200 focus:outline-none" required />
-              </div>
-              <div>
-                <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">Reorder Buffer Target (Qty) *</label>
-                <NumberInput min={0} value={form.reorder_level} onValueChange={(n) => setForm((f) => ({ ...f, reorder_level: n === '' ? '' : String(n) }))} className="w-full bg-slate-950/60 border border-white/10 rounded-xl px-4 py-2 text-xs text-slate-200 focus:outline-none" />
-              </div>
-              {editing && (
-                <div className="grid grid-cols-3 gap-3 pt-2 border-t border-white/5">
-                  <div>
-                    <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">Current system count</label>
-                    <div className="w-full bg-slate-950/40 border border-white/10 rounded-xl px-4 py-2 text-xs text-slate-300 font-mono">
-                      {editing.stock_quantity ?? 0}
-                    </div>
+                <input
+                  ref={imageInputRef}
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (file) void handleImageUpload(file);
+                    e.target.value = '';
+                  }}
+                />
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-start justify-between gap-3">
+                    <h2 className="text-lg font-bold text-[#0F172A]">{editing.name}</h2>
+                    <button type="button" onClick={() => setShowItemModal(false)} className="p-1.5 rounded-lg text-[#64748B] hover:bg-[#F1F5F9]" aria-label="Close">
+                      <X className="w-5 h-5" />
+                    </button>
                   </div>
-                  <div>
-                    <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">Physical count</label>
-                    <NumberInput
-                      min={0}
-                      step={1}
-                      value={form.physical_count}
-                      onValueChange={(n) => setForm((f) => ({ ...f, physical_count: n === '' ? '' : n }))}
-                      placeholder="Enter count"
-                      className="w-full bg-slate-950/60 border border-white/10 rounded-xl px-4 py-2 text-xs text-slate-200 focus:outline-none"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">Difference</label>
-                    <div
-                      className={`w-full bg-slate-950/40 border border-white/10 rounded-xl px-4 py-2 text-xs font-mono font-semibold ${
-                        (() => {
-                          const preview = physicalCountPreview(editing.stock_quantity ?? 0, form.physical_count);
-                          if (preview.difference == null) return 'text-slate-500';
-                          if (preview.difference > 0) return 'text-emerald-400';
-                          if (preview.difference < 0) return 'text-rose-400';
-                          return 'text-slate-300';
-                        })()
-                      }`}
-                    >
-                      {(() => {
-                        const preview = physicalCountPreview(editing.stock_quantity ?? 0, form.physical_count);
-                        return preview.difference == null ? '—' : formatStockDifference(preview.difference);
-                      })()}
-                    </div>
-                  </div>
+                  <p className="mt-1 text-xs text-[#64748B]">
+                    Product ID {editing.product_id || '—'} · SKU {editing.sku || '—'}
+                  </p>
+                  <p className="mt-0.5 text-xs text-[#64748B]">
+                    Best supplier: {editing.best_vendor_name || '—'}
+                  </p>
                 </div>
-              )}
-              <div className="flex justify-end gap-2.5 pt-4 border-t border-white/5">
-                <button type="button" onClick={() => setShowItemModal(false)} className="px-4 py-2.5 bg-slate-800 border border-white/5 text-slate-400 hover:text-white rounded-xl text-xs font-semibold">
+              </div>
+
+              {(() => {
+                const preview = physicalCountPreview(editing.stock_quantity ?? 0, form.physical_count);
+                const differenceClass =
+                  preview.difference == null
+                    ? 'text-[#64748B]'
+                    : preview.difference > 0
+                      ? 'text-emerald-700'
+                      : preview.difference < 0
+                        ? 'text-rose-600'
+                        : 'text-[#0F172A]';
+                return (
+                  <div className="grid grid-cols-3 gap-3">
+                    <div>
+                      <label className="block text-[10px] font-bold text-[#64748B] uppercase tracking-wider mb-1.5">Current system count</label>
+                      <div className="w-full border border-[#E2E8F0] bg-[#F8FAFC] rounded-lg px-3 py-2 text-sm font-mono text-[#0F172A]">
+                        {editing.stock_quantity ?? 0}
+                      </div>
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-bold text-[#64748B] uppercase tracking-wider mb-1.5">Physical count</label>
+                      <NumberInput
+                        min={0}
+                        step={1}
+                        value={form.physical_count}
+                        onValueChange={(n) => setForm((f) => ({ ...f, physical_count: n === '' ? '' : Math.trunc(n) }))}
+                        placeholder="Enter count"
+                        className="w-full border border-[#E2E8F0] rounded-lg px-3 py-2 text-sm text-[#0F172A]"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-bold text-[#64748B] uppercase tracking-wider mb-1.5">Difference</label>
+                      <div className={`w-full border border-[#E2E8F0] bg-[#F8FAFC] rounded-lg px-3 py-2 text-sm font-mono font-semibold ${differenceClass}`}>
+                        {preview.difference == null ? '—' : formatStockDifference(preview.difference)}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()}
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-[10px] font-bold text-[#64748B] uppercase tracking-wider mb-1.5">Selling price</label>
+                  <NumberInput
+                    min={0}
+                    step={0.01}
+                    showZero
+                    value={form.selling_price}
+                    onValueChange={(n) => setForm((f) => ({ ...f, selling_price: n }))}
+                    className="w-full border border-[#E2E8F0] rounded-lg px-3 py-2 text-sm text-[#0F172A]"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[10px] font-bold text-[#64748B] uppercase tracking-wider mb-1.5">Cost price</label>
+                  <NumberInput
+                    min={0}
+                    step={0.01}
+                    showZero
+                    value={form.cost_price}
+                    onValueChange={(n) => setForm((f) => ({ ...f, cost_price: n }))}
+                    className="w-full border border-[#E2E8F0] rounded-lg px-3 py-2 text-sm text-[#0F172A]"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-[10px] font-bold text-[#64748B] uppercase tracking-wider mb-1.5">Buffer level</label>
+                <NumberInput
+                  min={0}
+                  value={form.reorder_level}
+                  onValueChange={(n) => setForm((f) => ({ ...f, reorder_level: n === '' ? '' : String(Math.trunc(n)) }))}
+                  className="w-full border border-[#E2E8F0] rounded-lg px-3 py-2 text-sm text-[#0F172A]"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-[10px] font-bold text-[#64748B] uppercase tracking-wider mb-1.5">Category</label>
+                  <select
+                    value={form.item_category}
+                    onChange={(e) => {
+                      const categoryId = e.target.value;
+                      setForm((f) => ({
+                        ...f,
+                        item_category: categoryId,
+                        item_subcategory: subCategories.some((s) => s.id === f.item_subcategory && s.category_id === categoryId)
+                          ? f.item_subcategory
+                          : '',
+                      }));
+                    }}
+                    className="w-full border border-[#E2E8F0] rounded-lg px-3 py-2 text-sm text-[#0F172A] bg-white"
+                  >
+                    <option value="">Select category</option>
+                    {categories.map((c) => (
+                      <option key={c.id} value={c.id}>{c.name}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-[10px] font-bold text-[#64748B] uppercase tracking-wider mb-1.5">Subcategory</label>
+                  <select
+                    value={form.item_subcategory}
+                    onChange={(e) => setForm((f) => ({ ...f, item_subcategory: e.target.value }))}
+                    className="w-full border border-[#E2E8F0] rounded-lg px-3 py-2 text-sm text-[#0F172A] bg-white"
+                  >
+                    <option value="">Select subcategory</option>
+                    {subCategories
+                      .filter((s) => !form.item_category || s.category_id === form.item_category)
+                      .map((s) => (
+                        <option key={s.id} value={s.id}>{s.name}</option>
+                      ))}
+                  </select>
+                </div>
+              </div>
+
+              {(() => {
+                const qtyLeft = editing.stock_quantity ?? 0;
+                const costUnit = form.cost_price === '' ? undefined : Number(form.cost_price);
+                const sellUnit = form.selling_price === '' ? undefined : Number(form.selling_price);
+                return (
+                  <div className="rounded-lg border border-[#E2E8F0] bg-[#F8FAFC] px-4 py-3 grid grid-cols-2 gap-3">
+                    <div>
+                      <p className="text-[10px] font-bold uppercase tracking-wider text-[#64748B]">Purchase value</p>
+                      <p className="mt-1 text-lg font-semibold text-[#0F172A]">{lineValue(costUnit, qtyLeft)}</p>
+                      <p className="text-[11px] text-[#64748B]">Cost × qty left ({qtyLeft})</p>
+                    </div>
+                    <div>
+                      <p className="text-[10px] font-bold uppercase tracking-wider text-[#64748B]">Estimated sales</p>
+                      <p className="mt-1 text-lg font-semibold text-[#0F172A]">{lineValue(sellUnit, qtyLeft)}</p>
+                      <p className="text-[11px] text-[#64748B]">Selling price × qty left ({qtyLeft})</p>
+                    </div>
+                  </div>
+                );
+              })()}
+
+              <div className="flex justify-end gap-2.5 pt-1">
+                <button type="button" onClick={() => setShowItemModal(false)} className="px-4 py-2.5 border border-[#E2E8F0] text-[#334155] hover:bg-[#F8FAFC] rounded-lg text-xs font-semibold">
                   Close
                 </button>
-                <button type="submit" className="px-4 py-2.5 bg-[#0F9F8F] hover:bg-[#0B8275] border-transparent text-white rounded-xl text-xs font-bold transition-all shadow-sm">
-                  Save Item
+                <button type="submit" disabled={imageUploading} className="px-4 py-2.5 bg-[#0F9F8F] hover:bg-[#0B8275] text-white rounded-lg text-xs font-bold disabled:opacity-50">
+                  Save
                 </button>
               </div>
             </form>
@@ -1798,6 +2271,300 @@ function InventoryPageInner() {
             toast.success('Subcategory added');
           }}
         />
+      )}
+
+      {sheetMenu && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => { setSheetMenu(null); clearSheetQuery(); }}>
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-xl p-6" onClick={(e) => e.stopPropagation()}>
+            <h2 className="text-lg font-semibold text-gray-900">
+              {sheetMenu === 'physical_count' ? 'Physical count' : 'Stock adjustment'}
+            </h2>
+            <p className="mt-1 text-sm text-gray-500">Open a saved document or start a new one. Saved documents can be viewed or deleted.</p>
+            <div className="mt-5 grid grid-cols-2 items-stretch gap-3">
+              <button
+                type="button"
+                onClick={() => void loadPrevious(sheetMenu)}
+                className="flex h-11 items-center justify-center rounded-lg border border-gray-300 px-3 text-center text-sm font-semibold leading-tight text-gray-800 hover:bg-gray-50"
+              >
+                {sheetMenu === 'physical_count' ? 'Show previous count changes' : 'Show previous adjustments'}
+              </button>
+              <button
+                type="button"
+                onClick={() => (sheetMenu === 'physical_count' ? openCount() : openAdjust())}
+                className="flex h-11 items-center justify-center rounded-lg border border-black bg-black px-3 text-center text-sm font-semibold leading-tight text-white hover:bg-[#2C2C2C]"
+              >
+                {sheetMenu === 'physical_count' ? 'Create new physical count' : 'Create new stock adjustment'}
+              </button>
+            </div>
+            <button
+              type="button"
+              onClick={() => { setSheetMenu(null); clearSheetQuery(); }}
+              className="mt-3 w-full py-1.5 text-sm text-gray-500 hover:text-gray-800"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+
+      {previousKind && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => setPreviousKind(null)}>
+          <div className="bg-white rounded-xl shadow-xl max-w-3xl w-full max-h-[85vh] overflow-y-auto p-6" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-start justify-between gap-3 mb-4">
+              <h2 className="text-lg font-semibold text-gray-900">
+                {previousKind === 'physical_count' ? 'Previous count changes' : 'Previous adjustment changes'}
+              </h2>
+              <div className="flex items-center gap-3">
+                <button
+                  type="button"
+                  onClick={() => void printSelectedSheets()}
+                  disabled={selectedSheetIds.size === 0 || printLoading}
+                  className="text-sm font-semibold text-[#0F172A] disabled:text-gray-300"
+                >
+                  {printLoading ? 'Preparing…' : `Print selected${selectedSheetIds.size > 0 ? ` (${selectedSheetIds.size})` : ''}`}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void deleteSelectedSheets()}
+                  disabled={selectedSheetIds.size === 0}
+                  className="text-sm font-semibold text-red-600 disabled:text-gray-300"
+                >
+                  Delete selected{selectedSheetIds.size > 0 ? ` (${selectedSheetIds.size})` : ''}
+                </button>
+                <button type="button" onClick={() => setPreviousKind(null)} className="text-sm text-gray-500 hover:text-gray-800">Close</button>
+              </div>
+            </div>
+            {previousLoading ? (
+              <p className="text-sm text-gray-500 py-8 text-center">Loading…</p>
+            ) : previousSheets.length === 0 ? (
+              <p className="text-sm text-gray-500 py-8 text-center">No saved documents yet.</p>
+            ) : (
+              <table className="w-full text-sm">
+                <thead className="bg-gray-50">
+                  <tr>
+                    <th className="w-10 py-2 px-3">
+                      <input
+                        type="checkbox"
+                        aria-label="Select all documents"
+                        checked={previousSheets.length > 0 && previousSheets.every((sheet) => selectedSheetIds.has(sheet.id))}
+                        onChange={() => {
+                          setSelectedSheetIds((current) => {
+                            if (previousSheets.every((sheet) => current.has(sheet.id))) return new Set();
+                            return new Set(previousSheets.map((sheet) => sheet.id));
+                          });
+                        }}
+                        className="h-4 w-4 rounded border-gray-300 accent-black"
+                      />
+                    </th>
+                    <th className="text-left py-2 px-3">Number</th>
+                    <th className="text-left py-2 px-3">Date</th>
+                    <th className="text-right py-2 px-3">Lines</th>
+                    <th className="text-left py-2 px-3">Notes</th>
+                    <th className="text-right py-2 px-3">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {previousSheets.map((sheet) => (
+                    <tr key={sheet.id} className="border-t border-gray-100">
+                      <td className="py-2 px-3">
+                        <input
+                          type="checkbox"
+                          aria-label={`Select ${sheet.number}`}
+                          checked={selectedSheetIds.has(sheet.id)}
+                          onChange={() => {
+                            setSelectedSheetIds((current) => {
+                              const next = new Set(current);
+                              if (next.has(sheet.id)) next.delete(sheet.id);
+                              else next.add(sheet.id);
+                              return next;
+                            });
+                          }}
+                          className="h-4 w-4 rounded border-gray-300 accent-black"
+                        />
+                      </td>
+                      <td className="py-2 px-3 font-mono font-semibold">{sheet.number}</td>
+                      <td className="py-2 px-3 whitespace-nowrap text-gray-600">
+                        {sheet.created_at ? new Date(sheet.created_at).toLocaleString() : '—'}
+                      </td>
+                      <td className="py-2 px-3 text-right">{sheet.line_count ?? sheet.lines?.length ?? 0}</td>
+                      <td className="py-2 px-3 text-gray-600">{sheet.notes?.trim() || '—'}</td>
+                      <td className="py-2 px-3 text-right whitespace-nowrap">
+                        <button type="button" onClick={() => void openInvoice(sheet.id)} className="text-[#0F9F8F] font-semibold mr-3">View</button>
+                        <button type="button" onClick={() => void deleteSheet(sheet)} className="text-red-600 font-semibold">Delete</button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+        </div>
+      )}
+
+      {printSheets && (
+        <div className="fixed inset-0 z-[70] overflow-y-auto bg-[#E7E5E4] print:static print:bg-white print:overflow-visible">
+          <style>{`
+            @media print {
+              body * { visibility: hidden; }
+              .adjustment-print-root, .adjustment-print-root * { visibility: visible; }
+              .adjustment-print-root { position: absolute; left: 0; top: 0; width: 100%; background: white; }
+              .adjustment-print-toolbar { display: none !important; }
+              .adjustment-print-page { break-after: page; page-break-after: always; }
+              .adjustment-print-page:last-child { break-after: auto; page-break-after: auto; }
+            }
+          `}</style>
+          <div className="adjustment-print-toolbar sticky top-0 z-10 flex items-center justify-between gap-3 border-b border-stone-300 bg-white px-4 py-3">
+            <p className="text-sm font-semibold text-stone-800">{printSheets.length} {printSheets.length === 1 ? 'document' : 'documents'} ready to print</p>
+            <div className="flex gap-2">
+              <button type="button" onClick={() => window.print()} className="rounded-lg bg-black px-4 py-2 text-sm font-semibold text-white">
+                Print
+              </button>
+              <button type="button" onClick={() => setPrintSheets(null)} className="rounded-lg px-4 py-2 text-sm font-semibold text-stone-600 hover:bg-stone-100">
+                Close
+              </button>
+            </div>
+          </div>
+          <div className="adjustment-print-root mx-auto my-6 max-w-3xl space-y-6 print:my-0 print:max-w-none print:space-y-0">
+            {printSheets.map((sheet) => (
+              <article key={sheet.id} className="adjustment-print-page bg-white px-8 py-8 text-stone-900 shadow-sm print:shadow-none">
+                <div className="flex flex-col items-center border-b border-stone-900 pb-4 text-center">
+                  {sheet.barcode_png ? (
+                    <img src={sheet.barcode_png} alt={`Barcode ${sheet.number}`} className="h-24 w-auto" />
+                  ) : null}
+                  <p className="mt-2 font-mono text-xl font-bold tracking-wide">{sheet.number}</p>
+                  <p className="text-xs text-stone-500">
+                    {sheet.kind === 'physical_count' ? 'Physical count' : 'Stock adjustment'}
+                    {sheet.created_at ? ` · ${new Date(sheet.created_at).toLocaleString()}` : ''}
+                  </p>
+                </div>
+                <table className="mt-4 w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-stone-300 text-left text-[10px] uppercase tracking-wider text-stone-500">
+                      <th className="py-2 pr-2">Product</th>
+                      <th className="py-2 pr-2">SKU</th>
+                      <th className="py-2 pr-2 text-right">Before</th>
+                      <th className="py-2 pr-2 text-right">{sheet.kind === 'physical_count' ? 'Counted' : 'Change'}</th>
+                      <th className="py-2 pr-2 text-right">After</th>
+                      <th className="py-2">Notes</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(sheet.lines || []).map((line, idx) => (
+                      <tr key={`${sheet.id}-${idx}`} className="border-b border-stone-100">
+                        <td className="py-1.5 pr-2">{line.product_name}</td>
+                        <td className="py-1.5 pr-2">{line.sku || '—'}</td>
+                        <td className="py-1.5 pr-2 text-right font-mono">{line.quantity_before}</td>
+                        <td className="py-1.5 pr-2 text-right font-mono">
+                          {sheet.kind === 'physical_count' ? (line.counted_quantity ?? '—') : formatStockDifference(line.quantity_change)}
+                        </td>
+                        <td className="py-1.5 pr-2 text-right font-mono">{line.quantity_after}</td>
+                        <td className="py-1.5">{line.notes?.trim() || '—'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                <p className="mt-4 text-sm">
+                  <span className="font-semibold">Notes: </span>
+                  {sheet.notes?.trim() || '—'}
+                </p>
+              </article>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {invoiceSheet && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-4" onClick={() => setInvoiceSheet(null)}>
+          <div className="bg-white rounded-xl shadow-xl max-w-3xl w-full max-h-[90vh] overflow-y-auto p-6" onClick={(e) => e.stopPropagation()}>
+            <div className="flex flex-col items-center text-center border-b border-gray-200 pb-4 mb-4">
+              {invoiceSheet.barcode_png ? (
+                <img src={invoiceSheet.barcode_png} alt="" className="h-16 w-auto" />
+              ) : null}
+              <p className="mt-2 font-mono text-lg font-bold tracking-wide">{invoiceSheet.number}</p>
+              <p className="text-xs text-gray-500">
+                {invoiceSheet.kind === 'physical_count' ? 'Physical count' : 'Stock adjustment'}
+                {invoiceSheet.created_at ? ` · ${new Date(invoiceSheet.created_at).toLocaleString()}` : ''}
+              </p>
+            </div>
+            <table className="w-full text-sm">
+              <thead className="bg-gray-50">
+                <tr>
+                  <th className="text-left py-2 px-3">Product</th>
+                  <th className="text-left py-2 px-3">SKU</th>
+                  <th className="text-right py-2 px-3">Before</th>
+                  <th className="text-right py-2 px-3">{invoiceSheet.kind === 'physical_count' ? 'Counted' : 'Change'}</th>
+                  <th className="text-right py-2 px-3">After</th>
+                  <th className="text-left py-2 px-3">Notes</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(invoiceSheet.lines || []).map((line, idx) => (
+                  <tr key={`${line.product_id}-${idx}`} className="border-t border-gray-100">
+                    <td className="py-2 px-3">{line.product_name}</td>
+                    <td className="py-2 px-3 text-gray-600">{line.sku || '—'}</td>
+                    <td className="py-2 px-3 text-right font-mono">{line.quantity_before}</td>
+                    <td className="py-2 px-3 text-right font-mono">
+                      {invoiceSheet.kind === 'physical_count'
+                        ? (line.counted_quantity ?? '—')
+                        : formatStockDifference(line.quantity_change)}
+                    </td>
+                    <td className="py-2 px-3 text-right font-mono">{line.quantity_after}</td>
+                    <td className="py-2 px-3 text-gray-600">{line.notes?.trim() || '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <p className="mt-4 text-sm text-gray-700">
+              <span className="font-semibold">Notes: </span>
+              {invoiceSheet.notes?.trim() || '—'}
+            </p>
+            <div className="mt-5 flex justify-end">
+              <button type="button" onClick={() => setInvoiceSheet(null)} className="px-4 py-2 text-sm font-semibold bg-black text-white rounded-lg">
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {statementLoading && (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/40">
+          <p className="rounded-xl bg-white px-6 py-4 text-sm font-medium text-gray-800">Preparing the inventory statement…</p>
+        </div>
+      )}
+      {statement && <InventoryStatement statement={statement} onClose={() => setStatement(null)} />}
+
+      {trackOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => setTrackOpen(false)}>
+          <div className="bg-white rounded-xl shadow-xl max-w-md w-full p-6" onClick={(e) => e.stopPropagation()}>
+            <h2 className="text-lg font-semibold text-gray-900 mb-1">Track adjustment</h2>
+            <p className="text-sm text-gray-500 mb-4">Scan the barcode on the adjustment invoice, or type the number and press Enter.</p>
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                void lookupAdjustmentBarcode(trackCode);
+              }}
+            >
+              <input
+                ref={trackScanRef}
+                type="text"
+                value={trackCode}
+                onChange={(e) => setTrackCode(e.target.value)}
+                placeholder="Scan ADJ barcode"
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm mb-4"
+                autoFocus
+              />
+              <div className="flex justify-end gap-2">
+                <button type="button" onClick={() => setTrackOpen(false)} className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg">
+                  Cancel
+                </button>
+                <button type="submit" className="px-4 py-2 text-sm font-semibold bg-black text-white rounded-lg">
+                  Open
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
       )}
     </div>
   );

@@ -65,7 +65,17 @@ type CmDoc = {
   customer_id?: string;
   approved_at?: Date;
   reference_shipment_id?: string;
-  items: Array<{ product_id: string; quantity: number; product_name: string }>;
+  reason?: string;
+  items: Array<{
+    product_id: string;
+    quantity: number;
+    product_name: string;
+    purchase_match?: string;
+    purchase_rate?: number | null;
+    purchase_vendor_name?: string;
+    purchase_po_number?: string;
+    purchase_unit_cost?: number;
+  }>;
 };
 
 function makeCm(overrides: Partial<CmDoc> = {}): CmDoc {
@@ -292,6 +302,92 @@ test('customer mark-received increases stock and writes CREDIT_MEMO +qty with be
   assert.equal(ledgerCalls.length, 0);
   assert.equal(session.commitTransaction.mock.callCount(), 1);
   assert.equal(session.abortTransaction.mock.callCount(), 0);
+});
+
+test('damaged customer return is held out of sellable stock and names the supplier matched by rate', async () => {
+  assertNoMongoConnection();
+  const { productUpdates, movements, stock } = stubApprove({
+    cm: makeCm({
+      type: 'CUSTOMER',
+      status: 'APPROVED',
+      reason: 'DAMAGED',
+      affects_inventory: true,
+      items: [{
+        product_id: PRODUCT_A,
+        quantity: 5,
+        product_name: 'Photoframe',
+        purchase_match: 'rate',
+        purchase_rate: 10,
+        purchase_vendor_name: 'Supplier XYZ',
+        purchase_po_number: 'PO-XYZ',
+        purchase_unit_cost: 10,
+      }],
+    }),
+    stock: { [PRODUCT_A]: 58 },
+  });
+
+  const res = await postMarkReceived();
+
+  assert.equal(res.status, 200);
+  assert.deepEqual(productUpdates[0].update, { $inc: { damaged_quantity: 5 } });
+  assert.equal(stock[PRODUCT_A], 58);
+  const movement = movements[0].doc;
+  assert.equal(movement.quantity_change, 0);
+  assert.equal(movement.quantity_before, 58);
+  assert.equal(movement.quantity_after, 58);
+  assert.equal(movement.reason, 'DAMAGED');
+  assert.match(String(movement.notes), /5 damaged, held out of sellable stock/);
+  assert.match(String(movement.notes), /Supplier XYZ/);
+  assert.match(String(movement.notes), /PO-XYZ/);
+});
+
+test('damaged supplier dispatch leaves sellable stock and takes the units from damaged stock', async () => {
+  assertNoMongoConnection();
+  const { productUpdates, movements, stock } = stubApprove({
+    cm: makeCm({
+      type: 'VENDOR',
+      status: 'APPROVED',
+      reason: 'DAMAGED',
+      customer_id: undefined,
+      vendor_id: VENDOR_ID,
+      affects_inventory: true,
+      items: [{ product_id: PRODUCT_A, quantity: 5, product_name: 'Photoframe' }],
+    }),
+    stock: { [PRODUCT_A]: 50 },
+  });
+
+  const res = await postMarkDispatched();
+
+  assert.equal(res.status, 200);
+  assert.deepEqual(productUpdates[0].update, { $inc: { damaged_quantity: -5 } });
+  assert.deepEqual((productUpdates[0].filter as { damaged_quantity?: unknown }).damaged_quantity, { $gte: 5 });
+  assert.equal(stock[PRODUCT_A], 50);
+  assert.equal(movements[0].doc.quantity_change, 0);
+  assert.match(String(movements[0].doc.notes), /returned to the supplier/);
+});
+
+test('damaged supplier dispatch stops when those units are not in damaged stock', async () => {
+  assertNoMongoConnection();
+  const { movements, session } = stubApprove({
+    cm: makeCm({
+      type: 'VENDOR',
+      status: 'APPROVED',
+      reason: 'DAMAGED',
+      customer_id: undefined,
+      vendor_id: VENDOR_ID,
+      affects_inventory: true,
+      items: [{ product_id: PRODUCT_A, quantity: 5, product_name: 'Photoframe' }],
+    }),
+    stock: { [PRODUCT_A]: 50 },
+    productUpdate: () => null,
+  });
+
+  const res = await postMarkDispatched();
+
+  assert.equal(res.status, 400);
+  assert.match(String(res.body.error), /damaged stock/i);
+  assert.equal(movements.length, 0);
+  assert.equal(session.abortTransaction.mock.callCount(), 1);
 });
 
 test('customer financial-only CM does not change stock or create a movement', async () => {

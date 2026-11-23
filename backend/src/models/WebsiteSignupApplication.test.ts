@@ -25,6 +25,8 @@ test('schema enums and required fields', () => {
   assert.equal(Boolean(link.isRequired), true);
   assert.deepEqual(match.options?.enum, [...WEBSITE_SIGNUP_MATCH_KINDS]);
   assert.equal(Boolean(userId.isRequired), true);
+  const removed = WebsiteSignupApplication.schema.path('removed_at');
+  assert.ok(removed, 'removed_at is optional on the queue row');
 });
 
 test('unique user_id index and status queue index exist', () => {

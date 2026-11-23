@@ -12,15 +12,13 @@ export function formatStockDifference(delta: number): string {
   return String(delta);
 }
 
-export function adjustmentNumberDateKey(date: Date = new Date()): string {
-  const y = date.getUTCFullYear();
-  const m = String(date.getUTCMonth() + 1).padStart(2, '0');
-  const d = String(date.getUTCDate()).padStart(2, '0');
-  return `${y}${m}${d}`;
-}
-
-export function formatAdjustmentNumber(dateKey: string, seq: number): string {
-  return `ADJ-${dateKey}-${String(seq).padStart(4, '0')}`;
+/** Short warehouse document number. ADJ-0001, ADJ-0002, and so on. */
+export function formatAdjustmentNumber(seq: number): string {
+  const n = Math.trunc(Number(seq));
+  if (!Number.isInteger(n) || n < 1) {
+    throw new Error('Adjustment sequence must be a positive integer');
+  }
+  return `ADJ-${String(n).padStart(4, '0')}`;
 }
 
 export const PHYSICAL_COUNT_REASON = 'PHYSICAL_COUNT';

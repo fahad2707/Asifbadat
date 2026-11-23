@@ -1,11 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import {
-  adjustmentNumberDateKey,
-  formatAdjustmentNumber,
-  formatStockDifference,
-  physicalCountDelta,
-} from './physicalCount';
+import { formatAdjustmentNumber, formatStockDifference, physicalCountDelta } from './physicalCount';
 
 test('48 counted as 50 is difference +2', () => {
   assert.equal(physicalCountDelta(48, 50), 2);
@@ -22,8 +17,8 @@ test('unchanged count is difference 0', () => {
   assert.equal(formatStockDifference(0), '0');
 });
 
-test('adjustment numbers are date-prefixed sequences, not timestamps', () => {
-  assert.equal(formatAdjustmentNumber('20261008', 1), 'ADJ-20261008-0001');
-  assert.equal(formatAdjustmentNumber('20261008', 12), 'ADJ-20261008-0012');
-  assert.match(adjustmentNumberDateKey(new Date('2026-10-08T10:32:00Z')), /^20261008$/);
+test('adjustment numbers are short sequences', () => {
+  assert.equal(formatAdjustmentNumber(1), 'ADJ-0001');
+  assert.equal(formatAdjustmentNumber(12), 'ADJ-0012');
+  assert.equal(formatAdjustmentNumber(10000), 'ADJ-10000');
 });

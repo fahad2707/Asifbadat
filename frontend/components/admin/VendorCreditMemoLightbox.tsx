@@ -31,6 +31,13 @@ type PoOpt = {
 
 const REASONS = ['RETURN', 'DAMAGED', 'RATE_DIFFERENCE', 'SCHEME', 'OTHER'] as const;
 
+export type VendorCreditSeed = {
+  vendorId: string;
+  poId: string;
+  quantities: Record<string, number>;
+  notes: string;
+};
+
 function money(n: number) {
   return `$${Number(n || 0).toFixed(2)}`;
 }
@@ -46,10 +53,12 @@ export default function VendorCreditMemoLightbox({
   open,
   onClose,
   onSaved,
+  seed = null,
 }: {
   open: boolean;
   onClose: () => void;
   onSaved: (id: string) => void;
+  seed?: VendorCreditSeed | null;
 }) {
   const [vendors, setVendors] = useState<VendorOpt[]>([]);
   const [vendorId, setVendorId] = useState('');
@@ -63,38 +72,56 @@ export default function VendorCreditMemoLightbox({
 
   useEffect(() => {
     if (!open) return;
-    setVendorId('');
+    setVendorId(seed?.vendorId || '');
     setPoId('');
     setPos([]);
     setReturnQty({});
-    setReason('RETURN');
-    setNotes('');
+    setReason(seed ? 'DAMAGED' : 'RETURN');
+    setNotes(seed?.notes || '');
     adminApi
       .get('/vendors', { params: { limit: 5000 } })
       .then((r) => setVendors(r.data.vendors || []))
       .catch(() => toast.error('Failed to load suppliers'));
-  }, [open]);
+  }, [open, seed]);
 
   useEffect(() => {
     if (!open || !vendorId) {
       setPos([]);
-      setPoId('');
+      if (!vendorId) {
+        setPoId('');
+        setReturnQty({});
+      }
       return;
     }
+    let cancelled = false;
     setLoadingPos(true);
     adminApi
       .get('/credit-memos/vendor-pos', { params: { vendor_id: vendorId } })
       .then((r) => {
-        setPos(r.data.purchase_orders || []);
-        setPoId('');
-        setReturnQty({});
+        if (cancelled) return;
+        const next = r.data.purchase_orders || [];
+        setPos(next);
+        if (seed && seed.vendorId === vendorId && next.some((po: PoOpt) => po.id === seed.poId)) {
+          setPoId(seed.poId);
+          setReturnQty(seed.quantities);
+          setReason('DAMAGED');
+          setNotes(seed.notes);
+        } else {
+          setPoId('');
+          setReturnQty({});
+        }
       })
       .catch((err) => {
         toast.error(err?.response?.data?.error || 'Failed to load purchase orders');
         setPos([]);
       })
-      .finally(() => setLoadingPos(false));
-  }, [open, vendorId]);
+      .finally(() => {
+        if (!cancelled) setLoadingPos(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [open, vendorId, seed]);
 
   const selected = pos.find((p) => p.id === poId) || null;
   const returnableLines = selected?.items.filter((line) => line.quantity_remaining > 0) || [];

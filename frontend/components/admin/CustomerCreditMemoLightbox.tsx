@@ -33,6 +33,24 @@ type InvoiceOpt = {
 
 const REASONS = ['RETURN', 'DAMAGED', 'RATE_DIFFERENCE', 'SCHEME', 'OTHER'] as const;
 
+type PurchaseSource = {
+  product_id: string;
+  rate: number | null;
+  matched: boolean;
+  vendor_name?: string;
+  po_number?: string;
+  unit_cost?: number;
+};
+
+function sourceCaption(source?: PurchaseSource): string {
+  if (!source) return 'Looking up the purchase…';
+  if (source.matched && source.vendor_name) {
+    return `Bought from ${source.vendor_name} at $${Number(source.unit_cost || 0).toFixed(2)} on ${source.po_number || 'the purchase'}`;
+  }
+  if (source.rate == null) return 'No cost rate on this product, so the supplier cannot be matched';
+  return `No received purchase matches the cost rate $${Number(source.rate).toFixed(2)}`;
+}
+
 function money(n: number) {
   return `$${Number(n || 0).toFixed(2)}`;
 }
@@ -63,6 +81,7 @@ export default function CustomerCreditMemoLightbox({
   const [reason, setReason] = useState<(typeof REASONS)[number]>('RETURN');
   const [notes, setNotes] = useState('');
   const [returnQty, setReturnQty] = useState<Record<string, number>>({});
+  const [sources, setSources] = useState<Record<string, PurchaseSource>>({});
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
@@ -103,17 +122,41 @@ export default function CustomerCreditMemoLightbox({
   const selected = invoices.find((inv) => inv.id === invoiceId) || null;
   const returnableLines = selected?.items.filter((line) => line.quantity_remaining > 0) || [];
 
+  useEffect(() => {
+    if (!open || reason !== 'DAMAGED' || !selected) {
+      setSources({});
+      return;
+    }
+    const ids = [...new Set(selected.items.map((line) => line.product_id).filter(Boolean))];
+    if (!ids.length) {
+      setSources({});
+      return;
+    }
+    let cancelled = false;
+    adminApi
+      .get('/credit-memos/purchase-source', { params: { product_ids: ids.join(',') } })
+      .then((r) => {
+        if (cancelled) return;
+        const next: Record<string, PurchaseSource> = {};
+        for (const row of r.data.sources || []) next[String(row.product_id)] = row;
+        setSources(next);
+      })
+      .catch(() => {
+        if (!cancelled) setSources({});
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [open, reason, selected]);
+
   const totals = useMemo(() => {
     let subtotal = 0;
-    let tax = 0;
     for (const line of returnableLines) {
       const qty = Number(returnQty[line.product_id + ':' + line.unit_price] || 0);
       if (qty <= 0) continue;
-      const lineSub = qty * line.unit_price;
-      subtotal += lineSub;
-      tax += (lineSub * (line.tax_percent || 0)) / 100;
+      subtotal += qty * line.unit_price;
     }
-    return { subtotal, tax, total: subtotal + tax };
+    return { subtotal, total: subtotal };
   }, [returnableLines, returnQty]);
 
   if (!open) return null;
@@ -134,7 +177,7 @@ export default function CustomerCreditMemoLightbox({
         product_name: line.product_name,
         quantity: Number(returnQty[line.product_id + ':' + line.unit_price] || 0),
         unit_price: line.unit_price,
-        tax_percent: line.tax_percent || 0,
+        tax_percent: 0,
       }))
       .filter((i) => i.quantity > 0);
     if (!items.length) {
@@ -151,7 +194,11 @@ export default function CustomerCreditMemoLightbox({
         notes: notes || undefined,
         items,
       });
-      toast.success(`Credit memo ${res.data.credit_memo_number} saved — approve it, then mark as received`);
+      toast.success(
+        reason === 'DAMAGED'
+          ? `Credit memo ${res.data.credit_memo_number} saved. After you mark it received, these units stay in damaged stock.`
+          : `Credit memo ${res.data.credit_memo_number} saved — approve it, then mark as received`
+      );
       onSaved(res.data.id);
     } catch (err: any) {
       toast.error(err?.response?.data?.error || 'Could not complete credit memo');
@@ -216,7 +263,7 @@ export default function CustomerCreditMemoLightbox({
                 <div className="animate-spin rounded-full h-8 w-8 border-2 border-black border-t-transparent" />
               </div>
             ) : invoices.length === 0 ? (
-              <p className="text-sm text-gray-500">No invoices for this customer.</p>
+              <p className="text-sm text-gray-500">No picked-up or delivered invoices for this customer.</p>
             ) : (
               <div className="border border-gray-200 rounded-lg overflow-hidden">
                 <table className="w-full text-sm">
@@ -259,8 +306,24 @@ export default function CustomerCreditMemoLightbox({
                 <p className="text-sm font-medium text-gray-800 mb-2">
                   {selected.invoice_number} — sold prices, return what came back
                 </p>
+                {reason === 'DAMAGED' && (
+                  <p className="text-xs text-gray-500 mb-2">
+                    Damaged units are held out of sellable stock. The supplier is whoever sold them at this product’s cost rate.
+                  </p>
+                )}
                 {returnableLines.length === 0 ? (
-                  <p className="text-sm text-gray-500">Every line on this invoice is already credited.</p>
+                  <div>
+                    <p className="text-sm text-gray-500">Every line on this invoice is already credited.</p>
+                    {reason === 'DAMAGED' && (
+                      <ul className="mt-2 text-xs text-gray-600 space-y-1">
+                        {selected.items.map((line) => (
+                          <li key={`${line.product_id}:${line.unit_price}`}>
+                            {line.product_name || 'Item'}: {sourceCaption(sources[line.product_id])}
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
                 ) : (
                   <div className="border border-gray-200 rounded-lg overflow-x-auto">
                     <table className="w-full text-sm min-w-[640px]">
@@ -278,10 +341,15 @@ export default function CustomerCreditMemoLightbox({
                         {returnableLines.map((line) => {
                           const key = `${line.product_id}:${line.unit_price}`;
                           const qty = Number(returnQty[key] || 0);
-                          const credit = qty * line.unit_price * (1 + (line.tax_percent || 0) / 100);
+                          const credit = qty * line.unit_price;
                           return (
                             <tr key={key} className="border-t border-gray-100">
-                              <td className="py-2 px-3">{line.product_name || 'Item'}</td>
+                              <td className="py-2 px-3">
+                                {line.product_name || 'Item'}
+                                {reason === 'DAMAGED' && (
+                                  <span className="block text-[11px] text-gray-500">{sourceCaption(sources[line.product_id])}</span>
+                                )}
+                              </td>
                               <td className="py-2 px-3 text-right tabular-nums">{line.quantity_sold}</td>
                               <td className="py-2 px-3 text-right tabular-nums">{line.quantity_credited}</td>
                               <td className="py-2 px-3 text-right tabular-nums">{money(line.unit_price)}</td>
@@ -318,9 +386,9 @@ export default function CustomerCreditMemoLightbox({
                   />
                 </div>
                 <div className="mt-3 text-right text-sm space-y-1">
-                  <p>Subtotal: <span className="tabular-nums">{money(totals.subtotal)}</span></p>
-                  <p>Tax: <span className="tabular-nums">{money(totals.tax)}</span></p>
-                  <p className={`font-semibold ${moneyOut}`}>Total credit: {money(totals.total)}</p>
+                  <p>Merchandise: <span className="tabular-nums">{money(totals.subtotal)}</span></p>
+                  <p className="text-gray-500">Sales tax is not refunded</p>
+                  <p className={`font-semibold ${moneyOut}`}>Credit: {money(totals.total)}</p>
                 </div>
               </div>
             )}

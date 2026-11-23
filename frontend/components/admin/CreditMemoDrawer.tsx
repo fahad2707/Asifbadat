@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import Link from 'next/link';
 import { X } from 'lucide-react';
 import adminApi from '@/lib/admin-api';
 import toast from 'react-hot-toast';
@@ -34,7 +35,23 @@ export interface CreditMemoDrawerRecord {
     unit_price?: number;
     tax_percent?: number;
     total?: number;
+    purchase_match?: string;
+    purchase_rate?: number | null;
+    purchase_vendor_id?: string;
+    purchase_vendor_name?: string;
+    purchase_po_id?: string;
+    purchase_po_number?: string;
+    purchase_unit_cost?: number;
   }[];
+}
+
+function refId(value: unknown): string {
+  if (!value) return '';
+  if (typeof value === 'object') {
+    const record = value as { _id?: unknown; id?: unknown };
+    return String(record._id || record.id || '');
+  }
+  return String(value);
 }
 
 function money(n: number) {
@@ -194,7 +211,18 @@ export default function CreditMemoDrawer({
                     <tbody>
                       {memo.items.map((item, idx) => (
                         <tr key={idx} className="border-t border-[#E3E5E8]">
-                          <td className="px-2 py-1.5">{item.product_name || (typeof item.product_id === 'object' ? item.product_id?.name : '—')}</td>
+                          <td className="px-2 py-1.5">
+                            {item.product_name || (typeof item.product_id === 'object' ? item.product_id?.name : '—')}
+                            {memo.reason === 'DAMAGED' && memo.type === 'CUSTOMER' && (
+                              <span className="block text-[11px] text-[#6B6C72]">
+                                {item.purchase_match === 'rate' && item.purchase_vendor_name
+                                  ? `Bought from ${item.purchase_vendor_name} at $${Number(item.purchase_unit_cost || 0).toFixed(2)} on ${item.purchase_po_number || 'the purchase'}`
+                                  : item.purchase_rate != null
+                                    ? `No received purchase matches the cost rate $${Number(item.purchase_rate).toFixed(2)}`
+                                    : 'Supplier not matched'}
+                              </span>
+                            )}
+                          </td>
                           <td className="px-2 py-1.5 text-right tabular-nums">{Number(item.quantity || 0)}</td>
                           <td className="px-2 py-1.5 text-right tabular-nums">{money(Number(item.unit_price || 0))}</td>
                           <td className="px-2 py-1.5 text-right tabular-nums">{money(Number(item.total ?? 0))}</td>
@@ -215,6 +243,24 @@ export default function CreditMemoDrawer({
         )}
         {memo && (
           <div className="border-t border-[#E3E5E8] px-5 py-3 flex flex-wrap gap-2">
+            {memo.type === 'CUSTOMER' && memo.reason === 'DAMAGED' &&
+              [...new Map(
+                (memo.items || [])
+                  .filter((item) => item.purchase_match === 'rate' && refId(item.purchase_vendor_id) && refId(item.purchase_po_id))
+                  .map((item) => {
+                    const vendorId = refId(item.purchase_vendor_id);
+                    const poId = refId(item.purchase_po_id);
+                    return [`${vendorId}:${poId}`, { vendorId, poId, vendorName: item.purchase_vendor_name || 'supplier', poNumber: item.purchase_po_number || '' }] as const;
+                  })
+              ).values()].map((group) => (
+                <Link
+                  key={`${group.vendorId}:${group.poId}`}
+                  href={`/admin/credit-memos/vendors?from_memo=${memo.id}&vendor_id=${group.vendorId}&po_id=${group.poId}`}
+                  className={adminUi.btnSecondary}
+                >
+                  Credit {group.vendorName}{group.poNumber ? ` · ${group.poNumber}` : ''}
+                </Link>
+              ))}
             {draft && memo.type !== 'VENDOR' && (
               <button type="button" onClick={() => onEdit(memo.id)} className={adminUi.btnSecondary}>
                 View/Edit
@@ -272,7 +318,9 @@ export default function CreditMemoDrawer({
                 disabled={acting}
                 className={`${adminUi.btnPrimary} disabled:opacity-50`}
                 onClick={async () => {
-                  if (!confirm(`Mark ${memo.credit_memo_number} as dispatched?\n\nStock will leave the warehouse now.`)) return;
+                  if (!confirm(memo.reason === 'DAMAGED'
+                    ? `Mark ${memo.credit_memo_number} as dispatched?\n\nDamaged stock will leave. Sellable stock stays.`
+                    : `Mark ${memo.credit_memo_number} as dispatched?\n\nStock will leave the warehouse now.`)) return;
                   setActing(true);
                   try {
                     await adminApi.post(`/credit-memos/${memo.id}/mark-dispatched`);
@@ -318,7 +366,9 @@ export default function CreditMemoDrawer({
                 disabled={acting}
                 className={`${adminUi.btnPrimary} disabled:opacity-50`}
                 onClick={async () => {
-                  if (!confirm(`Mark ${memo.credit_memo_number} as received?\n\nStock will be updated now.`)) return;
+                  if (!confirm(memo.reason === 'DAMAGED'
+                    ? `Mark ${memo.credit_memo_number} as received?\n\nThese units will be recorded as damaged stock. Sellable stock will not increase.`
+                    : `Mark ${memo.credit_memo_number} as received?\n\nStock will be updated now.`)) return;
                   setActing(true);
                   try {
                     await adminApi.post(`/credit-memos/${memo.id}/mark-received`);

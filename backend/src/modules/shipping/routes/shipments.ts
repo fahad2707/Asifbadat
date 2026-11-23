@@ -3,6 +3,7 @@ import { z } from 'zod';
 import Shipment from '../models/Shipment';
 import ShipmentPackage from '../models/ShipmentPackage';
 import { authenticateAdmin, AuthRequest } from '../../../middleware/auth';
+import { recordAdminNotice } from '../../../services/adminNotice';
 import {
   generateShipmentNumber,
   markShipmentDelivered,
@@ -239,6 +240,19 @@ router.patch('/:id/status', authenticateAdmin, async (req: AuthRequest, res) => 
     const update: any = { status };
     if (status === 'DISPATCHED' || status === 'IN_TRANSIT') update.dispatch_date = new Date();
     await Shipment.findByIdAndUpdate(req.params.id, update);
+    const label =
+      status === 'DISPATCHED' || status === 'IN_TRANSIT'
+        ? 'is out for delivery'
+        : status === 'PACKED'
+          ? 'is packed'
+          : 'status updated';
+    void recordAdminNotice({
+      kind: 'shipment',
+      title: `${shipment.shipment_number} ${label}`,
+      body: `Shipment ${shipment.shipment_number} marked ${String(status).replace(/_/g, ' ').toLowerCase()}`,
+      href: `/admin/shipments?q=${encodeURIComponent(shipment.shipment_number)}`,
+      ref: `${shipment.shipment_number}:${status}`,
+    });
     res.json({ success: true, status });
   } catch (e) {
     console.error('Update shipment status:', e);
@@ -290,6 +304,16 @@ router.post('/:id/mark-delivered', authenticateAdmin, async (req: AuthRequest, r
     const { proof_of_delivery_url } = req.body || {};
     const result = await markShipmentDelivered(req.params.id, proof_of_delivery_url, req.userId);
     if (!result.success) return res.status(400).json({ error: result.error });
+    const delivered = await Shipment.findById(req.params.id).select('shipment_number').lean();
+    if (delivered) {
+      void recordAdminNotice({
+        kind: 'shipment',
+        title: `${delivered.shipment_number} marked as delivered`,
+        body: `Shipment ${delivered.shipment_number} is delivered`,
+        href: `/admin/shipments?q=${encodeURIComponent(String(delivered.shipment_number || ''))}`,
+        ref: `${delivered.shipment_number}:DELIVERED`,
+      });
+    }
     res.json({ success: true, message: 'Shipment marked delivered' });
   } catch (e) {
     console.error('Mark delivered:', e);

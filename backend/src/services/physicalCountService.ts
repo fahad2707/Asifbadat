@@ -1,13 +1,11 @@
 import mongoose from 'mongoose';
 import Product from '../models/Product';
-import StockMovement from '../models/StockMovement';
 import { StockMovementType } from '../shared/enums';
 import { createStockMovement, StockMovementWriteError } from '../utils/createStockMovement';
+import { createStockSheet } from './stockAdjustmentSheet';
 import {
   PHYSICAL_COUNT_REASON,
   PHYSICAL_COUNT_REFERENCE_TYPE,
-  adjustmentNumberDateKey,
-  formatAdjustmentNumber,
   physicalCountDelta,
 } from '../utils/physicalCount';
 
@@ -15,6 +13,7 @@ export type PhysicalCountLineInput = {
   product_id: string;
   counted_quantity: number;
   expected_current_quantity?: number;
+  line_notes?: string;
 };
 
 export type PhysicalCountLineResult = {
@@ -37,23 +36,6 @@ export class PhysicalCountError extends Error {
     this.body = body;
     this.name = 'PhysicalCountError';
   }
-}
-
-async function nextAdjustmentNumber(session: mongoose.ClientSession): Promise<string> {
-  const dateKey = adjustmentNumberDateKey();
-  const prefix = `ADJ-${dateKey}-`;
-  const last = await StockMovement.findOne(
-    { reference_number: { $regex: `^${prefix}` } },
-    'reference_number',
-    { session, sort: { reference_number: -1 } }
-  );
-  let seq = 1;
-  const lastNum = last?.reference_number ? String(last.reference_number) : '';
-  if (lastNum.startsWith(prefix)) {
-    const parsed = parseInt(lastNum.slice(prefix.length), 10);
-    if (Number.isFinite(parsed) && parsed >= 0) seq = parsed + 1;
-  }
-  return formatAdjustmentNumber(dateKey, seq);
 }
 
 export async function applyPhysicalCount(opts: {
@@ -79,16 +61,18 @@ export async function applyPhysicalCount(opts: {
     const prepared: Array<{
       product_id: mongoose.Types.ObjectId;
       product_name: string;
+      sku?: string;
       current: number;
       counted: number;
       delta: number;
+      line_notes?: string;
     }> = [];
 
     for (const line of opts.lines) {
       if (!mongoose.Types.ObjectId.isValid(line.product_id)) {
         throw new PhysicalCountError(404, { error: 'Product not found' });
       }
-      const product = await Product.findById(line.product_id, 'name stock_quantity', { session });
+      const product = await Product.findById(line.product_id, 'name sku stock_quantity', { session });
       if (!product) {
         throw new PhysicalCountError(404, { error: 'Product not found', product_id: line.product_id });
       }
@@ -110,15 +94,16 @@ export async function applyPhysicalCount(opts: {
       prepared.push({
         product_id: product._id as mongoose.Types.ObjectId,
         product_name: product.name,
+        sku: (product as { sku?: string }).sku || undefined,
         current,
         counted,
         delta: physicalCountDelta(current, counted),
+        line_notes: line.line_notes?.trim() || undefined,
       });
     }
 
-    const anyChange = prepared.some((p) => p.delta !== 0);
-    const reference_number = anyChange ? await nextAdjustmentNumber(session) : null;
     const results: PhysicalCountLineResult[] = [];
+    const applied: typeof prepared = [];
 
     for (const row of prepared) {
       if (row.delta === 0) {
@@ -131,6 +116,7 @@ export async function applyPhysicalCount(opts: {
           quantity_after: row.current,
           changed: false,
         });
+        applied.push(row);
         continue;
       }
 
@@ -150,27 +136,7 @@ export async function applyPhysicalCount(opts: {
       }
 
       const after = Number(updated.stock_quantity);
-      try {
-        await createStockMovement({
-          session,
-          productId: row.product_id,
-          movementType: StockMovementType.PHYSICAL_COUNT,
-          quantityBefore: row.current,
-          quantityChange: row.delta,
-          quantityAfter: after,
-          referenceType: PHYSICAL_COUNT_REFERENCE_TYPE,
-          referenceNumber: reference_number || undefined,
-          reason,
-          notes,
-          adminId,
-        });
-      } catch (error) {
-        if (error instanceof StockMovementWriteError) {
-          throw new PhysicalCountError(error.status, { error: error.message });
-        }
-        throw error;
-      }
-
+      applied.push(row);
       results.push({
         product_id: String(row.product_id),
         product_name: row.product_name,
@@ -182,9 +148,53 @@ export async function applyPhysicalCount(opts: {
       });
     }
 
+    const sheet = await createStockSheet(session, {
+      kind: 'physical_count',
+      notes,
+      adminId: opts.adminId,
+      lines: applied.map((row, index) => ({
+        product_id: row.product_id,
+        product_name: row.product_name,
+        sku: row.sku,
+        quantity_before: results[index].quantity_before,
+        quantity_change: results[index].quantity_delta,
+        quantity_after: results[index].quantity_after,
+        counted_quantity: row.counted,
+        notes: row.line_notes,
+      })),
+    });
+
+    for (const result of results) {
+      if (!result.changed) continue;
+      const source = applied.find((row) => String(row.product_id) === result.product_id);
+      try {
+        await createStockMovement({
+          session,
+          productId: result.product_id,
+          movementType: StockMovementType.PHYSICAL_COUNT,
+          quantityBefore: result.quantity_before,
+          quantityChange: result.quantity_delta,
+          quantityAfter: result.quantity_after,
+          referenceType: PHYSICAL_COUNT_REFERENCE_TYPE,
+          referenceId: sheet._id as mongoose.Types.ObjectId,
+          referenceNumber: sheet.number,
+          reason,
+          notes: source?.line_notes,
+          adminId,
+        });
+      } catch (error) {
+        if (error instanceof StockMovementWriteError) {
+          throw new PhysicalCountError(error.status, { error: error.message });
+        }
+        throw error;
+      }
+    }
+
     await session.commitTransaction();
     return {
-      reference_number,
+      id: String(sheet._id),
+      reference_number: sheet.number,
+      barcode: sheet.barcode,
       reason,
       notes: notes || null,
       lines: results,

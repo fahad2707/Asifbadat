@@ -117,7 +117,7 @@ router.post('/', authenticateAdmin, async (req: AuthRequest, res) => {
     });
   } catch (error: any) {
     if (error instanceof z.ZodError) {
-      return res.status(400).json({ error: error.errors[0].message });
+      return res.status(400).json({ error: error.message });
     }
     console.error('Create category error:', error);
     res.status(500).json({ error: 'Failed to create category' });
@@ -152,7 +152,7 @@ router.put('/:id', authenticateAdmin, async (req: AuthRequest, res) => {
     });
   } catch (error: any) {
     if (error instanceof z.ZodError) {
-      return res.status(400).json({ error: error.errors[0].message });
+      return res.status(400).json({ error: error.message });
     }
     console.error('Update category error:', error);
     res.status(500).json({ error: 'Failed to update category' });

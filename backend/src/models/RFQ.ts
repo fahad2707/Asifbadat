@@ -29,6 +29,8 @@ export interface IRFQ extends Document {
   /** When admin generates a quotation from this RFQ, store the link */
   quotation_id?: mongoose.Types.ObjectId;
   quotation_number?: string;
+  /** Set when that quotation is converted to an invoice (RI#…). */
+  invoice_number?: string;
 
   source: 'website' | 'store' | 'manual';
   notes?: string; // Admin notes
@@ -65,6 +67,7 @@ const RFQSchema = new Schema<IRFQ>(
     items: { type: [RFQItemSchema], default: [] },
     quotation_id: { type: Schema.Types.ObjectId, ref: 'Invoice' },
     quotation_number: String,
+    invoice_number: String,
     source: {
       type: String,
       enum: ['website', 'store', 'manual'],

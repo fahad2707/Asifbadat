@@ -70,7 +70,7 @@ router.put('/', authenticateAdmin, async (req: AuthRequest, res) => {
       ...settings.toObject(),
     });
   } catch (error: any) {
-    if (error instanceof z.ZodError) return res.status(400).json({ error: error.errors[0].message });
+    if (error instanceof z.ZodError) return res.status(400).json({ error: error.message });
     console.error('Update settings error:', error);
     res.status(500).json({ error: 'Failed to update settings' });
   }

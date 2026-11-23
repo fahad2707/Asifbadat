@@ -16,6 +16,7 @@ import {
   waitForCommittedCheckoutOrder,
 } from '../utils/onlineOrderIdempotency';
 import { DOC_PREFIX, nextPrefixedNumber } from '../utils/documentNumbers';
+import { recordAdminNotice } from '../services/adminNotice';
 
 const router = express.Router();
 
@@ -162,6 +163,13 @@ router.post('/', onlineCheckoutLimiter, authenticateUser, async (req: AuthReques
         notes: body.notes || undefined,
       });
 
+      void recordAdminNotice({
+        kind: 'online_order',
+        title: `${order.order_number} online order`,
+        body: `${order.customer_name} placed an online order for $${Number(order.total_amount).toFixed(2)}`,
+        href: `/admin/orders?q=${encodeURIComponent(order.order_number)}`,
+        ref: order.order_number,
+      });
       return res.status(201).json(formatOnlineOrderCreateResponse(order as any));
     } catch (createError: unknown) {
       if (!isCheckoutSubmissionDuplicateKey(createError)) {
@@ -187,7 +195,7 @@ router.post('/', onlineCheckoutLimiter, authenticateUser, async (req: AuthReques
     }
   } catch (error: any) {
     if (error instanceof z.ZodError) {
-      return res.status(400).json({ error: error.errors[0].message });
+      return res.status(400).json({ error: error.message });
     }
     console.error('Create online order error:', error);
     res.status(500).json({ error: 'Failed to place order' });
@@ -364,7 +372,7 @@ router.post('/:id/link-quotation', authenticateAdmin, async (req: AuthRequest, r
     });
   } catch (error: any) {
     if (error instanceof z.ZodError) {
-      return res.status(400).json({ error: error.errors[0]?.message || 'Invalid request' });
+      return res.status(400).json({ error: error.message || 'Invalid request' });
     }
     console.error('Link online-order quotation:', error);
     res.status(500).json({ error: 'Failed to link quotation' });
@@ -422,6 +430,21 @@ router.put('/:id/status', authenticateAdmin, async (req: AuthRequest, res) => {
   } catch (error) {
     console.error('Update order status error:', error);
     res.status(500).json({ error: 'Failed to update status' });
+  }
+});
+
+/** Admin: remove the website order. Does not delete a linked quotation or invoice, and does not change stock. */
+router.delete('/:id', authenticateAdmin, async (req: AuthRequest, res) => {
+  try {
+    if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+      return res.status(404).json({ error: 'Order not found' });
+    }
+    const deleted = await OnlineOrder.findByIdAndDelete(req.params.id).lean();
+    if (!deleted) return res.status(404).json({ error: 'Order not found' });
+    res.json({ ok: true });
+  } catch (error) {
+    console.error('Delete online order error:', error);
+    res.status(500).json({ error: 'Failed to delete order' });
   }
 });
 

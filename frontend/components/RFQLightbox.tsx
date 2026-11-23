@@ -39,6 +39,29 @@ export default function RFQLightbox({
   const nameInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
+    if (!isOpen) return;
+    const token = typeof window !== 'undefined' ? String(localStorage.getItem('token') || '').trim() : '';
+    if (!token) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await api.get('/user/profile');
+        if (cancelled) return;
+        const contact = res.data?.contact || {};
+        setName((current) => current || contact.name || res.data?.name || '');
+        setCompany((current) => current || contact.company || '');
+        setPhone((current) => current || contact.phone || '');
+        setEmail((current) => current || contact.email || res.data?.email || '');
+      } catch {
+        /* Quote form still works if the profile cannot be loaded. */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [isOpen]);
+
+  useEffect(() => {
     if (isOpen) {
       setError(null);
       setSuccessRef(null);

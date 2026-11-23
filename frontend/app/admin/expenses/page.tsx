@@ -1,11 +1,14 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Plus, Edit, Trash2, X, Wallet, TrendingUp, Tag, Award, Search } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Plus, Search, Trash2, X } from 'lucide-react';
 import adminApi from '@/lib/admin-api';
 import { adminUi } from '@/lib/admin-ui';
 import toast from 'react-hot-toast';
 import NumberInput from '@/components/admin/NumberInput';
+import ExpenseStatement from '@/components/admin/ExpenseStatement';
+import { STATEMENT_PERIODS, type StatementPeriod } from '@/components/admin/statementPeriods';
+import { moneyOut } from '@/lib/moneyTone';
 
 interface Expense {
   id: string;
@@ -71,6 +74,9 @@ export default function ExpensesPage() {
   const [newPaymentMode, setNewPaymentMode] = useState('');
   const [savingPaymentMode, setSavingPaymentMode] = useState(false);
   const [search, setSearch] = useState('');
+  const [page, setPage] = useState(1);
+  const [period, setPeriod] = useState<StatementPeriod>('month');
+  const [statementOpen, setStatementOpen] = useState(false);
 
   const thisMonthStart = () => {
     const d = new Date();
@@ -255,138 +261,101 @@ export default function ExpensesPage() {
       (e.vendor_name || '').toLowerCase().includes(term)
     );
   });
+  const PAGE_SIZE = 25;
+  const totalDocs = filteredExpenses.length;
+  const totalPages = Math.max(1, Math.ceil(totalDocs / PAGE_SIZE));
+  const safePage = Math.min(page, totalPages);
+  const pageRows = filteredExpenses.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-        <div>
-          <h1 className={adminUi.pageTitle}>Expenses</h1>
-          <p className="text-xs text-slate-400 mt-1">Manage, categorize, register and audit daily operating expenses (OPEX) and capital expenses (CAPEX).</p>
-        </div>
-      </div>
-
-      <div className="bg-white border border-[#E2E8F0] rounded-lg p-4 flex flex-wrap items-center gap-4">
-        <div className="relative flex-1 min-w-[240px]">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
-          <input
-            type="text"
-            placeholder="Search expenses by number, type, description, vendor..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="w-full pl-10 pr-4 py-2 bg-slate-950/60 border border-white/10 rounded-xl text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-teal-500 focus:border-teal-500 focus:bg-slate-950/80 transition-all font-semibold"
-          />
+      <div className="flex flex-wrap items-center justify-between gap-4">
+        <h1 className={adminUi.pageTitle}>Pay bills</h1>
+        <div className="flex items-center gap-2">
+          <select aria-label="Statement period" value={period} onChange={(e) => setPeriod(e.target.value as StatementPeriod)} className={adminUi.filter}>
+            {STATEMENT_PERIODS.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
+          </select>
+          <button type="button" onClick={() => setStatementOpen(true)} className={adminUi.btnSecondary}>Statement</button>
+          <button type="button" onClick={openAdd} className={adminUi.btnPrimary}>
+            <Plus className="w-4 h-4" /> Add expense
+          </button>
         </div>
       </div>
 
       {loading ? (
         <div className="flex justify-center py-16">
-          <div className="animate-spin rounded-full h-8 w-8 border-2 border-teal-500 border-t-transparent" />
+          <div className="animate-spin rounded-full h-8 w-8 border-2 border-black border-t-transparent" />
         </div>
       ) : (
         <>
-          {/* Top cards */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-            <div className="bg-white border border-[#E2E8F0] rounded-lg p-5">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-teal-500/10 border border-teal-500/20 flex items-center justify-center">
-                  <Wallet className="w-5 h-5 text-teal-400" />
-                </div>
-                <div>
-                  <p className="text-[10px] text-slate-500 font-bold uppercase tracking-wider mb-1">Expenses (This Month)</p>
-                  <p className="text-xl font-extrabold text-slate-100 font-mono">${Number(summary.total).toLocaleString(undefined, {minimumFractionDigits: 2})}</p>
-                </div>
-              </div>
+          <div className="grid grid-cols-1 overflow-hidden rounded-md border border-[#E3E5E8] md:grid-cols-2">
+            <div className="px-5 py-4 bg-[#FDECEC]">
+              <p className={`text-[26px] leading-tight font-normal tabular-nums ${moneyOut}`}>${Number(summary.total).toLocaleString(undefined, { minimumFractionDigits: 2 })}</p>
+              <p className="text-xs text-[#6B6C72] mt-1">Spent in the selected dates</p>
+              <div className="mt-3 h-1.5 rounded-full bg-[#C81916]" />
             </div>
-            <div className="bg-white border border-[#E2E8F0] rounded-lg p-5">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-blue-500/10 border border-blue-500/20 flex items-center justify-center">
-                  <Tag className="w-5 h-5 text-blue-400" />
-                </div>
-                <div>
-                  <p className="text-[10px] text-slate-500 font-bold uppercase tracking-wider mb-1">Fixed Expenditures</p>
-                  <p className="text-xl font-extrabold text-slate-100 font-mono">${Number(summary.fixed).toLocaleString(undefined, {minimumFractionDigits: 2})}</p>
-                </div>
-              </div>
-            </div>
-            <div className="bg-white border border-[#E2E8F0] rounded-lg p-5">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center">
-                  <TrendingUp className="w-5 h-5 text-amber-400" />
-                </div>
-                <div>
-                  <p className="text-[10px] text-slate-500 font-bold uppercase tracking-wider mb-1">Variable Expenditures</p>
-                  <p className="text-xl font-extrabold text-slate-100 font-mono">${Number(summary.variable).toLocaleString(undefined, {minimumFractionDigits: 2})}</p>
-                </div>
-              </div>
-            </div>
-            <div className="bg-white border border-[#E2E8F0] rounded-lg p-5">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-purple-500/10 border border-purple-500/20 flex items-center justify-center">
-                  <Award className="w-5 h-5 text-purple-400" />
-                </div>
-                <div>
-                  <p className="text-[10px] text-slate-500 font-bold uppercase tracking-wider mb-1">Peak Category</p>
-                  <p className="text-sm font-bold text-slate-200 mt-1 truncate">
-                    {summary.highestCategory ? `${summary.highestCategory.name} ($${Number(summary.highestCategory.amount).toFixed(2)})` : '—'}
-                  </p>
-                </div>
-              </div>
+            <div className="px-5 py-4 bg-[#FFF4E5]">
+              <p className="text-[26px] leading-tight font-normal text-[#1A1A1A] truncate">{summary.highestCategory ? summary.highestCategory.name : '—'}</p>
+              <p className="text-xs text-[#6B6C72] mt-1">{summary.highestCategory ? `Largest type · $${Number(summary.highestCategory.amount).toFixed(2)}` : 'Largest type'}</p>
+              <div className="mt-3 h-1.5 rounded-full bg-[#F5A623]" />
             </div>
           </div>
 
-          {/* Filters + Add + Table */}
-          <div className="bg-slate-900/40 backdrop-blur-lg border border-white/[0.06] border-t-white/[0.18] p-3 rounded-2xl flex flex-wrap items-center gap-3">
-            <input type="date" value={filters.start} onChange={(e) => setFilters((f) => ({ ...f, start: e.target.value }))} className="bg-slate-950/60 border border-white/10 rounded-xl px-3 py-2 text-xs text-slate-205 focus:outline-none focus:ring-1 focus:ring-teal-500" />
-            <input type="date" value={filters.end} onChange={(e) => setFilters((f) => ({ ...f, end: e.target.value }))} className="bg-slate-950/60 border border-white/10 rounded-xl px-3 py-2 text-xs text-slate-205 focus:outline-none focus:ring-1 focus:ring-teal-500" />
-            <input type="text" value={filters.expense_type} onChange={(e) => setFilters((f) => ({ ...f, expense_type: e.target.value }))} className="bg-slate-950/60 border border-white/10 rounded-xl px-3 py-2 text-xs text-slate-205 focus:outline-none focus:ring-1 focus:ring-teal-500 w-44" placeholder="Filter by expense type" />
-            <select value={filters.payment_mode} onChange={(e) => setFilters((f) => ({ ...f, payment_mode: e.target.value }))} className="bg-slate-950/60 border border-white/10 rounded-xl px-3 py-2 text-xs text-slate-205 focus:outline-none focus:ring-1 focus:ring-teal-500">
+          <div className="flex flex-wrap items-center gap-2 rounded-lg border border-[#E2E8F0] bg-white p-3">
+            <div className="relative w-full max-w-xs">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#8D9096]" />
+              <input
+                type="text"
+                placeholder="Search by number, type, payee, or description"
+                value={search}
+                onChange={(e) => { setSearch(e.target.value); setPage(1); }}
+                className={adminUi.filterSearch}
+              />
+            </div>
+            <input aria-label="From date" type="date" value={filters.start} onChange={(e) => { setFilters((f) => ({ ...f, start: e.target.value })); setPage(1); }} className={`${adminUi.filter} w-[9.5rem]`} />
+            <input aria-label="To date" type="date" value={filters.end} onChange={(e) => { setFilters((f) => ({ ...f, end: e.target.value })); setPage(1); }} className={`${adminUi.filter} w-[9.5rem]`} />
+            <input aria-label="Expense type" type="text" value={filters.expense_type} onChange={(e) => { setFilters((f) => ({ ...f, expense_type: e.target.value })); setPage(1); }} className={`${adminUi.filter} w-32`} placeholder="Type" />
+            <select aria-label="Payment mode" value={filters.payment_mode} onChange={(e) => { setFilters((f) => ({ ...f, payment_mode: e.target.value })); setPage(1); }} className={adminUi.filter}>
               <option value="">All payment modes</option>
               {paymentModes.map((m) => (
                 <option key={m} value={m}>{paymentModeLabel(m)}</option>
               ))}
             </select>
-            <button onClick={openAdd} className="bg-[#0F9F8F] hover:bg-[#0B8275] border-transparent text-white px-4 py-2.5 rounded-xl text-xs font-bold transition-all shadow-sm flex items-center gap-2">
-              <Plus className="w-4 h-4" /> Add Expense
-            </button>
           </div>
 
-          <div className="bg-white border border-[#E2E8F0] rounded-lg overflow-hidden">
+          <div className={`${adminUi.panel} overflow-hidden`}>
             <div className="overflow-x-auto">
-              <table className="w-full border-collapse">
-                <thead className="bg-slate-950/60 text-slate-400 border-b border-white/5">
+              <table className="w-full text-sm table-auto">
+                <thead className={adminUi.tableHead}>
                   <tr>
-                    <th className="text-left py-3.5 px-4 text-[10px] font-bold uppercase tracking-wider">Number</th>
-                    <th className="text-left py-3.5 px-4 text-[10px] font-bold uppercase tracking-wider">Date</th>
-                    <th className="text-left py-3.5 px-4 text-[10px] font-bold uppercase tracking-wider">Type / Category</th>
-                    <th className="text-left py-3.5 px-4 text-[10px] font-bold uppercase tracking-wider">Description</th>
-                    <th className="text-right py-3.5 px-4 text-[10px] font-bold uppercase tracking-wider">Amount</th>
-                    <th className="text-left py-3.5 px-4 text-[10px] font-bold uppercase tracking-wider">Payment Mode</th>
-                    <th className="text-right py-3.5 px-4 text-[10px] font-bold uppercase tracking-wider">Actions</th>
+                    <th className="text-left px-3 py-2 font-medium whitespace-nowrap w-[1%]">Number</th>
+                    <th className="text-left px-3 py-2 font-medium whitespace-nowrap w-[1%]">Date</th>
+                    <th className="text-left px-3 py-2 font-medium whitespace-nowrap w-[1%]">Type</th>
+                    <th className="text-left px-3 py-2 font-medium">Description</th>
+                    <th className="text-right px-3 py-2 font-medium whitespace-nowrap w-[1%]">Amount</th>
+                    <th className="text-left px-3 py-2 font-medium whitespace-nowrap w-[1%]">Payment</th>
+                    <th className="text-right px-3 py-2 font-medium whitespace-nowrap w-[1%]">Action</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {filteredExpenses.length === 0 ? (
+                  {pageRows.length === 0 ? (
                     <tr>
-                      <td colSpan={7} className="py-16 text-center text-slate-500 text-xs font-semibold">No expense records found.</td>
+                      <td colSpan={7} className="px-3 py-10 text-center text-sm text-[#6B6C72]">No expenses yet.</td>
                     </tr>
                   ) : (
-                    filteredExpenses.map((e) => (
-                      <tr key={e.id} className="border-b border-white/5 hover:bg-white/[0.02] transition-colors">
-                        <td className="py-3 px-4 text-xs font-mono font-bold text-teal-400">{e.expense_number}</td>
-                        <td className="py-3 px-4 text-xs text-slate-350">{formatDate(e.date)}</td>
-                        <td className="py-3 px-4 text-xs font-semibold text-slate-200">{e.expense_type}</td>
-                        <td className="py-3 px-4 text-xs text-slate-400 max-w-xs truncate">{e.description || '—'}</td>
-                        <td className="py-3 px-4 text-xs text-right font-extrabold text-slate-100 font-mono">${Number(e.amount).toLocaleString(undefined, {minimumFractionDigits: 2})}</td>
-                        <td className="py-3 px-4 text-xs">
-                          <span className="inline-flex px-2 py-0.5 rounded text-[10px] font-bold border border-white/10 bg-slate-800/80 text-slate-350">{paymentModeLabel(e.payment_mode)}</span>
-                        </td>
-                        <td className="py-3 px-4 text-right text-xs">
-                          <div className="flex items-center justify-end gap-1.5">
-                            <button onClick={() => openEdit(e)} className="p-1.5 text-teal-450 hover:text-teal-350 hover:bg-white/5 rounded-lg transition-all" title="Edit">
-                              <Edit className="w-3.5 h-3.5" />
-                            </button>
-                            <button onClick={() => handleDelete(e.id)} className="p-1.5 text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 rounded-lg transition-all" title="Delete">
-                              <Trash2 className="w-3.5 h-3.5" />
+                    pageRows.map((e) => (
+                      <tr key={e.id} className={`border-t border-[#E3E5E8] ${adminUi.tableRowHover}`}>
+                        <td className="px-3 py-2 text-sm font-medium text-[#0077C5] whitespace-nowrap">{e.expense_number}</td>
+                        <td className="px-3 py-2 text-sm text-[#1A1A1A] whitespace-nowrap">{formatDate(e.date)}</td>
+                        <td className="px-3 py-2 text-sm text-[#1A1A1A] whitespace-nowrap">{e.expense_type}</td>
+                        <td className="px-3 py-2 text-sm text-[#1A1A1A] max-w-[18rem] truncate">{e.description || '—'}</td>
+                        <td className={`px-3 py-2 text-right text-sm tabular-nums whitespace-nowrap ${moneyOut}`}>${Number(e.amount).toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
+                        <td className="px-3 py-2 text-sm whitespace-nowrap"><span className={adminUi.badge}>{paymentModeLabel(e.payment_mode)}</span></td>
+                        <td className="px-3 py-2 text-right text-sm whitespace-nowrap">
+                          <div className="flex items-center justify-end gap-2">
+                            <button type="button" onClick={() => openEdit(e)} className="text-sm text-[#0077C5] hover:underline">View/Edit</button>
+                            <button type="button" onClick={() => handleDelete(e.id)} className={adminUi.btnIcon} title="Delete" aria-label="Delete">
+                              <Trash2 className="w-4 h-4" />
                             </button>
                           </div>
                         </td>
@@ -397,37 +366,49 @@ export default function ExpensesPage() {
               </table>
             </div>
           </div>
+          {!loading && (
+            <div className="flex flex-wrap items-center justify-between gap-3 px-1">
+              <p className={adminUi.meta}>{totalDocs === 0 ? '0 expenses' : `${(safePage - 1) * PAGE_SIZE + 1}–${Math.min(safePage * PAGE_SIZE, totalDocs)} of ${totalDocs}`}</p>
+              <div className="flex items-center gap-2">
+                <button type="button" className={adminUi.btnSecondary} disabled={safePage <= 1} onClick={() => setPage((current) => Math.max(1, current - 1))} aria-label="Previous page"><ChevronLeft className="w-4 h-4" />Previous</button>
+                <span className="min-w-[3.5rem] text-center text-sm tabular-nums text-[#1A1A1A]">{safePage} / {totalPages}</span>
+                <button type="button" className={adminUi.btnSecondary} disabled={safePage >= totalPages} onClick={() => setPage((current) => current + 1)} aria-label="Next page">Next<ChevronRight className="w-4 h-4" /></button>
+              </div>
+            </div>
+          )}
         </>
       )}
 
+      {statementOpen && <ExpenseStatement period={period} onClose={() => setStatementOpen(false)} />}
+
       {showModal && (
-        <div className="fixed inset-0 bg-slate-955/80 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <div className="bg-white border border-[#E2E8F0] rounded-lg text-[#0F172A] max-w-lg w-full max-h-[90vh] overflow-y-auto">
-            <div className="flex items-center justify-between p-5 border-b border-white/5">
-              <h2 className="text-lg font-bold text-white">{editing ? 'Edit Corporate Expense' : 'Log Corporate Expense'}</h2>
-              <button type="button" onClick={() => setShowModal(false)} className="p-1.5 hover:bg-white/5 rounded-lg text-slate-400 hover:text-white transition-all">
+        <div className={adminUi.modalBackdrop} onClick={() => setShowModal(false)}>
+          <div className={`${adminUi.modal} max-w-lg w-full`} onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between p-5 border-b border-[#E3E5E8]">
+              <h2 className="text-lg font-medium text-[#1A1A1A]">{editing ? 'Edit expense' : 'Add expense'}</h2>
+              <button type="button" onClick={() => setShowModal(false)} className={adminUi.btnIcon} aria-label="Close">
                 <X className="w-5 h-5" />
               </button>
             </div>
             <form onSubmit={handleSubmit} className="p-5 space-y-4">
               <div>
-                <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">Transaction Date *</label>
-                <input type="date" value={form.date} onChange={(e) => setForm((f) => ({ ...f, date: e.target.value }))} className="w-full bg-slate-950/60 border border-white/10 rounded-xl px-4 py-2 text-xs text-slate-202 focus:outline-none focus:ring-1 focus:ring-teal-500" required />
+                <label className={adminUi.label}>Date</label>
+                <input type="date" value={form.date} onChange={(e) => setForm((f) => ({ ...f, date: e.target.value }))} className={`${adminUi.field} mt-1`} required />
               </div>
               <div>
-                <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">Expense Category *</label>
-                <input type="text" value={form.expense_type} onChange={(e) => setForm((f) => ({ ...f, expense_type: e.target.value }))} className="w-full bg-slate-955/60 border border-white/10 rounded-xl px-4 py-2.5 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-teal-500" placeholder="e.g. WiFi, Shipping, Electricity, Transport, Rental" required />
+                <label className={adminUi.label}>Type</label>
+                <input type="text" value={form.expense_type} onChange={(e) => setForm((f) => ({ ...f, expense_type: e.target.value }))} className={`${adminUi.field} mt-1`} placeholder="Electricity, shipping, rent" required />
               </div>
               <div>
-                <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">Description</label>
-                <input type="text" value={form.description} onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))} className="w-full bg-slate-950/60 border border-white/10 rounded-xl px-4 py-2 text-xs text-slate-200 placeholder-slate-600 focus:outline-none" placeholder="Optional" />
+                <label className={adminUi.label}>Description</label>
+                <input type="text" value={form.description} onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))} className={`${adminUi.field} mt-1`} placeholder="Optional" />
               </div>
               <div>
-                <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">Grand Amount (USD) *</label>
-                <NumberInput min={0} step={0.01} value={form.amount} onValueChange={(n) => setForm((f) => ({ ...f, amount: n === '' ? '' : String(n) }))} className="w-full bg-slate-955/65 border border-white/10 rounded-xl px-4 py-2 text-xs text-slate-100 font-mono font-semibold focus:outline-none focus:ring-1 focus:ring-teal-500" required />
+                <label className={adminUi.label}>Amount</label>
+                <NumberInput min={0} step={0.01} value={form.amount} onValueChange={(n) => setForm((f) => ({ ...f, amount: n === '' ? '' : String(n) }))} className={`${adminUi.field} mt-1`} required />
               </div>
               <div>
-                <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">Mode of payment *</label>
+                <label className={adminUi.label}>Payment mode</label>
                 {!addingPaymentMode ? (
                   <select
                     value={form.payment_mode}
@@ -439,7 +420,7 @@ export default function ExpensesPage() {
                       }
                       setForm((f) => ({ ...f, payment_mode: e.target.value }));
                     }}
-                    className="w-full bg-slate-955/60 border border-white/10 rounded-xl px-4 py-2 text-xs text-slate-250 focus:outline-none focus:ring-1 focus:ring-teal-500"
+                    className={`${adminUi.field} mt-1`}
                   >
                     {Array.from(new Set([...paymentModes, form.payment_mode].filter(Boolean))).map((m) => (
                       <option key={m} value={m}>{paymentModeLabel(m)}</option>
@@ -447,47 +428,36 @@ export default function ExpensesPage() {
                     <option value={ADD_PAYMENT_MODE}>+ Add payment mode</option>
                   </select>
                 ) : (
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="text"
-                      value={newPaymentMode}
-                      onChange={(e) => setNewPaymentMode(e.target.value)}
-                      placeholder="e.g. Wire transfer"
-                      className="flex-1 bg-slate-955/60 border border-white/10 rounded-xl px-4 py-2 text-xs text-slate-200 focus:outline-none focus:ring-1 focus:ring-teal-500"
-                      autoFocus
-                    />
-                    <button type="button" onClick={handleAddPaymentMode} disabled={savingPaymentMode} className="px-3 py-2 bg-[#0F9F8F] text-white rounded-xl text-xs font-bold disabled:opacity-40">
-                      {savingPaymentMode ? 'Saving…' : 'Save'}
-                    </button>
-                    <button type="button" onClick={() => { setAddingPaymentMode(false); setNewPaymentMode(''); }} className="px-3 py-2 bg-slate-800 text-slate-300 rounded-xl text-xs font-semibold">
-                      Cancel
-                    </button>
+                  <div className="mt-1 flex items-center gap-2">
+                    <input type="text" value={newPaymentMode} onChange={(e) => setNewPaymentMode(e.target.value)} placeholder="Wire transfer" className={adminUi.field} autoFocus />
+                    <button type="button" onClick={handleAddPaymentMode} disabled={savingPaymentMode} className={adminUi.btnPrimary}>{savingPaymentMode ? 'Saving…' : 'Save'}</button>
+                    <button type="button" onClick={() => { setAddingPaymentMode(false); setNewPaymentMode(''); }} className={adminUi.btnSecondary}>Cancel</button>
                   </div>
                 )}
               </div>
               <div>
-                <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">Vendor recipient name</label>
-                <input type="text" value={form.vendor_name} onChange={(e) => setForm((f) => ({ ...f, vendor_name: e.target.value }))} className="w-full bg-slate-950/60 border border-white/10 rounded-xl px-4 py-2 text-xs text-slate-200 focus:outline-none" placeholder="e.g. Warehouse Landlord" />
+                <label className={adminUi.label}>Payee</label>
+                <input type="text" value={form.vendor_name} onChange={(e) => setForm((f) => ({ ...f, vendor_name: e.target.value }))} className={`${adminUi.field} mt-1`} placeholder="Who was paid" />
               </div>
               <div>
-                <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">Attachment / Receipt Link</label>
-                <input type="url" value={form.attachment} onChange={(e) => setForm((f) => ({ ...f, attachment: e.target.value }))} className="w-full bg-slate-950/60 border border-white/10 rounded-xl px-4 py-2 text-xs text-slate-200 placeholder-slate-600 focus:outline-none" placeholder="e.g. https://s3.aws.receipt.pdf" />
+                <label className={adminUi.label}>Receipt link</label>
+                <input type="url" value={form.attachment} onChange={(e) => setForm((f) => ({ ...f, attachment: e.target.value }))} className={`${adminUi.field} mt-1`} placeholder="https://" />
               </div>
-              <div className="flex items-center gap-4 bg-slate-950/40 border border-white/5 p-3 rounded-xl">
-                <label className="flex items-center gap-2.5 cursor-pointer select-none">
-                  <input type="checkbox" checked={form.is_recurring} onChange={(e) => setForm((f) => ({ ...f, is_recurring: e.target.checked }))} className="rounded border-white/10 bg-slate-950/60 text-teal-600 focus:ring-0 w-4 h-4" />
-                  <span className="text-xs text-slate-350 font-bold uppercase tracking-wider">Mark Recurring Expense</span>
+              <div className="flex items-center gap-4 rounded-md border border-[#E3E5E8] p-3">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input type="checkbox" checked={form.is_recurring} onChange={(e) => setForm((f) => ({ ...f, is_recurring: e.target.checked }))} className="h-4 w-4 accent-black" />
+                  <span className="text-sm text-[#1A1A1A]">Recurring</span>
                 </label>
                 {form.is_recurring && (
-                  <select value={form.recurrence_type} onChange={(e) => setForm((f) => ({ ...f, recurrence_type: e.target.value }))} className="bg-slate-950/60 border border-white/10 rounded-xl px-3 py-1.5 text-xs text-slate-200 focus:outline-none">
-                    <option value="MONTHLY">Monthly cycle</option>
-                    <option value="YEARLY">Yearly cycle</option>
+                  <select value={form.recurrence_type} onChange={(e) => setForm((f) => ({ ...f, recurrence_type: e.target.value }))} className={adminUi.field}>
+                    <option value="MONTHLY">Monthly</option>
+                    <option value="YEARLY">Yearly</option>
                   </select>
                 )}
               </div>
-              <div className="flex justify-end gap-2.5 pt-4 border-t border-white/5">
-                <button type="button" onClick={() => setShowModal(false)} className="px-4 py-2.5 bg-slate-800 border border-white/5 text-slate-400 hover:text-white rounded-xl text-xs font-semibold">Cancel</button>
-                <button type="submit" disabled={submitting} className="flex-1 px-4 py-2.5 bg-[#0F9F8F] hover:bg-[#0B8275] border-transparent text-white rounded-xl text-xs font-bold shadow-sm transition-all disabled:opacity-40">Save Expense</button>
+              <div className="flex justify-end gap-2 pt-4 border-t border-[#E3E5E8]">
+                <button type="button" onClick={() => setShowModal(false)} className={adminUi.btnSecondary}>Cancel</button>
+                <button type="submit" disabled={submitting} className={`${adminUi.btnPrimary} disabled:opacity-40`}>{submitting ? 'Saving…' : 'Save expense'}</button>
               </div>
             </form>
           </div>

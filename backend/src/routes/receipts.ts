@@ -1,9 +1,11 @@
 import express from 'express';
 import mongoose from 'mongoose';
 import Receipt from '../models/Receipt';
+import Invoice from '../models/Invoice';
 import BankAccount from '../models/BankAccount';
 import { authenticateAdmin, AuthRequest } from '../middleware/auth';
 import { httpErrorFromPayment, paymentApplication } from '../services/paymentApplication';
+import { recordAdminNotice } from '../services/adminNotice';
 
 const router = express.Router();
 
@@ -29,6 +31,42 @@ function depositAt(r: { city?: string | null; trx_date?: Date | string }) {
     if (!Number.isNaN(d.getTime())) return d;
   }
   return r.trx_date ? new Date(r.trx_date) : new Date(0);
+}
+
+const STATEMENT_PERIODS = ['today', 'yesterday', 'week', '2weeks', 'month', '2months', '3months', '6months', '12months', 'year'] as const;
+
+function statementWindow(period: string): { start: Date; end: Date } | null {
+  if (!(STATEMENT_PERIODS as readonly string[]).includes(period)) return null;
+  const now = new Date();
+  const start = new Date(now);
+  start.setHours(0, 0, 0, 0);
+  const end = new Date(now);
+  end.setHours(23, 59, 59, 999);
+  if (period === 'yesterday') {
+    start.setDate(start.getDate() - 1);
+    end.setTime(start.getTime());
+    end.setHours(23, 59, 59, 999);
+  } else if (period === 'week') start.setDate(start.getDate() - 6);
+  else if (period === '2weeks') start.setDate(start.getDate() - 13);
+  else if (period === 'month') start.setMonth(start.getMonth() - 1);
+  else if (period === '2months') start.setMonth(start.getMonth() - 2);
+  else if (period === '3months') start.setMonth(start.getMonth() - 3);
+  else if (period === '6months') start.setMonth(start.getMonth() - 6);
+  else if (period === '12months') start.setFullYear(start.getFullYear() - 1);
+  else if (period === 'year') {
+    start.setFullYear(start.getFullYear() - 1, 0, 1);
+    start.setHours(0, 0, 0, 0);
+    end.setFullYear(end.getFullYear() - 1, 11, 31);
+    end.setHours(23, 59, 59, 999);
+  }
+  return { start, end };
+}
+
+function dayKey(value: Date): string {
+  const y = value.getFullYear();
+  const m = String(value.getMonth() + 1).padStart(2, '0');
+  const d = String(value.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
 }
 
 function periodBounds(period: string) {
@@ -64,7 +102,45 @@ function toReceiptRow(r: any) {
     created_at: r.created_at,
     deposit_status: isArchivedReceipt(r) ? 'archived' : deposited ? 'deposited' : 'pending',
     deposited_at: deposited || isArchivedReceipt(r) ? depositAt(r).toISOString() : undefined,
+    comment: r.so_id || '',
   };
+}
+
+async function decorateReceiptRows<T extends { id: string; invoice_num?: string; amount_received?: number; trx_date?: string | Date; created_at?: string | Date }>(rows: T[]) {
+  const numbers = [...new Set(rows.map((row) => String(row.invoice_num || '')).filter(Boolean))];
+  const [invoices, siblings] = numbers.length
+    ? await Promise.all([
+      Invoice.find({ invoice_number: { $in: numbers } }).select('invoice_number total_amount amount_paid').lean(),
+      Receipt.find({ invoice_num: { $in: numbers } }).select('invoice_num amount_received trx_date created_at').sort({ trx_date: 1, created_at: 1 }).lean(),
+    ])
+    : [[], []];
+  const books = new Map(invoices.map((row) => {
+    const doc = row as { invoice_number?: string; total_amount?: number; amount_paid?: number };
+    return [String(doc.invoice_number || ''), { total: Number(doc.total_amount) || 0, paid: Number(doc.amount_paid) || 0 }];
+  }));
+  const grouped = new Map<string, Array<{ id: string; amount_received?: number }>>();
+  for (const raw of siblings) {
+    const doc = raw as { _id?: { toString(): string }; invoice_num?: string; amount_received?: number };
+    const key = String(doc.invoice_num || '');
+    if (!key || !books.has(key) || !doc._id) continue;
+    grouped.set(key, [...(grouped.get(key) || []), { id: doc._id.toString(), amount_received: doc.amount_received }]);
+  }
+  const extra = new Map<string, { settlement: 'full' | 'partial'; remaining: number; invoice_total: number; invoice_balance: number }>();
+  for (const [number, list] of grouped) {
+    const book = books.get(number)!;
+    let running = 0;
+    for (const row of list) {
+      running = Math.round((running + (Number(row.amount_received) || 0)) * 100) / 100;
+      const remaining = Math.max(0, Math.round((book.total - running) * 100) / 100);
+      extra.set(row.id, {
+        settlement: remaining <= 0 ? 'full' : 'partial',
+        remaining,
+        invoice_total: book.total,
+        invoice_balance: Math.max(0, Math.round((book.total - book.paid) * 100) / 100),
+      });
+    }
+  }
+  return rows.map((row) => ({ ...row, ...(extra.get(row.id) || { settlement: null, remaining: null, invoice_total: null, invoice_balance: null }) }));
 }
 
 // Overview of deposited totals by bank for a time window. Sums stored amounts only.
@@ -126,6 +202,64 @@ router.get('/overview', authenticateAdmin, async (req: AuthRequest, res) => {
   }
 });
 
+router.get('/statement', authenticateAdmin, async (req: AuthRequest, res) => {
+  try {
+    const period = String(req.query.period || 'month');
+    const window = statementWindow(period);
+    if (!window) return res.status(400).json({ error: 'Choose a statement period.' });
+    const receipts = await Receipt.find({ trx_date: { $lte: window.end } })
+      .populate('bank_account_id', 'name')
+      .sort({ trx_date: 1, created_at: 1 })
+      .lean();
+    const decorated = await decorateReceiptRows(receipts.map(toReceiptRow));
+    let opening = 0;
+    let received = 0;
+    let deposited = 0;
+    let pending = 0;
+    const lines: Array<Record<string, unknown>> = [];
+    let running = 0;
+    for (const row of decorated) {
+      const when = new Date(row.trx_date || 0);
+      const amount = Number(row.amount_received) || 0;
+      if (when < window.start) {
+        opening = Math.round((opening + amount) * 100) / 100;
+        continue;
+      }
+      if (when > window.end) continue;
+      running = Math.round((opening + received + amount) * 100) / 100;
+      received = Math.round((received + amount) * 100) / 100;
+      if (row.deposit_status === 'deposited') deposited = Math.round((deposited + amount) * 100) / 100;
+      else if (row.deposit_status !== 'archived') pending = Math.round((pending + amount) * 100) / 100;
+      lines.push({
+        date: dayKey(when),
+        reference: row.trx_id,
+        customer: row.customer_name,
+        invoice: row.invoice_num || '',
+        type: row.settlement,
+        method: row.pmt_mode,
+        amount,
+        deposit: row.deposit_status,
+        remaining: row.invoice_balance,
+        balance: running,
+      });
+    }
+    res.json({
+      period,
+      from: dayKey(window.start),
+      to: dayKey(window.end),
+      opening_balance: opening,
+      payments_received: received,
+      deposited,
+      not_deposited: pending,
+      closing_balance: Math.round((opening + received) * 100) / 100,
+      lines,
+    });
+  } catch (error) {
+    console.error('Receipt statement error:', error);
+    res.status(500).json({ error: 'Failed to build the payments statement' });
+  }
+});
+
 // List receipts (bank transactions)
 router.get('/', authenticateAdmin, async (req: AuthRequest, res) => {
   try {
@@ -141,12 +275,13 @@ router.get('/', authenticateAdmin, async (req: AuthRequest, res) => {
     if (bank_account_id && typeof bank_account_id === 'string') {
       query.bank_account_id = bank_account_id;
     }
+    const limit = Math.min(2000, Math.max(1, Number(req.query.limit) || 500));
     const receipts = await Receipt.find(query)
       .populate('bank_account_id', 'name')
       .sort({ trx_date: -1, created_at: -1 })
-      .limit(500)
+      .limit(limit)
       .lean();
-    let rows = receipts.map(toReceiptRow);
+    let rows = await decorateReceiptRows(receipts.map(toReceiptRow));
     if (deposit_status === 'pending' || deposit_status === 'deposited' || deposit_status === 'archived') {
       rows = rows.filter((r) => r.deposit_status === deposit_status);
     }
@@ -178,6 +313,13 @@ router.post('/', authenticateAdmin, async (req: AuthRequest, res) => {
         customerName: customer_name,
         notes: so_id,
       });
+      void recordAdminNotice({
+        kind: 'receipt',
+        title: `${applied.receipt.trx_id} received`,
+        body: `$${Number(applied.amount_applied).toFixed(2)} from ${customer_name || 'customer'}${applied.invoice_number ? ` on ${applied.invoice_number}` : ''}`,
+        href: `/admin/receipts?q=${encodeURIComponent(applied.receipt.trx_id)}`,
+        ref: applied.receipt.trx_id,
+      });
       return res.status(201).json({
         id: applied.receipt.id,
         trx_id: applied.receipt.trx_id,
@@ -208,6 +350,13 @@ router.post('/', authenticateAdmin, async (req: AuthRequest, res) => {
       amount_received: Number(amount_received) || 0,
     });
     const r = receipt.toObject();
+    void recordAdminNotice({
+      kind: hasBank ? 'receipt_deposit' : 'receipt',
+      title: hasBank ? `${(r as any).trx_id} deposited` : `${(r as any).trx_id} received`,
+      body: `$${Number((r as any).amount_received || 0).toFixed(2)} from ${(r as any).customer_name || 'customer'}`,
+      href: `/admin/receipts?q=${encodeURIComponent(String((r as any).trx_id || ''))}`,
+      ref: String((r as any).trx_id || ''),
+    });
     res.status(201).json({
       id: (r as any)._id.toString(),
       trx_id: (r as any).trx_id,
@@ -247,6 +396,14 @@ router.post('/:id/deposit', authenticateAdmin, async (req: AuthRequest, res) => 
       bank_account_id: String(bank_account_id),
       state: 'deposited',
       city: depositedAt.toISOString(),
+    });
+    const bank = await BankAccount.findById(bank_account_id).select('name').lean();
+    void recordAdminNotice({
+      kind: 'receipt_deposit',
+      title: `${result.receipt.trx_id} deposited`,
+      body: `$${(Number(result.receipt.amount_received) || 0).toFixed(2)} to ${String((bank as { name?: string } | null)?.name || 'bank account')}`,
+      href: `/admin/receipts?q=${encodeURIComponent(result.receipt.trx_id)}`,
+      ref: result.receipt.trx_id,
     });
     res.json({
       success: true,

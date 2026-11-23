@@ -9,15 +9,30 @@ import { useAuthStore } from '@/lib/store';
 import { customerAuthTheme, customerAuthUi } from '@/lib/customer-auth-ui';
 import toast from 'react-hot-toast';
 
+type Contact = {
+  name?: string;
+  company?: string;
+  phone?: string;
+  email?: string;
+  address?: string;
+  city?: string;
+  state?: string;
+  zip?: string;
+};
+
 export default function AccountSettingsPage() {
   const router = useRouter();
   const token = useAuthStore((s) => s.token);
   const [hydrated, setHydrated] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [savingPassword, setSavingPassword] = useState(false);
+  const [approved, setApproved] = useState(false);
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
-  const [phone, setPhone] = useState('');
+  const [contact, setContact] = useState<Contact>({});
+  const [currentPassword, setCurrentPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
   const [fieldError, setFieldError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -43,9 +58,14 @@ export default function AccountSettingsPage() {
       try {
         const res = await api.get('/user/profile');
         if (cancelled) return;
-        setName(res.data?.name || '');
-        setEmail(res.data?.email || '');
-        setPhone(res.data?.phone || '');
+        const nextContact = (res.data?.contact || {}) as Contact;
+        setApproved(res.data?.account_approved === true && res.data?.account_status === 'approved');
+        setName(nextContact.name || res.data?.name || '');
+        setEmail(nextContact.email || res.data?.email || '');
+        setContact({
+          ...nextContact,
+          phone: nextContact.phone || '',
+        });
       } catch {
         if (!cancelled) toast.error('Failed to load profile');
       } finally {
@@ -59,6 +79,7 @@ export default function AccountSettingsPage() {
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!approved) return;
     setFieldError(null);
     setSaving(true);
     try {
@@ -76,6 +97,36 @@ export default function AccountSettingsPage() {
     }
   };
 
+  const handlePassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setFieldError(null);
+    if (newPassword.trim().length < 8) {
+      setFieldError('New password must be at least 8 characters.');
+      return;
+    }
+    setSavingPassword(true);
+    try {
+      await api.put('/user/password', {
+        current_password: currentPassword,
+        new_password: newPassword,
+      });
+      setCurrentPassword('');
+      setNewPassword('');
+      toast.success('Password updated');
+    } catch (error: unknown) {
+      const message = formatApiError(error, 'Failed to update password');
+      setFieldError(message);
+      toast.error(message);
+    } finally {
+      setSavingPassword(false);
+    }
+  };
+
+  const readOnlyClass = `${customerAuthUi.field} opacity-80`;
+  const address = [contact.address, [contact.city, contact.state, contact.zip].filter(Boolean).join(', ')]
+    .filter(Boolean)
+    .join('\n');
+
   return (
     <div
       className="min-h-screen px-4 py-10 sm:py-14"
@@ -90,11 +141,8 @@ export default function AccountSettingsPage() {
     >
       <div className="mx-auto w-full max-w-md space-y-6">
         <div className="flex items-center justify-between gap-3">
-          <Link href="/account" className={customerAuthUi.btnGhost}>
-            ← Account
-          </Link>
           <Link href="/site" className={customerAuthUi.btnGhost}>
-            Store
+            ← Store
           </Link>
         </div>
 
@@ -105,14 +153,13 @@ export default function AccountSettingsPage() {
             borderColor: customerAuthTheme.panelBorder,
           }}
         >
-          <h1
-            className="text-2xl text-[#F5F1E8] mb-2"
-            style={{ fontFamily: customerAuthTheme.serif }}
-          >
-            Account settings
+          <h1 className="text-2xl text-[#F5F1E8] mb-2" style={{ fontFamily: customerAuthTheme.serif }}>
+            Change settings
           </h1>
           <p className="text-sm text-[#A8A29A] mb-6">
-            Update the details on your wholesale account.
+            {approved
+              ? 'Update your login name and email, or change your password.'
+              : 'Your personal details are on file. You can change your password here.'}
           </p>
 
           {!hydrated || loading ? (
@@ -120,58 +167,91 @@ export default function AccountSettingsPage() {
               <div className="animate-spin rounded-full h-9 w-9 border-2 border-[#BFA06A] border-t-transparent" />
             </div>
           ) : (
-            <form onSubmit={handleSave} className="space-y-4" noValidate>
+            <div className="space-y-8">
               {fieldError && (
                 <div className={customerAuthUi.errorBox} role="alert">
                   {fieldError}
                 </div>
               )}
-              <div>
-                <label htmlFor="settings-name" className={customerAuthUi.label}>
-                  Name
-                </label>
-                <input
-                  id="settings-name"
-                  type="text"
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  className={customerAuthUi.field}
-                  autoComplete="name"
-                />
-              </div>
-              <div>
-                <label htmlFor="settings-email" className={customerAuthUi.label}>
-                  Email
-                </label>
-                <input
-                  id="settings-email"
-                  type="email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  className={customerAuthUi.field}
-                  autoComplete="email"
-                />
-              </div>
-              <div>
-                <label htmlFor="settings-phone" className={customerAuthUi.label}>
-                  Phone
-                </label>
-                <input
-                  id="settings-phone"
-                  type="tel"
-                  value={phone}
-                  readOnly
-                  className={`${customerAuthUi.field} opacity-70`}
-                  aria-describedby="phone-help"
-                />
-                <p id="phone-help" className={customerAuthUi.helper}>
-                  Phone changes are not available here. Contact Express Distributors if you need this updated.
-                </p>
-              </div>
-              <button type="submit" disabled={saving} className={customerAuthUi.btnPrimary}>
-                {saving ? 'Saving…' : 'Save changes'}
-              </button>
-            </form>
+              <form onSubmit={handleSave} className="space-y-4" noValidate>
+                <div>
+                  <label htmlFor="settings-name" className={customerAuthUi.label}>Name</label>
+                  <input
+                    id="settings-name"
+                    type="text"
+                    value={approved ? name : contact.name || name}
+                    onChange={(e) => setName(e.target.value)}
+                    readOnly={!approved}
+                    className={approved ? customerAuthUi.field : readOnlyClass}
+                    autoComplete="name"
+                  />
+                </div>
+                <div>
+                  <label htmlFor="settings-company" className={customerAuthUi.label}>Company</label>
+                  <input id="settings-company" type="text" value={contact.company || ''} readOnly className={readOnlyClass} />
+                </div>
+                <div>
+                  <label htmlFor="settings-email" className={customerAuthUi.label}>Email</label>
+                  <input
+                    id="settings-email"
+                    type="email"
+                    value={approved ? email : contact.email || email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    readOnly={!approved}
+                    className={approved ? customerAuthUi.field : readOnlyClass}
+                    autoComplete="email"
+                  />
+                </div>
+                <div>
+                  <label htmlFor="settings-phone" className={customerAuthUi.label}>Phone</label>
+                  <input id="settings-phone" type="tel" value={contact.phone || ''} readOnly className={readOnlyClass} />
+                </div>
+                <div>
+                  <label htmlFor="settings-address" className={customerAuthUi.label}>Address</label>
+                  <textarea id="settings-address" value={address} readOnly rows={3} className={readOnlyClass} />
+                </div>
+                {!approved && (
+                  <p className={customerAuthUi.helper}>To change personal details, contact admin.</p>
+                )}
+                {approved && (
+                  <button type="submit" disabled={saving} className={customerAuthUi.btnPrimary}>
+                    {saving ? 'Saving…' : 'Save changes'}
+                  </button>
+                )}
+              </form>
+
+              <form onSubmit={handlePassword} className="space-y-4 border-t border-white/10 pt-6" noValidate>
+                <h2 className="text-lg text-[#F5F1E8]" style={{ fontFamily: customerAuthTheme.serif }}>
+                  Password
+                </h2>
+                <div>
+                  <label htmlFor="settings-current-password" className={customerAuthUi.label}>Current password</label>
+                  <input
+                    id="settings-current-password"
+                    type="password"
+                    value={currentPassword}
+                    onChange={(e) => setCurrentPassword(e.target.value)}
+                    className={customerAuthUi.field}
+                    autoComplete="current-password"
+                  />
+                </div>
+                <div>
+                  <label htmlFor="settings-new-password" className={customerAuthUi.label}>New password</label>
+                  <input
+                    id="settings-new-password"
+                    type="password"
+                    value={newPassword}
+                    onChange={(e) => setNewPassword(e.target.value)}
+                    className={customerAuthUi.field}
+                    autoComplete="new-password"
+                    minLength={8}
+                  />
+                </div>
+                <button type="submit" disabled={savingPassword} className={customerAuthUi.btnPrimary}>
+                  {savingPassword ? 'Updating…' : 'Change password'}
+                </button>
+              </form>
+            </div>
           )}
         </div>
       </div>

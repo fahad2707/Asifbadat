@@ -37,7 +37,7 @@ router.post('/', authenticateAdmin, async (req: AuthRequest, res) => {
     const p = pm as any;
     res.status(201).json({ id: p._id.toString(), name: p.name, display_order: p.display_order ?? 0 });
   } catch (error: any) {
-    if (error instanceof z.ZodError) return res.status(400).json({ error: error.errors[0].message });
+    if (error instanceof z.ZodError) return res.status(400).json({ error: error.message });
     res.status(500).json({ error: 'Failed to create payment method' });
   }
 });
@@ -55,7 +55,7 @@ router.put('/:id', authenticateAdmin, async (req: AuthRequest, res) => {
     const p = pm as any;
     res.json({ id: p._id.toString(), name: p.name, display_order: p.display_order ?? 0 });
   } catch (error: any) {
-    if (error instanceof z.ZodError) return res.status(400).json({ error: error.errors[0].message });
+    if (error instanceof z.ZodError) return res.status(400).json({ error: error.message });
     res.status(500).json({ error: 'Failed to update' });
   }
 });

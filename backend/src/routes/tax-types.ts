@@ -37,7 +37,7 @@ router.post('/', authenticateAdmin, async (req: AuthRequest, res) => {
     const tax = await TaxType.create({ name: data.name, rate_type: data.rate_type || 'percent', rate: data.rate });
     res.status(201).json({ id: tax._id.toString(), name: tax.name, rate_type: (tax as any).rate_type, rate: tax.rate });
   } catch (error: any) {
-    if (error instanceof z.ZodError) return res.status(400).json({ error: error.errors[0].message });
+    if (error instanceof z.ZodError) return res.status(400).json({ error: error.message });
     res.status(500).json({ error: 'Failed to create tax type' });
   }
 });
@@ -52,7 +52,7 @@ router.put('/:id', authenticateAdmin, async (req: AuthRequest, res) => {
     const t = tax as any;
     res.json({ id: t._id.toString(), name: t.name, rate_type: t.rate_type || 'percent', rate: t.rate });
   } catch (error: any) {
-    if (error instanceof z.ZodError) return res.status(400).json({ error: error.errors[0].message });
+    if (error instanceof z.ZodError) return res.status(400).json({ error: error.message });
     res.status(500).json({ error: 'Failed to update' });
   }
 });

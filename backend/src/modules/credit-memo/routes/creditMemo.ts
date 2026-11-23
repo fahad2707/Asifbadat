@@ -3,6 +3,9 @@ import mongoose from 'mongoose';
 import { z } from 'zod';
 import CreditMemo from '../models/CreditMemo';
 import { authenticateAdmin, AuthRequest } from '../../../middleware/auth';
+import { recordAdminNotice } from '../../../services/adminNotice';
+import Customer from '../../../models/Customer';
+import Vendor from '../../../models/Vendor';
 import {
   approveCreditMemo,
   cancelCreditMemo,
@@ -15,55 +18,81 @@ import {
 import {
   CreditMemoFromInvoiceError,
   buildValidatedCustomerCreditItems,
+  customerCreditLineAmounts,
   loadCustomerInvoicesForCredit,
 } from '../services/creditMemoFromInvoice';
+import { buildInvoicePdfBuffer } from '../../../utils/invoicePdfLayout';
 import {
   CreditMemoFromPoError,
   buildValidatedVendorCreditItems,
   loadVendorPosForCredit,
 } from '../services/creditMemoFromPurchaseOrder';
-import { buildBusinessDocumentPdf } from '../../../utils/businessDocPdf';
 import { sendPdfResponse } from '../../../utils/pdfHelpers';
+import { annotateDamagedPurchaseSources } from '../services/purchaseSourceByRate';
 
 const router = express.Router();
 
-async function generateCreditMemoPDFBuffer(cm: any): Promise<Buffer> {
-  const cmNumber = cm.credit_memo_number || cm._id?.toString() || '—';
-  const partyName =
-    cm.type === 'VENDOR' ? (cm.vendor_id as any)?.name : (cm.customer_id as any)?.name;
-  const created = cm.created_at
-    ? new Date(cm.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
-    : '—';
-  const items = (cm.items || []).map((item: any) => ({
-    name: item.product_name || 'Product',
-    qty: item.quantity ?? 0,
-    unitPrice: Number(item.unit_price ?? 0),
-    lineTotal: Number(item.total ?? (item.quantity ?? 0) * (item.unit_price ?? 0)),
-  }));
+function purchaseStamp(item: {
+  purchase_match?: string;
+  purchase_rate?: number | null;
+  purchase_vendor_id?: unknown;
+  purchase_vendor_name?: string;
+  purchase_po_id?: unknown;
+  purchase_po_number?: string;
+  purchase_unit_cost?: number;
+}) {
+  if (!item.purchase_match) return {};
+  return {
+    purchase_rate: item.purchase_rate,
+    purchase_match: item.purchase_match,
+    purchase_vendor_id: item.purchase_vendor_id,
+    purchase_vendor_name: item.purchase_vendor_name,
+    purchase_po_id: item.purchase_po_id,
+    purchase_po_number: item.purchase_po_number,
+    purchase_unit_cost: item.purchase_unit_cost,
+  };
+}
 
-  return buildBusinessDocumentPdf({
-    title: 'CREDIT MEMO',
-    subtitle: cmNumber,
-    partyLabel: cm.type === 'VENDOR' ? 'Vendor' : 'Customer',
-    partyName: partyName || '—',
-    meta: [
-      { label: 'Credit memo #', value: cmNumber },
-      { label: 'Type', value: String(cm.type || '—') },
-      { label: 'Date', value: created },
-      { label: 'Reason', value: String(cm.reason || '—').replace(/_/g, ' ') },
-      { label: 'Status', value: String(cm.status || '—') },
-      ...(cm.reference_invoice_id?.invoice_number
-        ? [{ label: 'Invoice', value: String(cm.reference_invoice_id.invoice_number) }]
-        : []),
-    ],
-    items,
-    totals: [
-      { label: 'Subtotal', value: `$${Number(cm.subtotal ?? 0).toFixed(2)}` },
-      { label: 'Tax', value: `$${Number(cm.tax_amount ?? 0).toFixed(2)}` },
-      { label: 'Total credit', value: `$${Number(cm.total_amount ?? 0).toFixed(2)}`, bold: true },
-    ],
-    itemColumns: { showProductId: false },
-  });
+function partyAddress(party: { address?: string; billing_address?: string; city?: string; state?: string; zip?: string } | null | undefined): string {
+  if (!party) return '';
+  const street = party.billing_address || party.address || '';
+  const region = [party.city, party.state, party.zip].filter(Boolean).join(' ');
+  return [street, region].filter(Boolean).join(', ');
+}
+
+async function generateCreditMemoPDFBuffer(cm: any): Promise<Buffer> {
+  const party = cm.type === 'VENDOR' ? cm.vendor_id : cm.customer_id;
+  const items = (cm.items || []).map((item: any) => ({
+    product_name: item.product_name || 'Product',
+    quantity: item.quantity ?? 0,
+    price: Number(item.unit_price ?? 0),
+    subtotal: Math.round((Number(item.quantity ?? 0) * Number(item.unit_price ?? 0)) * 100) / 100,
+    taxable: Number(item.tax_amount) > 0,
+    tax_type_name: item.tax_type_name || null,
+    tax_type_label: item.tax_type_label || null,
+    tax_amount: Number(item.tax_amount) || 0,
+  }));
+  return buildInvoicePdfBuffer(
+    {
+      invoice_number: cm.credit_memo_number || '—',
+      invoice_date: cm.created_at,
+      document_kind: 'credit_memo',
+      customer_name: party?.name || '—',
+      customer_company: party?.company || '',
+      customer_address: partyAddress(party),
+      customer_phone: party?.phone || '',
+      customer_email: party?.email || '',
+      terms: String(cm.reason || '').replace(/_/g, ' '),
+      shipping_type: cm.reference_invoice_id?.invoice_number || cm.reference_purchase_order_id?.po_number || '',
+      payment_method: String(cm.status || ''),
+      party_heading: cm.type === 'VENDOR' ? 'VENDOR' : 'BILL TO',
+      reference_label: cm.type === 'VENDOR' ? 'PO' : 'Invoice',
+      subtotal_amount: Number(cm.subtotal ?? 0),
+      tax_amount: Number(cm.tax_amount ?? 0),
+      total_amount: Number(cm.total_amount ?? 0),
+    },
+    items
+  );
 }
 
 function mongoIdOrUndef(value?: string): string | undefined {
@@ -138,6 +167,156 @@ router.get('/vendor-pos', authenticateAdmin, async (req: AuthRequest, res) => {
   }
 });
 
+const STATEMENT_PERIODS = ['today', 'yesterday', 'week', '2weeks', 'month', '2months', '3months', '6months', '12months', 'year'] as const;
+
+function creditStatementWindow(period: string): { start: Date; end: Date } | null {
+  if (!(STATEMENT_PERIODS as readonly string[]).includes(period)) return null;
+  const now = new Date();
+  const start = new Date(now);
+  start.setHours(0, 0, 0, 0);
+  const end = new Date(now);
+  end.setHours(23, 59, 59, 999);
+  if (period === 'yesterday') {
+    start.setDate(start.getDate() - 1);
+    end.setTime(start.getTime());
+    end.setHours(23, 59, 59, 999);
+  } else if (period === 'week') start.setDate(start.getDate() - 6);
+  else if (period === '2weeks') start.setDate(start.getDate() - 13);
+  else if (period === 'month') start.setMonth(start.getMonth() - 1);
+  else if (period === '2months') start.setMonth(start.getMonth() - 2);
+  else if (period === '3months') start.setMonth(start.getMonth() - 3);
+  else if (period === '6months') start.setMonth(start.getMonth() - 6);
+  else if (period === '12months') start.setFullYear(start.getFullYear() - 1);
+  else if (period === 'year') {
+    start.setFullYear(start.getFullYear() - 1, 0, 1);
+    start.setHours(0, 0, 0, 0);
+    end.setFullYear(end.getFullYear() - 1, 11, 31);
+    end.setHours(23, 59, 59, 999);
+  }
+  return { start, end };
+}
+
+function creditDayKey(value: Date): string {
+  const month = String(value.getMonth() + 1).padStart(2, '0');
+  const day = String(value.getDate()).padStart(2, '0');
+  return `${value.getFullYear()}-${month}-${day}`;
+}
+
+function creditSettlement(status: string): { settlement: string; counts: boolean } {
+  if (status === 'CANCELLED') return { settlement: 'Cancelled', counts: false };
+  if (status === 'DRAFT') return { settlement: 'Not settled', counts: false };
+  if (status === 'APPROVED') return { settlement: 'Owed', counts: true };
+  if (status === 'ADJUSTED' || status === 'CLOSED') return { settlement: 'Settled', counts: true };
+  return { settlement: status || 'Not settled', counts: false };
+}
+
+router.get('/statement', authenticateAdmin, async (req: AuthRequest, res) => {
+  try {
+    const period = String(req.query.period || 'month');
+    const type = String(req.query.type || 'CUSTOMER').toUpperCase() === 'VENDOR' ? 'VENDOR' : 'CUSTOMER';
+    const window = creditStatementWindow(period);
+    if (!window) return res.status(400).json({ error: 'Choose a statement period.' });
+    const memos = await CreditMemo.find({ type, created_at: { $lte: window.end } })
+      .populate('customer_id', 'name company')
+      .populate('vendor_id', 'name')
+      .populate('reference_invoice_id', 'invoice_number')
+      .populate('reference_purchase_order_id', 'po_number')
+      .sort({ created_at: 1 })
+      .lean();
+    const round = (n: number) => Math.round(n * 100) / 100;
+    let opening = 0;
+    let issued = 0;
+    let settled = 0;
+    let stillOwed = 0;
+    const lines: Array<Record<string, unknown>> = [];
+    let running = 0;
+    for (const memo of memos as any[]) {
+      const when = new Date(memo.created_at || 0);
+      const book = creditSettlement(String(memo.status || ''));
+      const credit = Number(memo.total_amount) || 0;
+      const owed = book.counts ? credit : 0;
+      if (when < window.start) {
+        opening = round(opening + owed);
+        continue;
+      }
+      if (when > window.end) continue;
+      issued = round(issued + owed);
+      if (book.settlement === 'Settled') settled = round(settled + credit);
+      if (book.settlement === 'Owed') stillOwed = round(stillOwed + credit);
+      const party = type === 'VENDOR' ? memo.vendor_id : memo.customer_id;
+      const items = Array.isArray(memo.items) && memo.items.length ? memo.items : [{ product_name: '', quantity: 0, unit_price: 0, tax_amount: 0, total: credit }];
+      items.forEach((item: any, index: number) => {
+        const lineCredit = round(Number(item.total) || (Number(item.quantity) || 0) * (Number(item.unit_price) || 0));
+        if (index === 0) running = round(opening + issued);
+        lines.push({
+          date: creditDayKey(when),
+          memo: memo.credit_memo_number || '',
+          customer: party?.name || '',
+          company: party?.company || '',
+          invoice: memo.reference_invoice_id?.invoice_number || memo.reference_purchase_order_id?.po_number || '',
+          reason: String(memo.reason || '').replace(/_/g, ' '),
+          item: item.product_name || '',
+          quantity: Number(item.quantity) || 0,
+          unit_price: Number(item.unit_price) || 0,
+          merchandise: round((Number(item.quantity) || 0) * (Number(item.unit_price) || 0)),
+          tax: Number(item.tax_amount) || 0,
+          credit: index === 0 ? credit : lineCredit,
+          status: memo.status || '',
+          settlement: book.settlement,
+          we_owe: index === 0 ? owed : 0,
+          balance: running,
+        });
+      });
+    }
+    res.json({
+      period,
+      type,
+      from: creditDayKey(window.start),
+      to: creditDayKey(window.end),
+      opening_owed: opening,
+      credits_issued: issued,
+      settled,
+      still_owed: stillOwed,
+      closing_owed: round(opening + issued),
+      lines,
+    });
+  } catch (error) {
+    console.error('Credit memo statement error:', error);
+    res.status(500).json({ error: 'Failed to build the credit memo statement' });
+  }
+});
+
+// Supplier of a product, matched by the product's cost rate against received purchases.
+router.get('/purchase-source', authenticateAdmin, async (req: AuthRequest, res) => {
+  try {
+    const raw = String(req.query.product_ids || req.query.product_id || '');
+    const ids = [...new Set(raw.split(',').map((id) => id.trim()).filter(Boolean))].slice(0, 50);
+    if (!ids.length) return res.json({ sources: [] });
+    for (const id of ids) {
+      if (!mongoose.Types.ObjectId.isValid(id)) {
+        return res.status(400).json({ error: 'A product id is not valid' });
+      }
+    }
+    const annotated = await annotateDamagedPurchaseSources(ids.map((id) => ({ product_id: id })));
+    res.json({
+      sources: annotated.map((row) => ({
+        product_id: String(row.product_id),
+        rate: row.purchase_rate,
+        matched: row.purchase_match === 'rate',
+        vendor_id: row.purchase_vendor_id ? String(row.purchase_vendor_id) : undefined,
+        vendor_name: row.purchase_vendor_name,
+        po_id: row.purchase_po_id ? String(row.purchase_po_id) : undefined,
+        po_number: row.purchase_po_number,
+        unit_cost: row.purchase_unit_cost,
+        method: row.purchase_match === 'rate' ? 'purchase_order' : undefined,
+      })),
+    });
+  } catch (error) {
+    console.error('Purchase source by rate:', error);
+    res.status(500).json({ error: 'Failed to find the purchase source' });
+  }
+});
+
 // List credit memos
 router.get('/', authenticateAdmin, async (req: AuthRequest, res) => {
   try {
@@ -203,9 +382,10 @@ router.get('/', authenticateAdmin, async (req: AuthRequest, res) => {
 router.get('/:id/pdf', authenticateAdmin, async (req: AuthRequest, res) => {
   try {
     const cm = await CreditMemo.findById(req.params.id)
-      .populate('vendor_id', 'name')
-      .populate('customer_id', 'name')
+      .populate('vendor_id', 'name phone email address city state zip')
+      .populate('customer_id', 'name company phone email address billing_address city state zip')
       .populate('reference_invoice_id', 'invoice_number')
+      .populate('reference_purchase_order_id', 'po_number')
       .lean();
     if (!cm) return res.status(404).json({ error: 'Credit memo not found' });
     const buffer = await generateCreditMemoPDFBuffer(cm);
@@ -323,17 +503,27 @@ router.post('/', authenticateAdmin, async (req: AuthRequest, res) => {
       extraNotes = built.invoice_number ? `Invoice ${built.invoice_number}` : '';
     }
 
-    const items = sourceItems.map((i) => {
-      const taxAmount = (i.quantity * i.unit_price * (i.tax_percent || 0)) / 100;
-      const total = i.quantity * i.unit_price + taxAmount;
+    const stampedItems =
+      data.type === 'CUSTOMER' && data.reason === 'DAMAGED'
+        ? await annotateDamagedPurchaseSources(sourceItems)
+        : sourceItems;
+    const items = stampedItems.map((i) => {
+      const priced = data.type === 'CUSTOMER'
+        ? customerCreditLineAmounts(i)
+        : {
+          tax_percent: i.tax_percent || 0,
+          tax_amount: (i.quantity * i.unit_price * (i.tax_percent || 0)) / 100,
+          total: i.quantity * i.unit_price + (i.quantity * i.unit_price * (i.tax_percent || 0)) / 100,
+        };
       return {
         product_id: i.product_id,
         product_name: i.product_name,
         quantity: i.quantity,
         unit_price: i.unit_price,
-        tax_percent: i.tax_percent || 0,
-        tax_amount: taxAmount,
-        total,
+        tax_percent: priced.tax_percent,
+        tax_amount: priced.tax_amount,
+        total: priced.total,
+        ...(purchaseStamp(i) as any),
       };
     });
     const subtotal = items.reduce((s, i) => s + i.quantity * i.unit_price, 0);
@@ -373,6 +563,20 @@ router.post('/', authenticateAdmin, async (req: AuthRequest, res) => {
       total_amount: cm.total_amount,
       created_at: cm.created_at,
     });
+    const party =
+      data.type === 'VENDOR'
+        ? await Vendor.findById(cm.vendor_id).select('name').lean()
+        : await Customer.findById(cm.customer_id).select('name').lean();
+    const partyName = String((party as { name?: string } | null)?.name || (data.type === 'VENDOR' ? 'vendor' : 'customer'));
+    const hrefBase = data.type === 'VENDOR' ? '/admin/credit-memos/vendors' : '/admin/credit-memos/customers';
+    const invoiceHint = extraNotes || '';
+    void recordAdminNotice({
+      kind: 'credit_memo',
+      title: `${cm.credit_memo_number} credit memo`,
+      body: `Credit memo created for ${partyName}${invoiceHint ? ` · ${invoiceHint}` : ''}`,
+      href: `${hrefBase}?q=${encodeURIComponent(cm.credit_memo_number)}`,
+      ref: cm.credit_memo_number,
+    });
   } catch (e: any) {
     if (e instanceof CreditMemoFromInvoiceError) return res.status(e.status).json({ error: e.message });
     if (e instanceof CreditMemoFromPoError) return res.status(e.status).json({ error: e.message });
@@ -399,18 +603,47 @@ router.put('/:id', authenticateAdmin, async (req: AuthRequest, res) => {
     let items = cm.items;
     if (data.items) {
       items = data.items.map((i) => {
-        const taxAmount = (i.quantity * i.unit_price * (i.tax_percent || 0)) / 100;
-        const total = i.quantity * i.unit_price + taxAmount;
+        const priced = cm.type === 'CUSTOMER'
+          ? customerCreditLineAmounts(i)
+          : {
+            tax_percent: i.tax_percent || 0,
+            tax_amount: (i.quantity * i.unit_price * (i.tax_percent || 0)) / 100,
+            total: i.quantity * i.unit_price + (i.quantity * i.unit_price * (i.tax_percent || 0)) / 100,
+          };
         return {
           product_id: new mongoose.Types.ObjectId(i.product_id),
           product_name: i.product_name,
           quantity: i.quantity,
           unit_price: i.unit_price,
-          tax_percent: i.tax_percent || 0,
-          tax_amount: taxAmount,
-          total,
+          tax_percent: priced.tax_percent,
+          tax_amount: priced.tax_amount,
+          total: priced.total,
         };
-      });
+      }) as typeof cm.items;
+    }
+    const nextReason = data.reason ?? cm.reason;
+    if (cm.type === 'CUSTOMER' && nextReason === 'DAMAGED') {
+      const annotated = await annotateDamagedPurchaseSources(
+        items.map((item) => ({
+          product_id: String(item.product_id),
+          product_name: item.product_name,
+          quantity: item.quantity,
+          unit_price: item.unit_price,
+          tax_percent: item.tax_percent,
+          tax_amount: item.tax_amount,
+          total: item.total,
+        }))
+      );
+      items = annotated.map((item) => ({
+        product_id: new mongoose.Types.ObjectId(String(item.product_id)),
+        product_name: item.product_name,
+        quantity: item.quantity,
+        unit_price: item.unit_price,
+        tax_percent: item.tax_percent,
+        tax_amount: item.tax_amount,
+        total: item.total,
+        ...purchaseStamp(item),
+      })) as typeof cm.items;
     }
     const subtotal = items.reduce((s, i) => s + i.quantity * i.unit_price, 0);
     const tax_amount = items.reduce((s, i) => s + i.tax_amount, 0);

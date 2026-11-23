@@ -2,17 +2,20 @@
 
 import { Suspense, useEffect, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { Plus, Search, X, Trash2, Download } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Download, Plus, Printer, Search, Trash2, X } from 'lucide-react';
 import adminApi, { uploadApi } from '@/lib/admin-api';
 import toast from 'react-hot-toast';
-import { downloadPdfFromResponse, openPdfFromResponse } from '@/lib/download-pdf';
-import Link from 'next/link';
+import { downloadPdfFromResponse, openPdfFromResponse, printPdfFromResponse } from '@/lib/download-pdf';
 import SearchableProductDropdown from '@/components/admin/SearchableProductDropdown';
+import ProductModal from '@/components/admin/ProductModal';
 import NumberInput from '@/components/admin/NumberInput';
 import { adminUi } from '@/lib/admin-ui';
 import { exportPurchaseOrdersToExcel } from '@/lib/export-purchase-orders-excel';
 import PurchaseOrderDrawer from '@/components/admin/PurchaseOrderDrawer';
+import PurchaseBooksStatement from '@/components/admin/PurchaseBooksStatement';
+import { STATEMENT_PERIODS, type StatementPeriod } from '@/components/admin/statementPeriods';
 import { toastBarcodeNotFound, toastProductAdded } from '@/lib/barcode-feedback';
+import { moneyOut } from '@/lib/moneyTone';
 
 interface POItem {
   product_id: string;
@@ -69,7 +72,7 @@ interface CreateRow {
 
 export default function PurchaseOrdersPage() {
   return (
-    <Suspense fallback={<div className="flex justify-center h-64 items-center"><div className="animate-spin rounded-full h-10 w-10 border-2 border-teal-500 border-t-transparent" /></div>}>
+    <Suspense fallback={<div className="flex justify-center h-64 items-center"><div className="animate-spin rounded-full h-8 w-8 border-2 border-black border-t-transparent" /></div>}>
       <PurchaseOrdersPageInner />
     </Suspense>
   );
@@ -97,6 +100,10 @@ function PurchaseOrdersPageInner() {
   const [newVendorName, setNewVendorName] = useState('');
   const [savingVendor, setSavingVendor] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [page, setPage] = useState(1);
+  const [printing, setPrinting] = useState(false);
+  const [period, setPeriod] = useState<StatementPeriod>('month');
+  const [statementOpen, setStatementOpen] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [detailId, setDetailId] = useState<string | null>(null);
@@ -104,10 +111,12 @@ function PurchaseOrdersPageInner() {
   const [savingPo, setSavingPo] = useState(false);
   const receiveInFlightRef = useRef(false);
   const vendorInvoiceInputRef = useRef<HTMLInputElement>(null);
+  const [showAddProduct, setShowAddProduct] = useState(false);
+  const addProductRowRef = useRef(0);
 
   const fetchPOs = async () => {
     try {
-      const res = await adminApi.get('/purchase-orders', { params: { limit: 1000, ...(search ? { search } : {}) } });
+      const res = await adminApi.get('/purchase-orders', { params: { limit: 1000 } });
       setPos(res.data.purchase_orders || []);
     } catch {
       toast.error('Failed to load purchase orders');
@@ -129,14 +138,44 @@ function PurchaseOrdersPageInner() {
     try {
       const res = await adminApi.get('/products', { params: { limit: 5000 } });
       setProducts(res.data.products || []);
+      return (res.data.products || []) as Product[];
     } catch {
       toast.error('Failed to load products');
+      return [] as Product[];
+    }
+  };
+
+  const handleCreatedProduct = async (saved?: { id: string }) => {
+    setShowAddProduct(false);
+    const idx = addProductRowRef.current;
+    try {
+      const list = await fetchProducts();
+      const created = saved?.id ? list.find((p) => String(p.id) === String(saved.id)) : undefined;
+      if (!created) {
+        toast.error('Product saved. Search for it on the line to add it.');
+        return;
+      }
+      setRows((prev) => {
+        const next = [...prev];
+        const current = next[idx] || emptyRow();
+        next[idx] = {
+          ...current,
+          product_id: created.id,
+          product_name: created.name,
+          category_name: created.category_name || '',
+          unit_cost: current.unit_cost || Number(created.cost_price) || 0,
+          qty: current.qty || 1,
+        };
+        return next;
+      });
+    } catch {
+      toast.error('Product saved. Search for it on the line to add it.');
     }
   };
 
   useEffect(() => {
     fetchPOs();
-  }, [search]);
+  }, []);
 
   const emptyRow = (): CreateRow => ({
     product_id: '',
@@ -290,8 +329,19 @@ function PurchaseOrdersPageInner() {
     }
   };
 
-  const allVisibleSelected = pos.length > 0 && pos.every((p) => selectedIds.has(p.id));
-  const someVisibleSelected = pos.some((p) => selectedIds.has(p.id));
+  const PAGE_SIZE = 25;
+  const term = search.trim().toLowerCase();
+  const filtered = pos.filter((po) => {
+    if (filter !== 'All' && po.status !== filter) return false;
+    if (!term) return true;
+    return [po.po_number, po.vendor_name, po.supplier_id, po.state, po.city].some((value) => String(value || '').toLowerCase().includes(term));
+  });
+  const totalDocs = filtered.length;
+  const totalPages = Math.max(1, Math.ceil(totalDocs / PAGE_SIZE));
+  const safePage = Math.min(page, totalPages);
+  const pageRows = filtered.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
+  const allVisibleSelected = pageRows.length > 0 && pageRows.every((p) => selectedIds.has(p.id));
+  const someVisibleSelected = pageRows.some((p) => selectedIds.has(p.id));
   const selectedRows = pos.filter((p) => selectedIds.has(p.id));
 
   const toggleOne = (id: string) => {
@@ -307,11 +357,11 @@ function PurchaseOrdersPageInner() {
     setSelectedIds((prev) => {
       if (allVisibleSelected) {
         const next = new Set(prev);
-        pos.forEach((p) => next.delete(p.id));
+        pageRows.forEach((p) => next.delete(p.id));
         return next;
       }
       const next = new Set(prev);
-      pos.forEach((p) => next.add(p.id));
+      pageRows.forEach((p) => next.add(p.id));
       return next;
     });
   };
@@ -326,6 +376,36 @@ function PurchaseOrdersPageInner() {
       toast.error('Export failed');
     } finally {
       setExporting(false);
+    }
+  };
+
+  const printOrders = async (rows: PurchaseOrder[]) => {
+    if (printing || rows.length === 0) return;
+    setPrinting(true);
+    try {
+      for (const po of rows) {
+        const res = await adminApi.get(`/purchase-orders/${po.id}/pdf`, { responseType: 'blob' });
+        await printPdfFromResponse(res.data, res.headers['content-type']);
+      }
+    } catch {
+      toast.error('Failed to print');
+    } finally {
+      setPrinting(false);
+    }
+  };
+
+  const downloadOrders = async (rows: PurchaseOrder[]) => {
+    if (printing || rows.length === 0) return;
+    setPrinting(true);
+    try {
+      for (const po of rows) {
+        const res = await adminApi.get(`/purchase-orders/${po.id}/pdf`, { responseType: 'blob' });
+        await downloadPdfFromResponse(res.data, `po-${po.po_number || po.id}.pdf`, res.headers['content-type']);
+      }
+    } catch {
+      toast.error('Failed to download');
+    } finally {
+      setPrinting(false);
     }
   };
 
@@ -361,11 +441,11 @@ function PurchaseOrdersPageInner() {
   };
 
   const poStatusBadgeClass = (status: string) => {
-    if (status === 'received') return 'bg-teal-500/10 text-teal-450 border-teal-500/20';
-    if (status === 'partial') return 'bg-amber-500/10 text-amber-400 border-amber-500/20';
-    if (status === 'sent') return 'bg-blue-500/10 text-blue-400 border-blue-500/20';
-    if (status === 'cancelled') return 'bg-rose-500/10 text-rose-400 border-rose-500/20';
-    return 'bg-slate-800 text-slate-400 border-white/10';
+    if (status === 'received') return adminUi.badgePaid;
+    if (status === 'partial') return adminUi.badgeUnpaid;
+    if (status === 'sent') return adminUi.badge;
+    if (status === 'cancelled') return adminUi.badgeUnpaid;
+    return adminUi.badgeDraft;
   };
 
   const poPaymentLabel = (po: PurchaseOrder) => {
@@ -377,9 +457,9 @@ function PurchaseOrdersPageInner() {
   };
 
   const poPaymentBadgeClass = (status?: string) => {
-    if (status === 'paid') return 'bg-emerald-500/10 text-emerald-450 border-emerald-500/20';
-    if (status === 'partial') return 'bg-blue-500/10 text-blue-400 border-blue-500/20';
-    return 'bg-amber-500/10 text-amber-400 border-amber-500/20';
+    if (status === 'paid') return adminUi.badgePaid;
+    if (status === 'partial') return adminUi.badgeUnpaid;
+    return adminUi.badgeUnpaid;
   };
 
   const receivePoStock = async (po: PurchaseOrder) => {
@@ -425,74 +505,82 @@ function PurchaseOrdersPageInner() {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-semibold text-[#0F172A] tracking-tight">Purchase order</h1>
-          <p className="text-xs text-slate-400 mt-1">Issue procurement order sheets to wholesale vendors, track inventory shipments and balances.</p>
-        </div>
-      </div>
-
-      <div className="bg-white border border-[#E2E8F0] rounded-lg p-4 flex flex-wrap items-center gap-4">
-        <div className="relative flex-1 min-w-[240px]">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
-          <input
-            type="text"
-            placeholder="Search POs by number, supplier, bill #..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="w-full pl-10 pr-4 py-2 bg-slate-950/60 border border-white/10 rounded-xl text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-teal-500 focus:border-teal-500 focus:bg-slate-950/80 transition-all font-semibold"
-          />
-        </div>
-        <div className="flex items-center gap-2.5 flex-wrap">
-          <button
-            type="button"
-            onClick={() => openCreatePo()}
-            className="inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-[#0F9F8F] hover:bg-[#0B8275] border-transparent text-white rounded-xl text-xs font-bold shadow-sm transition-all"
-          >
+      <div className="flex flex-wrap items-center justify-between gap-4">
+        <h1 className={adminUi.pageTitle}>Purchase orders</h1>
+        <div className="flex items-center gap-2">
+          <select aria-label="Statement period" value={period} onChange={(e) => setPeriod(e.target.value as StatementPeriod)} className={adminUi.filter}>
+            {STATEMENT_PERIODS.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
+          </select>
+          <button type="button" onClick={() => setStatementOpen(true)} className={adminUi.btnSecondary}>Statement</button>
+          <button type="button" onClick={() => openCreatePo()} className={adminUi.btnPrimary}>
             <Plus className="w-3.5 h-3.5" />
             New PO
           </button>
-          <select value={filter} onChange={(e) => setFilter(e.target.value)} className="bg-slate-955/60 border border-white/10 rounded-xl px-3 py-2 text-xs text-slate-200 focus:outline-none focus:ring-1 focus:ring-teal-500">
-            <option value="All">All Statuses</option>
-          </select>
-          <button
-            type="button"
-            onClick={() => handleExport(pos)}
-            disabled={exporting || pos.length === 0}
-            className={`${adminUi.btnSecondary} disabled:opacity-50`}
-          >
-            <Download className="w-4 h-4" />
-            Export all ({pos.length})
-          </button>
         </div>
       </div>
 
+      <div className="flex flex-wrap items-center gap-2 rounded-lg border border-[#E2E8F0] bg-white p-3">
+        <div className="relative w-full max-w-xs">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#8D9096]" />
+          <input
+            type="text"
+            placeholder="Search by PO number, supplier, or bill"
+            value={search}
+            onChange={(e) => { setSearch(e.target.value); setPage(1); }}
+            className={adminUi.filterSearch}
+          />
+        </div>
+        <select aria-label="Filter by status" value={filter} onChange={(e) => { setFilter(e.target.value); setPage(1); }} className={adminUi.filter}>
+          <option value="All">All statuses</option>
+          <option value="draft">Draft</option>
+          <option value="sent">Sent</option>
+          <option value="partial">Partially received</option>
+          <option value="received">Fully received</option>
+          <option value="cancelled">Cancelled</option>
+        </select>
+        <button
+          type="button"
+          onClick={() => handleExport(filtered)}
+          disabled={exporting || filtered.length === 0}
+          className={`${adminUi.btnSecondary} disabled:opacity-50`}
+        >
+          <Download className="w-4 h-4" />
+          Export
+        </button>
+      </div>
+
       {selectedIds.size > 0 && (
-        <div className="flex flex-wrap items-center gap-3 rounded-md border border-[#E3E5E8] bg-[#F4F5F8] px-4 py-2.5">
+        <div className="flex items-center justify-between gap-3 rounded-md border border-[#E3E5E8] bg-[#F4F5F8] px-4 py-2">
           <span className="text-sm font-medium text-[#1A1A1A]">{selectedIds.size} selected</span>
-          <button type="button" onClick={() => handleExport(selectedRows)} disabled={exporting} className={`${adminUi.btnPrimary} disabled:opacity-50`}>
-            <Download className="w-4 h-4" />
-            {exporting ? 'Exporting…' : 'Export selected to Excel'}
-          </button>
-          <button type="button" onClick={handleDeleteSelected} disabled={deleting} className={`${adminUi.btnDanger} disabled:opacity-50`}>
-            <Trash2 className="w-4 h-4" />
-            {deleting ? 'Deleting…' : 'Delete selected'}
-          </button>
-          <button type="button" onClick={() => setSelectedIds(new Set())} className={adminUi.btnGhost}>
-            Clear selection
-          </button>
+          <div className="flex items-center gap-1">
+            <button type="button" title="Export selected" aria-label="Export selected" onClick={() => handleExport(selectedRows)} disabled={exporting} className={`${adminUi.btnIcon} disabled:opacity-40`}>
+              <Download className="w-4 h-4" />
+            </button>
+            <button type="button" title="Delete selected" aria-label="Delete selected" onClick={handleDeleteSelected} disabled={deleting} className={`${adminUi.btnIcon} disabled:opacity-40`}>
+              <Trash2 className="w-4 h-4" />
+            </button>
+            <button type="button" title="Clear selection" aria-label="Clear selection" onClick={() => setSelectedIds(new Set())} className={adminUi.btnIcon}>
+              <X className="w-4 h-4" />
+            </button>
+            <button type="button" title="Print selected" aria-label="Print selected" onClick={() => { void printOrders(selectedRows); }} disabled={printing} className={`${adminUi.btnIcon} disabled:opacity-40`}>
+              <Printer className="w-4 h-4" />
+            </button>
+            <button type="button" title="Download selected" aria-label="Download selected" onClick={() => { void downloadOrders(selectedRows); }} disabled={printing} className={`${adminUi.btnIcon} disabled:opacity-40`}>
+              <Download className="w-4 h-4" />
+            </button>
+          </div>
         </div>
       )}
 
-      <div className="bg-white border border-[#E2E8F0] rounded-lg overflow-hidden">
+      <div className={`${adminUi.panel} overflow-hidden`}>
         {loading ? (
           <div className="flex items-center justify-center py-16">
-            <div className="animate-spin rounded-full h-8 w-8 border-2 border-teal-500 border-t-transparent" />
+            <div className="animate-spin rounded-full h-8 w-8 border-2 border-black border-t-transparent" />
           </div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full border-collapse">
-              <thead className="bg-slate-950/60 text-slate-400 border-b border-white/5">
+            <table className="w-full text-sm">
+              <thead className={adminUi.tableHead}>
                 <tr>
                   <th className="w-10 px-4 py-3">
                     <input
@@ -504,36 +592,36 @@ function PurchaseOrdersPageInner() {
                       className="h-4 w-4 rounded border-[#C7C7C7] accent-black cursor-pointer"
                     />
                   </th>
-                  <th className="text-left py-3.5 px-4 text-[10px] font-bold uppercase tracking-wider">Date</th>
-                  <th className="text-left py-3.5 px-4 text-[10px] font-bold uppercase tracking-wider">PO ID</th>
-                  <th className="text-left py-3.5 px-4 text-[10px] font-bold uppercase tracking-wider">Supplier ID</th>
-                  <th className="text-left py-3.5 px-4 text-[10px] font-bold uppercase tracking-wider">Supplier Name</th>
-                  <th className="text-left py-3.5 px-4 text-[10px] font-bold uppercase tracking-wider">Bill</th>
-                  <th className="text-left py-3.5 px-4 text-[10px] font-bold uppercase tracking-wider">State</th>
-                  <th className="text-left py-3.5 px-4 text-[10px] font-bold uppercase tracking-wider">City</th>
-                  <th className="text-right py-3.5 px-4 text-[10px] font-bold uppercase tracking-wider">Total Amount</th>
-                  <th className="text-left py-3.5 px-4 text-[10px] font-bold uppercase tracking-wider">Stock Status</th>
-                  <th className="text-left py-3.5 px-4 text-[10px] font-bold uppercase tracking-wider">Payment Status</th>
-                  <th className="text-right py-3.5 px-4 text-[10px] font-bold uppercase tracking-wider">Actions</th>
+                  <th className="text-left px-4 py-3 font-medium">Date</th>
+                  <th className="text-left px-4 py-3 font-medium">Number</th>
+                  <th className="text-left px-4 py-3 font-medium">Supplier ID</th>
+                  <th className="text-left px-4 py-3 font-medium">Supplier</th>
+                  <th className="text-left px-4 py-3 font-medium">Bill</th>
+                  <th className="text-left px-4 py-3 font-medium">State</th>
+                  <th className="text-left px-4 py-3 font-medium">City</th>
+                  <th className="text-right px-4 py-3 font-medium">Amount</th>
+                  <th className="text-left px-4 py-3 font-medium">Stock</th>
+                  <th className="text-left px-4 py-3 font-medium">Payment</th>
+                  <th className="text-right px-4 py-3 font-medium">Action</th>
                 </tr>
               </thead>
               <tbody>
-                {pos.length === 0 ? (
+                {filtered.length === 0 ? (
                   <tr>
-                    <td colSpan={12} className="py-16 text-center text-slate-500 text-xs font-semibold">
-                      No purchase orders yet. Click Draft PO to register imports.
+                    <td colSpan={12} className="px-4 py-10 text-center text-sm text-[#6B6C72]">
+                      No purchase orders yet. Use New PO to create one.
                     </td>
                   </tr>
                 ) : (
-                  pos.map((po) => {
+                  pageRows.map((po) => {
                     const statusLabel = poStatusLabel(po.status);
                     return (
                       <tr
                         key={po.id}
-                        className={`border-b border-white/5 hover:bg-white/[0.02] transition-colors cursor-pointer ${selectedIds.has(po.id) ? 'bg-[#F4F5F8]' : ''}`}
+                        className={`border-t border-[#E3E5E8] cursor-pointer ${adminUi.tableRowHover} ${selectedIds.has(po.id) ? 'bg-[#F4F5F8]' : ''}`}
                         onClick={() => setDetailId(po.id)}
                       >
-                        <td className="py-3 px-4" onClick={(e) => e.stopPropagation()}>
+                        <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
                           <input
                             type="checkbox"
                             aria-label={`Select ${po.po_number}`}
@@ -542,75 +630,50 @@ function PurchaseOrdersPageInner() {
                             className="h-4 w-4 rounded border-[#C7C7C7] accent-black cursor-pointer"
                           />
                         </td>
-                        <td className="py-3 px-4 text-xs text-slate-350">{po.created_at ? new Date(po.created_at).toLocaleDateString('en-US', { month: 'short', day: '2-digit', year: 'numeric' }) : '—'}</td>
-                        <td className="py-3 px-4 text-xs font-mono font-bold text-teal-450">
+                        <td className="px-4 py-3 text-[#1A1A1A] whitespace-nowrap">{po.created_at ? new Date(po.created_at).toLocaleDateString('en-US', { month: 'short', day: '2-digit', year: 'numeric' }) : '—'}</td>
+                        <td className="px-4 py-3 font-medium text-[#0077C5] whitespace-nowrap">
                           <span>{po.po_number}</span>
                           {po.vendor_invoice_url ? (
-                            <span className="ml-2 text-[10px] font-semibold text-[#6B6C72] uppercase tracking-wide">vendor inv.</span>
+                            <span className="ml-2 text-[11px] text-[#6B6C72]">vendor inv.</span>
                           ) : null}
                         </td>
-                        <td className="py-3 px-4 text-xs text-slate-300 font-mono">{po.supplier_id || '—'}</td>
-                        <td className="py-3 px-4 text-xs font-semibold text-slate-200">{po.vendor_name}</td>
-                        <td className="py-3 px-4 text-xs text-slate-400">—</td>
-                        <td className="py-3 px-4 text-xs text-slate-400">{po.state || '—'}</td>
-                        <td className="py-3 px-4 text-xs text-slate-400">{po.city || '—'}</td>
-                        <td className="py-3 px-4 text-xs text-right font-extrabold text-slate-100 font-mono">${Number(po.total_amount || 0).toLocaleString(undefined, {minimumFractionDigits: 2})}</td>
-                        <td className="py-3 px-4 text-xs">
-                          <span className={`inline-flex px-2 py-0.5 rounded text-[10px] font-bold border ${poStatusBadgeClass(po.status)}`}>
+                        <td className="px-4 py-3 font-mono text-[#1A1A1A]">{po.supplier_id || '—'}</td>
+                        <td className="px-4 py-3 text-[#1A1A1A]">{po.vendor_name}</td>
+                        <td className="px-4 py-3 text-[#6B6C72]">—</td>
+                        <td className="px-4 py-3 text-[#1A1A1A]">{po.state || '—'}</td>
+                        <td className="px-4 py-3 text-[#1A1A1A]">{po.city || '—'}</td>
+                        <td className={`px-4 py-3 text-right tabular-nums ${moneyOut}`}>${Number(po.total_amount || 0).toLocaleString(undefined, {minimumFractionDigits: 2})}</td>
+                        <td className="px-4 py-3">
+                          <span className={poStatusBadgeClass(po.status)}>
                             {statusLabel}
                           </span>
                         </td>
-                        <td className="py-3 px-4 text-xs">
-                          <span className={`inline-flex px-2 py-0.5 rounded text-[10px] font-bold border ${poPaymentBadgeClass(po.payment_status)}`}>
+                        <td className="px-4 py-3">
+                          <span className={poPaymentBadgeClass(po.payment_status)}>
                             {poPaymentLabel(po)}
                           </span>
                         </td>
-                        <td className="py-3 px-4 text-right text-xs" onClick={(e) => e.stopPropagation()}>
-                          <div className="flex items-center justify-end gap-2.5 flex-wrap">
-                            <button type="button" onClick={() => setDetailId(po.id)} className="text-[#0077C5] hover:underline font-medium">
-                              View
+                        <td className="px-4 py-3 text-right whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
+                          <div className="flex items-center justify-end gap-2 whitespace-nowrap">
+                            <button type="button" onClick={() => setDetailId(po.id)} className="text-sm text-[#0077C5] hover:underline">
+                              View/Edit
                             </button>
                             {po.payment_status !== 'paid' && po.status !== 'cancelled' && (
-                              <button
-                                type="button"
-                                onClick={() => setDetailId(po.id)}
-                                className="text-[#2CA01C] hover:underline font-semibold"
-                                title="Record full or partial payment to vendor"
-                              >
+                              <button type="button" onClick={() => setDetailId(po.id)} className="text-sm text-[#0077C5] hover:underline" title="Record a payment to the supplier">
                                 Pay
                               </button>
                             )}
-                            {po.status === 'draft' && (
-                              <Link href={`/admin/purchase-orders/${po.id}?edit=1`} className="text-[#0077C5] hover:underline font-medium">
-                                Edit Draft
-                              </Link>
-                            )}
-                            {(po.status === 'sent' || po.status === 'partial' || po.status === 'draft') && (
-                              <Link href={`/admin/purchase-orders/${po.id}`} className="text-[#0077C5] hover:underline font-medium">
-                                Open
-                              </Link>
-                            )}
-                            <button
-                              type="button"
-                              onClick={async () => {
-                                try {
-                                  const res = await adminApi.get(`/purchase-orders/${po.id}/pdf`, { responseType: 'blob' });
-                                  if (await downloadPdfFromResponse(res.data, `po-${po.po_number || po.id}.pdf`, res.headers['content-type'])) {
-                                    toast.success('PDF downloaded');
-                                  }
-                                } catch {
-                                  toast.error('Failed to download PDF');
-                                }
-                              }}
-                              className="text-[#6B6C72] hover:underline font-medium"
-                            >
-                              Print
-                            </button>
                             {(po.status === 'draft' || po.status === 'sent' || po.status === 'partial') && (
-                              <button type="button" onClick={() => receivePoStock(po)} className="text-[#0077C5] hover:underline font-medium">
-                                Receive All Remaining
+                              <button type="button" onClick={() => receivePoStock(po)} className="text-sm text-[#0077C5] hover:underline">
+                                Receive
                               </button>
                             )}
+                            <button type="button" title="Print" aria-label="Print" onClick={() => { void printOrders([po]); }} className={adminUi.btnIcon}>
+                              <Printer className="w-4 h-4" />
+                            </button>
+                            <button type="button" title="Download" aria-label="Download" onClick={() => { void downloadOrders([po]); }} className={adminUi.btnIcon}>
+                              <Download className="w-4 h-4" />
+                            </button>
                             {(po.status === 'draft' || po.status === 'cancelled' || po.status === 'sent') && (
                               <button
                                 type="button"
@@ -624,7 +687,7 @@ function PurchaseOrdersPageInner() {
                                     toast.error(error?.response?.data?.error || 'Failed to delete');
                                   }
                                 }}
-                                className="text-[#C81916] hover:underline font-medium"
+                                className="text-sm text-[#C81916] hover:underline"
                               >
                                 Delete
                               </button>
@@ -640,6 +703,27 @@ function PurchaseOrdersPageInner() {
           </div>
         )}
       </div>
+
+      {!loading && (
+        <div className="flex flex-wrap items-center justify-between gap-3 px-1">
+          <p className={adminUi.meta}>
+            {totalDocs === 0 ? '0 purchase orders' : `${(safePage - 1) * PAGE_SIZE + 1}–${Math.min(safePage * PAGE_SIZE, totalDocs)} of ${totalDocs}`}
+          </p>
+          <div className="flex items-center gap-2">
+            <button type="button" className={adminUi.btnSecondary} disabled={safePage <= 1} onClick={() => setPage((current) => Math.max(1, current - 1))} aria-label="Previous page">
+              <ChevronLeft className="w-4 h-4" />
+              Previous
+            </button>
+            <span className="min-w-[3.5rem] text-center text-sm tabular-nums text-[#1A1A1A]">{safePage} / {totalPages}</span>
+            <button type="button" className={adminUi.btnSecondary} disabled={safePage >= totalPages} onClick={() => setPage((current) => current + 1)} aria-label="Next page">
+              Next
+              <ChevronRight className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+      )}
+
+      {statementOpen && <PurchaseBooksStatement period={period} focus="orders" onClose={() => setStatementOpen(false)} />}
 
       <PurchaseOrderDrawer
         poId={detailId}
@@ -735,6 +819,10 @@ function PurchaseOrdersPageInner() {
                                   products={products}
                                   value={r.product_id}
                                   displayName={r.product_name || undefined}
+                                  onAddProduct={() => {
+                                    addProductRowRef.current = idx;
+                                    setShowAddProduct(true);
+                                  }}
                                   onSelect={(p) => updateRow(idx, 'product_id', p.id)}
                                   onBarcodeScan={(code) => {
                                     adminApi
@@ -865,6 +953,14 @@ function PurchaseOrdersPageInner() {
             </form>
           </div>
         </div>
+      )}
+
+      {showAddProduct && (
+        <ProductModal
+          product={null}
+          onClose={() => setShowAddProduct(false)}
+          onSuccess={handleCreatedProduct}
+        />
       )}
 
       {showAddVendor && (

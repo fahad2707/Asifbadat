@@ -52,6 +52,20 @@ test('already_linked cannot bind from the queue', () => {
   assert.equal(needsManualResolution(app), true);
 });
 
+test('POS customer already linked to this login can be approved', () => {
+  const app = {
+    status: 'pending' as const,
+    link_outcome: 'linked' as const,
+    match_kind: 'none' as const,
+    user_id: USER,
+    customer_id: CUSTOMER,
+    matched_customer_ids: [] as string[],
+  };
+  assert.equal(canApproveApplication(app), true);
+  assert.equal(needsManualResolution(app), false);
+  assert.equal(canBindMatchedCustomer(app), false);
+});
+
 test('safe created path stays on Approve', () => {
   const app = {
     status: 'pending' as const,

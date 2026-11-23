@@ -5,6 +5,7 @@ import { createPortal } from 'react-dom';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Plus, Edit, Search, User, Trash2, FileDown, X, FileText, DollarSign, ChevronDown } from 'lucide-react';
+import CustomerStatement from '@/components/admin/CustomerStatement';
 import adminApi from '@/lib/admin-api';
 import { adminMenuItemClass, adminMenuPanel, adminUi } from '@/lib/admin-ui';
 import toast from 'react-hot-toast';
@@ -81,6 +82,7 @@ export default function CustomersPage() {
   const [summary, setSummary] = useState<InvoiceSummaryStats | null>(null);
   const [balances, setBalances] = useState<Record<string, number>>({});
   const [receivePaymentOpen, setReceivePaymentOpen] = useState(false);
+  const [statementOpen, setStatementOpen] = useState(false);
   const [receivePaymentCustomerId, setReceivePaymentCustomerId] = useState<string | undefined>();
   const [actionDropdownId, setActionDropdownId] = useState<string | null>(null);
   const [actionDropdownAnchor, setActionDropdownAnchor] = useState<DOMRect | null>(null);
@@ -135,8 +137,10 @@ export default function CustomersPage() {
     try {
       const res = await adminApi.get('/customers/balances');
       const map: Record<string, number> = {};
-      (res.data.balances || []).forEach((b: { customer_id: string; open_balance: number }) => {
-        if (b.customer_id) map[b.customer_id] = b.open_balance ?? 0;
+      (res.data.balances || []).forEach((b: { customer_id: string; open_balance?: number; credit_memo_total?: number; account_position?: number }) => {
+        if (!b.customer_id) return;
+        const position = b.account_position ?? ((b.open_balance ?? 0) - (b.credit_memo_total ?? 0));
+        map[b.customer_id] = Math.round(position * 100) / 100;
       });
       setBalances(map);
     } catch {
@@ -221,13 +225,14 @@ export default function CustomersPage() {
       return;
     }
     const company = form.company ? titleCaseWords(form.company) : form.company;
+    const name = titleCaseWords(form.name.trim());
     try {
       if (editing) {
         const { customer_code: _ignore, ...rest } = form;
-        await adminApi.put(`/customers/${editing.id}`, { ...rest, phone, company, email: form.email || undefined });
+        await adminApi.put(`/customers/${editing.id}`, { ...rest, name, phone, company, email: form.email || undefined });
         toast.success('Customer updated');
       } else {
-        const res = await adminApi.post('/customers', { ...form, phone, company, email: form.email || undefined });
+        const res = await adminApi.post('/customers', { ...form, name, phone, company, email: form.email || undefined });
         const created = res.data;
         const fileInput = document.getElementById('customer-docs-form') as HTMLInputElement;
         if (fileInput?.files?.length) {
@@ -425,6 +430,9 @@ export default function CustomersPage() {
           <p className={`${adminUi.meta} mt-1`}>Manage B2B Customer Profiles, credit accounts, and statements.</p>
         </div>
         <div className="flex items-center gap-2">
+          <button type="button" onClick={() => setStatementOpen(true)} className={glassButtonClass}>
+            Statement
+          </button>
           <button
             onClick={() => {
               setEditing(null);
@@ -557,7 +565,7 @@ export default function CustomersPage() {
                           <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wide bg-slate-800 text-slate-400">Pending</span>
                         )}
                       </td>
-                      <td className={`py-3 px-4 text-right font-bold ${moneyNet(openBal)}`}>${openBal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                      <td className={`py-3 px-4 text-right font-bold tabular-nums ${moneyNet(openBal)}`}>{openBal < 0 ? '-' : ''}${Math.abs(openBal).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
                       <td className="py-3 px-4 text-right" onClick={(e) => e.stopPropagation()}>
                         <div className="relative inline-block">
                           <button
@@ -647,7 +655,7 @@ export default function CustomersPage() {
                 <input
                   type="text"
                   value={form.name || ''}
-                  onChange={(e) => { setForm({ ...form, name: e.target.value }); setCustomerFormDirty(true); }}
+                  onChange={(e) => { setForm({ ...form, name: titleCaseWords(e.target.value) }); setCustomerFormDirty(true); }}
                   className={glassInputClass}
                   required
                 />
@@ -877,6 +885,7 @@ export default function CustomersPage() {
         </div>
       )}
 
+      {statementOpen && <CustomerStatement onClose={() => setStatementOpen(false)} />}
       <ReceivePaymentLightbox
         isOpen={receivePaymentOpen}
         onClose={() => { setReceivePaymentOpen(false); setReceivePaymentCustomerId(undefined); }}

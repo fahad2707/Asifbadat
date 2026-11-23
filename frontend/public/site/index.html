@@ -73,8 +73,19 @@ html:not(.use-custom-cursor) #dot,html:not(.use-custom-cursor) #ring{display:non
 .cart-n{position:absolute;top:-7px;right:-7px;width:17px;height:17px;border-radius:50%;background:var(--gold);color:var(--ink);font-size:9px;font-weight:700;display:flex;align-items:center;justify-content:center}
 .wl-btn{display:inline-flex;align-items:center;gap:7px;border:1px solid var(--line);padding:8px 18px;font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:rgba(245,240,232,.7);transition:border-color .3s,color .3s;position:relative}
 .wl-btn:hover{border-color:var(--gold);color:var(--gold)}
-.acct-btn{display:inline-flex;align-items:center;gap:7px;border:1px solid var(--line);padding:8px 18px;font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:rgba(245,240,232,.7);transition:border-color .3s,color .3s;text-decoration:none;font-family:var(--body);line-height:1.2}
-.acct-btn:hover{border-color:var(--gold);color:var(--gold)}
+.acct-wrap{position:relative;display:flex;align-items:center;margin-left:4px}
+.hl-side{display:flex;flex-direction:column;align-items:flex-end;align-self:stretch;max-width:380px}
+.hl-side>p{margin-top:auto}
+.welcome-name{display:flex;flex-direction:row;align-items:baseline;justify-content:flex-end;gap:7px;white-space:nowrap;line-height:1.2;margin-top:calc((clamp(34px, 4.5vw, 58px) * 1.06 - 1.25em) / 2)}
+.welcome-label{font-family:var(--body);font-size:11px;font-weight:500;letter-spacing:.18em;text-transform:uppercase;color:#fff}
+.welcome-person{font-family:var(--serif);font-size:18px;font-style:italic;font-weight:500;color:var(--gold)}
+.user-btn{width:42px;height:42px;border:1px solid var(--line);border-radius:50%;display:inline-flex;align-items:center;justify-content:center;color:rgba(245,240,232,.88);background:transparent;padding:0;flex-shrink:0}
+.user-btn:hover{border-color:var(--gold);color:var(--gold)}
+.user-btn svg{width:18px;height:18px;display:block}
+.acct-menu{display:none;position:absolute;top:calc(100% + 10px);right:0;min-width:230px;background:#141416;border:1px solid var(--line);z-index:10020;padding:6px;box-shadow:0 16px 40px rgba(0,0,0,.35)}
+.acct-menu.open{display:block}
+.acct-menu a,.acct-menu button{display:block;width:100%;text-align:left;padding:11px 12px;font-size:13px;color:var(--cream);background:none;border:0;font-family:var(--body);text-decoration:none}
+.acct-menu a:hover,.acct-menu button:hover{color:var(--gold)}
 .wl-n{position:absolute;top:-7px;right:-7px;width:17px;height:17px;border-radius:50%;background:var(--gold);color:var(--ink);font-size:9px;font-weight:700;display:flex;align-items:center;justify-content:center}
 #wishlist{position:fixed;top:0;right:-110%;width:min(400px,100%);height:100dvh;z-index:800;background:var(--ink2);border-left:1px solid var(--line2);display:flex;flex-direction:column;transition:right .42s var(--ease)}
 #wishlist.open{right:0}
@@ -163,7 +174,7 @@ html:not(.use-custom-cursor) #dot,html:not(.use-custom-cursor) #ring{display:non
 .af-lbl{font-size:9px;letter-spacing:.18em;text-transform:uppercase;color:var(--fog);margin-bottom:5px}
 .af-val{font-family:var(--serif);font-size:26px;font-weight:400;color:var(--gold)}
 #highlights{padding:96px 0 96px}
-.hl-head{padding:0 56px;margin-bottom:28px;display:flex;justify-content:space-between;align-items:flex-end;flex-wrap:wrap;gap:16px}
+.hl-head{padding:0 56px;margin-bottom:28px;display:flex;justify-content:space-between;align-items:stretch;flex-wrap:nowrap;gap:28px}
 .hl-head h2{font-family:var(--serif);font-size:clamp(34px,4.5vw,58px);font-weight:400;line-height:1.06}
 .hl-head h2 i{color:var(--gold);font-style:italic}
 .hl-head p{font-size:13px;font-weight:300;color:var(--fog);max-width:230px;text-align:right;line-height:1.7}
@@ -493,7 +504,10 @@ body.category-mode #homeContent{display:none}
   #nav{padding:18px 20px;z-index:9999;border-bottom:1px solid var(--line2)}#nav.stuck{padding:12px 20px;border-bottom-color:var(--line)}
   .nav-mid{display:none}.ham{display:flex;z-index:10000}.mob-cart-btn{display:flex;z-index:10000}
   .nav-right{gap:10px;position:relative;align-items:center}
-  .nav-right .wl-btn,.nav-right .cart-btn,.nav-right .acct-btn{display:none !important}
+  .nav-right .wl-btn,.nav-right .cart-btn{display:none !important}
+  .hl-side{max-width:46%}
+  .welcome-name{margin-top:6px}
+  .welcome-person{font-size:16px}
   .cart-fab{display:none !important}
   #mob-nav{z-index:10000}
   .cart-back-mob{display:inline-flex;align-items:center;justify-content:center}
@@ -501,7 +515,7 @@ body.category-mode #homeContent{display:none}
   #wishlist{z-index:11900}.wl-ov{z-index:11890}
   #hero{padding-top:70px}.hero-inner{padding:0 20px}.hero-h1{font-size:clamp(40px,11vw,64px)}.hero-scroll-hint{margin-top:32px}.btn-fill,.btn-ghost{padding:11px 26px;font-size:10.5px}
   #about{grid-template-columns:1fr;padding:70px 20px;gap:44px}.about-mosaic{aspect-ratio:3/2}.about-float{left:0;bottom:16px}
-  #highlights{padding:max(92px,calc(76px + env(safe-area-inset-top))) 0 64px;margin-top:0;border-top:1px solid rgba(191,160,106,.12);box-shadow:0 8px 24px rgba(0,0,0,.2)}.hl-head{padding:0 20px;margin-bottom:4px;margin-top:14px;flex-direction:column;align-items:flex-start;gap:10px}.hl-head p{text-align:left;max-width:100%}.hl-scene{height:460px;margin-top:0}.hl-wheel{top:52%}.hl-card{width:210px;height:286px;top:-143px;left:-105px}.hl-ctrl{margin-top:14px;padding:0 20px}
+  #highlights{padding:max(92px,calc(76px + env(safe-area-inset-top))) 0 64px;margin-top:0;border-top:1px solid rgba(191,160,106,.12);box-shadow:0 8px 24px rgba(0,0,0,.2)}.hl-head{padding:0 20px;margin-bottom:4px;margin-top:14px;align-items:stretch;gap:16px}.hl-head p{max-width:100%}.hl-scene{height:460px;margin-top:0}.hl-wheel{top:52%}.hl-card{width:210px;height:286px;top:-143px;left:-105px}.hl-ctrl{margin-top:14px;padding:0 20px}
   #shop{padding:70px 20px 60px}.pgrid{grid-template-columns:repeat(2,1fr)}.pc-img{font-size:52px}.pc-name{font-size:18px}
   .logo img{height:42px}
   .pm-media{min-height:42vh;padding:14px}.pm-media img.pm-img,.pm-media img{max-height:72vh}.pm-content{padding:18px 18px 28px}.pm-close{width:54px;height:54px;font-size:32px}
@@ -536,18 +550,29 @@ body.category-mode #homeContent{display:none}
 <div id="wishlist"><div class="wl-hd"><button type="button" class="cart-back-mob" onclick="closeWl()">← Back</button><h3>♡ Wishlist</h3><button type="button" class="cart-cls" onclick="closeWl()" aria-label="Close wishlist">×</button></div><div class="wl-list" id="wlList"><div class="cart-mt"><div class="cart-mt-ico">♡</div><p style="font-size:13px">Your wishlist is empty</p></div></div></div>
 <div id="toast"><span class="ti">✓</span><span id="toastTxt"></span></div>
 <div class="nav-backdrop" id="navBg" onclick="closeMobNav()"></div>
-<div id="mob-nav"><div class="mob-nav-top"><h2>Menu</h2><button type="button" class="mob-nav-close" onclick="closeMobNav()" aria-label="Close menu">×</button></div><div class="mob-nav-links"><a class="mob-link" href="/site#highlights" onclick="closeMobNav()">Highlights</a><a class="mob-link" href="/site#shop" onclick="closeMobNav()">Shop</a><a class="mob-link" href="/site#about" onclick="closeMobNav()">About</a><a class="mob-link" href="/site#story" onclick="closeMobNav()">Our Story</a><a class="mob-link" href="/site#testi" onclick="closeMobNav()">Clients</a><a class="mob-link" id="mobAuthLink" href="/login" onclick="closeMobNav();return onAccountNavClick(event)">Login</a><a class="mob-link" id="mobSignupLink" href="/login?mode=signup" onclick="closeMobNav()">Sign up</a></div><div class="mob-nav-actions"><button type="button" class="mob-act" onclick="closeMobNav();openWl();">♡ Wishlist<span class="dot" id="mobWlN">0</span></button><button type="button" class="mob-act primary" onclick="closeMobNav();openCart();">🛒 Cart<span class="dot" id="mobCartActN">0</span></button></div></div>
+<div id="mob-nav"><div class="mob-nav-top"><h2>Menu</h2><button type="button" class="mob-nav-close" onclick="closeMobNav()" aria-label="Close menu">×</button></div><div class="mob-nav-links"><a class="mob-link" href="/site#highlights" onclick="closeMobNav()">Highlights</a><a class="mob-link" href="/site#shop" onclick="closeMobNav()">Shop</a><a class="mob-link" href="/site#about" onclick="closeMobNav()">About</a><a class="mob-link" href="/site#story" onclick="closeMobNav()">Our Story</a><a class="mob-link" href="/site#testi" onclick="closeMobNav()">Clients</a><a class="mob-link" id="mobAuthLink" href="/login" onclick="closeMobNav()">Login</a><a class="mob-link" id="mobSignupLink" href="/login?mode=signup" onclick="closeMobNav()">Sign up</a><a class="mob-link" id="mobTrack" href="/account/pending" style="display:none" onclick="closeMobNav()">Track your application</a><a class="mob-link" id="mobOrders" href="/account/orders" style="display:none" onclick="closeMobNav()">My orders</a><a class="mob-link" id="mobRfqs" href="/account/rfqs" style="display:none" onclick="closeMobNav()">Previous RFQ</a><a class="mob-link" id="mobSettings" href="/account/settings" style="display:none" onclick="closeMobNav()">Change settings</a><button type="button" class="mob-link" id="mobLogout" style="display:none;background:none;border:0;text-align:left;width:100%" onclick="storefrontLogout()">Log out</button></div><div class="mob-nav-actions"><button type="button" class="mob-act" onclick="closeMobNav();openWl();">♡ Wishlist<span class="dot" id="mobWlN">0</span></button><button type="button" class="mob-act primary" onclick="closeMobNav();openCart();">🛒 Cart<span class="dot" id="mobCartActN">0</span></button></div></div>
 <nav id="nav">
   <a href="/site" class="logo" aria-label="Express Distributors Inc">
     <img src="/logo.png" alt="Express Distributors Inc"/>
   </a>
   <div class="nav-mid"><a href="/site#highlights">Highlights</a><a href="/site#shop">Shop</a><a href="/site#about">About</a><a href="/site#story">Our Story</a><a href="/site#testi">Clients</a></div>
   <div class="nav-right">
-    <a class="acct-btn" id="navAuthLink" href="/login" onclick="return onAccountNavClick(event)">Login</a>
     <button class="wl-btn" onclick="openWl()">♡ Wishlist<div class="wl-n" id="wlN">0</div></button>
     <button class="cart-btn" onclick="openCart()">🛒 Cart<div class="cart-n" id="cartN">0</div></button>
     <button type="button" class="mob-cart-btn" id="mobCartTop" onclick="toggleCartPop()" aria-label="Cart">🛒<span class="cart-n" id="mobCartTopN">0</span></button>
     <button class="ham" id="ham" onclick="toggleMobNav()" aria-label="Menu"><span></span><span></span><span></span></button>
+    <div class="acct-wrap" id="acctWrap">
+      <button type="button" class="user-btn" id="navAuthLink" aria-label="Account" onclick="return onAccountNavClick(event)">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><circle cx="12" cy="8" r="3.2"/><path d="M5 19.2c1.4-3.1 3.8-4.6 7-4.6s5.6 1.5 7 4.6"/></svg>
+      </button>
+      <div class="acct-menu" id="acctMenu">
+        <a id="acctTrack" href="/account/pending">Track your application</a>
+        <a id="acctOrders" href="/account/orders" style="display:none">My orders</a>
+        <a id="acctRfqs" href="/account/rfqs">Previous RFQ</a>
+        <a id="acctSettings" href="/account/settings">Change settings</a>
+        <button type="button" id="acctLogout" onclick="storefrontLogout()">Log out</button>
+      </div>
+    </div>
   </div>
 </nav>
 <section id="categoryPage" aria-label="Category products">
@@ -573,7 +598,7 @@ body.category-mode #homeContent{display:none}
   <div class="load-row" id="catPageLoadRow" style="display:none"><button class="btn-ghost" id="catPageLoadBtn" type="button">Load More →</button></div>
 </section>
 <div id="homeContent">
-<section id="highlights"><div class="hl-head"><h2 class="rv">Our <i>Premier</i><br/>Product Lines</h2><p class="rv">A curated selection across industries, maintained to the highest standards.</p></div><div class="hl-scene"><div class="hl-wheel" id="hlWheel"></div></div><div class="hl-ctrl rv"><button class="hl-btn" id="hlPrev">←</button><div class="hl-dots" id="hlDots"></div><button class="hl-btn" id="hlNext">→</button></div></section>
+<section id="highlights"><div class="hl-head"><h2 class="rv">Our <i>Premier</i><br/>Product Lines</h2><div class="hl-side"><span class="welcome-name" id="welcomeName" hidden><span class="welcome-label">Welcome</span><span class="welcome-person" id="welcomePerson"></span></span><p class="rv">A curated selection across industries, maintained to the highest standards.</p></div></div><div class="hl-scene"><div class="hl-wheel" id="hlWheel"></div></div><div class="hl-ctrl rv"><button class="hl-btn" id="hlPrev">←</button><div class="hl-dots" id="hlDots"></div><button class="hl-btn" id="hlNext">→</button></div></section>
 <div style="height:1px;background:linear-gradient(90deg,transparent,var(--line),transparent)"></div>
 <section id="shop"><div class="shop-head rv"><div class="about-tag">Browse &amp; Buy</div><h2><i>All</i> Products</h2><p>Explore our complete catalog. Quality-assured, competitively priced, ready to ship.</p></div><div class="shop-search rv"><div class="shop-search-row"><input id="shopSearch" type="text" placeholder="Search name, SKU / barcode, or category…" inputmode="search" autocomplete="off"><button type="button" class="shop-scan-btn" id="scanBtn" aria-label="Scan barcode">Scan barcode</button></div></div>
 <div class="cart-pop-ov" id="cartPopOv" onclick="closeCartPop()" aria-hidden="true"></div>
@@ -706,35 +731,104 @@ document.querySelectorAll('.stat-v').forEach(el=>{const obs=new IntersectionObse
 const API_BASE="/api";
 let accountApproved=false;
 let accountStatus=null;
+let customerName='';
+let customerContact=null;
 function storefrontUserToken(){
   try{return String(localStorage.getItem('token')||'').trim();}catch(e){return '';}
 }
-function accountNavHref(){
-  const token=storefrontUserToken();
-  if(!token) return '/login';
-  // Dual-flag only. Approved customers open the account hub (orders, settings, profile).
+function accountStatusHref(){
   if(accountStatus==='approved'&&accountApproved===true) return '/account';
   if(accountStatus==='pending') return '/account/pending';
   if(accountStatus==='rejected') return '/account/rejected';
   return '/account/restricted';
 }
+function closeAcctMenu(){
+  const menu=document.getElementById('acctMenu');
+  if(menu) menu.classList.remove('open');
+}
 function onAccountNavClick(e){
-  // Let the browser follow accountNavHref (profile hub / status / login).
-  return true;
+  if(e) e.preventDefault();
+  if(!storefrontUserToken()){
+    window.location.href='/login';
+    return false;
+  }
+  const menu=document.getElementById('acctMenu');
+  if(menu) menu.classList.toggle('open');
+  return false;
+}
+function storefrontLogout(){
+  closeAcctMenu();
+  closeMobNav();
+  try{
+    localStorage.removeItem('token');
+    const raw=localStorage.getItem('auth-storage');
+    if(raw){
+      const parsed=JSON.parse(raw);
+      if(parsed&&parsed.state){
+        parsed.state.token=null;
+        parsed.state.user=null;
+        localStorage.setItem('auth-storage', JSON.stringify(parsed));
+      }
+    }
+  }catch(err){}
+  accountApproved=false;
+  accountStatus=null;
+  customerName='';
+  customerContact=null;
+  updateNavAuthLink();
+  updateCheckoutCta();
+  window.location.href='/site';
+}
+function setMenuDisplay(id, show){
+  const el=document.getElementById(id);
+  if(el) el.style.display=show?'':'none';
 }
 function updateNavAuthLink(){
   const loggedIn=!!storefrontUserToken();
-  const href=accountNavHref();
-  const label=loggedIn?'Account':'Login';
-  ['navAuthLink','mobAuthLink'].forEach(function(id){
-    const el=document.getElementById(id);
-    if(!el) return;
-    el.setAttribute('href',href);
-    el.textContent=label;
-  });
+  const welcome=document.getElementById('welcomeName');
+  const person=document.getElementById('welcomePerson');
+  if(welcome){
+    if(loggedIn){
+      if(person) person.textContent=customerName||'';
+      welcome.hidden=false;
+    }else{
+      if(person) person.textContent='';
+      welcome.hidden=true;
+    }
+  }
+  const btn=document.getElementById('navAuthLink');
+  if(btn) btn.setAttribute('aria-label', loggedIn?(customerName?('Welcome '+customerName):'Account'):'Login');
+  const mob=document.getElementById('mobAuthLink');
+  if(mob){
+    mob.style.display=loggedIn?'none':'';
+    mob.setAttribute('href','/login');
+    mob.textContent='Login';
+  }
   const signup=document.getElementById('mobSignupLink');
   if(signup) signup.style.display=loggedIn?'none':'';
+  const online=loggedIn&&accountApproved===true;
+  setMenuDisplay('acctTrack', loggedIn&&!online);
+  setMenuDisplay('mobTrack', loggedIn&&!online);
+  setMenuDisplay('acctOrders', online);
+  setMenuDisplay('mobOrders', online);
+  setMenuDisplay('acctRfqs', loggedIn);
+  setMenuDisplay('mobRfqs', loggedIn);
+  setMenuDisplay('acctSettings', loggedIn);
+  setMenuDisplay('mobSettings', loggedIn);
+  setMenuDisplay('acctLogout', loggedIn);
+  setMenuDisplay('mobLogout', loggedIn);
+  const track=document.getElementById('acctTrack');
+  const mobTrack=document.getElementById('mobTrack');
+  const statusHref=accountStatusHref();
+  if(track) track.setAttribute('href', statusHref);
+  if(mobTrack) mobTrack.setAttribute('href', statusHref);
+  if(!loggedIn) closeAcctMenu();
 }
+document.addEventListener('click', function(e){
+  const wrap=document.getElementById('acctWrap');
+  if(!wrap||wrap.contains(e.target)) return;
+  closeAcctMenu();
+});
 function catalogHeaders(){
   const headers={'Accept':'application/json'};
   const token=storefrontUserToken();
@@ -802,18 +896,22 @@ async function resolveAccountApproved(opts){
   updateNavAuthLink();
   const token=storefrontUserToken();
   if(!token){
+    customerName='';
+    customerContact=null;
     updateCheckoutCta();
     if(prevApproved) await syncCatalogPricingFromApi();
     return;
   }
   try{
     const res=await fetch(API_BASE+'/user/profile',{headers:{Authorization:'Bearer '+token}});
-    if(!res.ok){updateNavAuthLink();updateCheckoutCta();return;}
+    if(!res.ok){customerName='';customerContact=null;updateNavAuthLink();updateCheckoutCta();return;}
     const data=await res.json();
     const status=data&&data.account_status;
     accountStatus=(status==='approved'||status==='pending'||status==='rejected')?status:null;
     accountApproved=!!(data&&data.account_approved===true&&accountStatus==='approved');
-  }catch(e){accountApproved=false;accountStatus=null;}
+    customerContact=(data&&data.contact)||null;
+    customerName=String((customerContact&&customerContact.name)||(data&&data.name)||'').trim();
+  }catch(e){accountApproved=false;accountStatus=null;customerName='';customerContact=null;}
   updateNavAuthLink();
   updateCheckoutCta();
   const force=opts&&opts.refreshCatalog;
@@ -1671,6 +1769,16 @@ function openRfqLightbox(){
   if(sumWrap) sumWrap.style.display=cartItems.length?'block':'none';
   ov.classList.add('show');
   document.body.style.overflow='hidden';
+  const contact=customerContact||{};
+  function fillIfEmpty(id, value){
+    const el=document.getElementById(id);
+    if(!el||String(el.value||'').trim()||!value) return;
+    el.value=value;
+  }
+  fillIfEmpty('rfqName', contact.name);
+  fillIfEmpty('rfqCompany', contact.company);
+  fillIfEmpty('rfqPhone', contact.phone);
+  fillIfEmpty('rfqEmail', contact.email);
   setTimeout(function(){const n=document.getElementById('rfqName');if(n)n.focus();},120);
 }
 function closeRfqLightbox(e){
@@ -1713,7 +1821,10 @@ async function submitRfq(){
   };
   if(btn){btn.disabled=true;btn.innerHTML='<span>Submitting…</span>';}
   try{
-    const res=await fetch(API_BASE+'/rfq',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+    const headers={'Content-Type':'application/json'};
+    const token=storefrontUserToken();
+    if(token) headers.Authorization='Bearer '+token;
+    const res=await fetch(API_BASE+'/rfq',{method:'POST',headers:headers,body:JSON.stringify(payload)});
     const data=await res.json().catch(function(){return null;});
     if(!res.ok){
       setErr((data&&(data.error||data.message))||'Failed to submit. Please try again.');

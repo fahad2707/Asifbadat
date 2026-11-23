@@ -7,6 +7,7 @@ import LedgerEntry from '../../../models/LedgerEntry';
 import { StockMovementType } from '../../../shared/enums';
 import { createStockMovement, StockMovementWriteError } from '../../../utils/createStockMovement';
 import { DOC_PREFIX, nextPrefixedNumber } from '../../../utils/documentNumbers';
+import { damagedHoldNote } from './purchaseSourceByRate';
 
 const CREDIT_MEMO_REFERENCE_TYPE = 'CreditMemo';
 
@@ -123,16 +124,40 @@ function isSkippedProductType(productType: unknown): boolean {
  * Customer: +qty (return in). Vendor: -qty (return to supplier).
  * Skips service / non_inventory lines (no $inc, no StockMovement).
  */
+type CreditInventoryItem = {
+  product_id: mongoose.Types.ObjectId;
+  quantity: number;
+  purchase_match?: string;
+  purchase_rate?: number | null;
+  purchase_vendor_name?: string;
+  purchase_po_number?: string;
+  purchase_unit_cost?: number | null;
+};
+
+function creditInventoryItems(items: CreditInventoryItem[]): CreditInventoryItem[] {
+  return items.map((item) => ({
+    product_id: item.product_id,
+    quantity: item.quantity,
+    purchase_match: item.purchase_match,
+    purchase_rate: item.purchase_rate,
+    purchase_vendor_name: item.purchase_vendor_name,
+    purchase_po_number: item.purchase_po_number,
+    purchase_unit_cost: item.purchase_unit_cost,
+  }));
+}
+
 async function applyCreditMemoInventory(
   cm: {
     type: 'VENDOR' | 'CUSTOMER';
+    reason?: string;
     credit_memo_number: string;
-    items: { product_id: mongoose.Types.ObjectId; quantity: number }[];
+    items: CreditInventoryItem[];
   },
   referenceId: mongoose.Types.ObjectId,
   userId?: mongoose.Types.ObjectId,
   session?: mongoose.mongo.ClientSession
 ): Promise<void> {
+  const damaged = cm.reason === 'DAMAGED';
   for (const item of cm.items) {
     const product = session
       ? await Product.findById(item.product_id).session(session)
@@ -146,27 +171,43 @@ async function applyCreditMemoInventory(
 
     const qty = Number(item.quantity);
     const delta = cm.type === 'VENDOR' ? -qty : qty;
+    const filter: Record<string, unknown> = { _id: item.product_id };
+    if (damaged && cm.type === 'VENDOR') {
+      filter.damaged_quantity = { $gte: qty };
+    }
     const updated = await Product.findOneAndUpdate(
-      { _id: item.product_id },
-      { $inc: { stock_quantity: delta } },
+      filter,
+      { $inc: damaged ? { damaged_quantity: delta } : { stock_quantity: delta } },
       { session, new: true }
     );
     if (!updated) {
-      throw new CreditMemoInventoryError('Product not found', 404);
+      throw new CreditMemoInventoryError(
+        damaged && cm.type === 'VENDOR'
+          ? 'Not enough damaged stock of this product to return to the supplier'
+          : 'Product not found',
+        damaged && cm.type === 'VENDOR' ? 400 : 404
+      );
     }
-    const after = Number(updated.stock_quantity);
-    const before = after - delta;
+    const sellableAfter = Number(updated.stock_quantity);
+    const quantityChange = damaged ? 0 : delta;
+    const quantityBefore = damaged ? sellableAfter : sellableAfter - delta;
     try {
       await createStockMovement({
         session,
         productId: item.product_id,
         movementType: StockMovementType.CREDIT_MEMO,
-        quantityBefore: before,
-        quantityChange: delta,
-        quantityAfter: after,
+        quantityBefore,
+        quantityChange,
+        quantityAfter: sellableAfter,
         referenceType: CREDIT_MEMO_REFERENCE_TYPE,
         referenceId,
         referenceNumber: cm.credit_memo_number,
+        reason: damaged ? 'DAMAGED' : undefined,
+        notes: damaged
+          ? cm.type === 'VENDOR'
+            ? `${qty} damaged returned to the supplier. Sellable stock unchanged.`
+            : damagedHoldNote(qty, item)
+          : undefined,
         adminId: userId,
       });
     } catch (error) {
@@ -377,8 +418,9 @@ export async function markCreditMemoReceived(
       await applyCreditMemoInventory(
         {
           type: claimed.type,
+          reason: claimed.reason,
           credit_memo_number: claimed.credit_memo_number,
-          items: claimed.items.map((i) => ({ product_id: i.product_id, quantity: i.quantity })),
+          items: creditInventoryItems(claimed.items),
         },
         objId,
         adminId,
@@ -446,8 +488,9 @@ export async function markCreditMemoDispatched(
       await applyCreditMemoInventory(
         {
           type: claimed.type,
+          reason: claimed.reason,
           credit_memo_number: claimed.credit_memo_number,
-          items: claimed.items.map((i) => ({ product_id: i.product_id, quantity: i.quantity })),
+          items: creditInventoryItems(claimed.items),
         },
         objId,
         adminId,

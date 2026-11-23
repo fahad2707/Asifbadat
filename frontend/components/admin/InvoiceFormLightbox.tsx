@@ -17,6 +17,7 @@ import {
   inheritInvoiceLineTax,
   invoiceLineTaxDisplayLabel,
   recalculateInvoiceLineTax,
+  taxMarkFromName,
   TAX_DECISION_NOT_CONFIRMED_LABEL,
   type InvoiceLineTaxState,
 } from '@/lib/tax-type';
@@ -760,6 +761,7 @@ export default function InvoiceFormLightbox({ isOpen, onClose, onSaved, editId, 
       const res = await adminApi.post('/customers', {
         ...newCustomerForm,
         phone,
+        name: titleCaseWords(newCustomerForm.name.trim()),
         company: newCustomerForm.company ? titleCaseWords(newCustomerForm.company) : newCustomerForm.company,
         email: newCustomerForm.email || undefined,
       });
@@ -1004,7 +1006,9 @@ export default function InvoiceFormLightbox({ isOpen, onClose, onSaved, editId, 
                                     className="w-20 text-right border border-gray-300 rounded px-2 py-1 placeholder:text-gray-400/70"
                                   />
                                   {line.taxable && (
-                                    <span className="text-xs font-semibold text-[#0F9F8F]" title="Tax applies. Selling price is tax-exclusive.">T</span>
+                                    <span className="align-super text-[10px] font-semibold text-[#6B6C72]" title={invoiceLineTaxDisplayLabel(line)}>
+                                      {taxMarkFromName(line.tax_type_name || line.tax_type_label, true)}
+                                    </span>
                                   )}
                                 </div>
                               ) : (
@@ -1026,7 +1030,16 @@ export default function InvoiceFormLightbox({ isOpen, onClose, onSaved, editId, 
                                 <span className="text-gray-400">{line.quantity || ''}</span>
                               )}
                             </td>
-                            <td className={`py-2 px-4 text-right font-medium ${hasProduct ? moneyIn : moneyPlain}`}>{hasProduct ? `$${(line.total ?? line.subtotal + (line.tax_amount || 0)).toFixed(2)}` : ''}</td>
+                            <td className={`py-2 px-4 text-right font-medium ${hasProduct ? moneyIn : moneyPlain}`}>
+                              {hasProduct ? (
+                                <>
+                                  ${Number(line.subtotal).toFixed(2)}
+                                  {line.taxable ? (
+                                    <span className="align-super text-[10px] font-semibold text-[#6B6C72]">{taxMarkFromName(line.tax_type_name || line.tax_type_label, true)}</span>
+                                  ) : null}
+                                </>
+                              ) : ''}
+                            </td>
                             <td className="py-2 px-4">
                               {hasProduct && (
                                 <button
@@ -1068,12 +1081,26 @@ export default function InvoiceFormLightbox({ isOpen, onClose, onSaved, editId, 
                 <div className="flex flex-wrap items-start justify-end gap-8">
                   <div className="space-y-2 min-w-[220px]">
                     <p className="text-sm text-gray-600">Subtotal: <span className={`font-medium ${moneyIn}`}>${subtotal.toFixed(2)}</span></p>
-                    {usesLineTax && (
-                      <p className="text-sm text-gray-600">
-                        {documentType === 'quotation' ? 'Estimated product tax' : 'Product tax'}:{' '}
-                        <span className="font-medium text-gray-900">${lineTaxTotal.toFixed(2)}</span>
+                    {usesLineTax && Array.from(lines.reduce((map, line) => {
+                      if (line.taxable !== true && !(Number(line.tax_amount) > 0)) return map;
+                      const name = String(line.tax_type_name || line.tax_type_label || 'Tax');
+                      map.set(name, (map.get(name) || 0) + (Number(line.tax_amount) || 0));
+                      return map;
+                    }, new Map<string, number>())).map(([name, amount]) => (
+                      <p key={name} className="text-sm text-gray-600">
+                        {documentType === 'quotation' ? 'Est. ' : ''}{taxMarkFromName(name, true) === name ? name : `${taxMarkFromName(name, true)} · ${name}`}:{' '}
+                        <span className="font-medium text-gray-900">${amount.toFixed(2)}</span>
                       </p>
-                    )}
+                    ))}
+                    {usesLineTax && extraBillTax > 0 ? (
+                      <p className="text-sm text-gray-600">Other tax: <span className="font-medium text-gray-900">${extraBillTax.toFixed(2)}</span></p>
+                    ) : null}
+                    {!usesLineTax ? (
+                      <p className="text-sm text-gray-600">
+                        {documentType === 'quotation' ? 'Estimated tax' : 'Tax'}:{' '}
+                        <span className={`font-medium ${moneyIn}`}>${displayTax.toFixed(2)}</span>
+                      </p>
+                    ) : null}
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">Tax on bill ($)</label>
                       <NumberInput
@@ -1089,16 +1116,12 @@ export default function InvoiceFormLightbox({ isOpen, onClose, onSaved, editId, 
                         className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
                       />
                     </div>
-                    <p className="text-sm text-gray-600">
-                      {documentType === 'quotation' ? 'Estimated tax' : 'Tax'}:{' '}
-                      <span className={`font-medium ${moneyIn}`}>${displayTax.toFixed(2)}</span>
-                      {documentType === 'quotation' ? <span className="ml-2 text-xs text-gray-500">Not recorded sales tax</span> : null}
-                      {lines.some((line) => invoiceLineTaxDisplayLabel(line) === TAX_DECISION_NOT_CONFIRMED_LABEL) ? (
-                        <span className="ml-2 text-xs text-amber-800">{TAX_DECISION_NOT_CONFIRMED_LABEL}</span>
-                      ) : null}
-                    </p>
                     <p className={`font-semibold text-base ${moneyIn}`}>Total: ${total.toFixed(2)}</p>
-                    <p className="text-xs text-gray-500 max-w-xs">Product tax is inherited from each line. Use Tax on bill for an extra amount on the whole document. T means tax applies.</p>
+                    {documentType === 'quotation' ? <p className="text-xs text-gray-500">Quoted tax is an estimate until the invoice is recorded.</p> : null}
+                    {lines.some((line) => invoiceLineTaxDisplayLabel(line) === TAX_DECISION_NOT_CONFIRMED_LABEL) ? (
+                      <p className="text-xs text-amber-800">{TAX_DECISION_NOT_CONFIRMED_LABEL}</p>
+                    ) : null}
+                    <p className="text-xs text-gray-500 max-w-xs">Selling price is tax-exclusive. The mark next to the amount is the tax on that product. Use Tax on bill for an extra amount on the whole document.</p>
                   </div>
                 </div>
               </div>
@@ -1123,7 +1146,7 @@ export default function InvoiceFormLightbox({ isOpen, onClose, onSaved, editId, 
             <form onSubmit={handleAddCustomerSubmit} className="p-4 space-y-3">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Customer name *</label>
-                <input type="text" value={newCustomerForm.name} onChange={(e) => setNewCustomerForm((f) => ({ ...f, name: e.target.value }))} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" required />
+                <input type="text" value={newCustomerForm.name} onChange={(e) => setNewCustomerForm((f) => ({ ...f, name: titleCaseWords(e.target.value) }))} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" required />
               </div>
               <div className="flex items-end gap-2">
                 <div className="flex-1 min-w-0">

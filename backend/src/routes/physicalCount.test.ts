@@ -13,6 +13,7 @@ import mongoose from 'mongoose';
 import request from 'supertest';
 import { createApp } from '../server';
 import Product from '../models/Product';
+import StockAdjustmentSheet from '../models/StockAdjustmentSheet';
 import StockMovement from '../models/StockMovement';
 import { StockMovementType } from '../shared/enums';
 
@@ -48,6 +49,18 @@ const catalog: Record<string, { name: string; stock_quantity: number }> = {
   [PRODUCT_B]: { name: 'Oreo', stock_quantity: 48 },
 };
 
+function stubSheet() {
+  mock.method(StockAdjustmentSheet, 'findOne', () => ({
+    sort: () => ({
+      session: async () => null,
+    }),
+  }));
+  mock.method(StockAdjustmentSheet, 'create', async (docs: unknown) => {
+    const doc = (Array.isArray(docs) ? docs[0] : docs) as Record<string, unknown>;
+    return [{ ...doc, _id: new mongoose.Types.ObjectId('64b0000000000000000c0101') }];
+  });
+}
+
 function stubCatalog() {
   mock.method(Product, 'findById', async (id: unknown) => {
     const key = String(id);
@@ -67,9 +80,9 @@ async function postCount(body: Record<string, unknown>) {
 test('48 → 50 writes +2, final 50, and a PHYSICAL_COUNT movement with before/after', async () => {
   assertNoMongoConnection();
   stubCatalog();
+  stubSheet();
   const session = createFakeSession();
   mock.method(mongoose, 'startSession', async () => session);
-  mock.method(StockMovement, 'findOne', async () => null);
 
   let updateArgs: unknown[] | undefined;
   mock.method(Product, 'findOneAndUpdate', async (...args: unknown[]) => {
@@ -96,7 +109,8 @@ test('48 → 50 writes +2, final 50, and a PHYSICAL_COUNT movement with before/a
   assert.equal(res.body.lines[0].quantity_delta, 2);
   assert.equal(res.body.lines[0].quantity_after, 50);
   assert.equal(res.body.lines[0].changed, true);
-  assert.match(String(res.body.reference_number), /^ADJ-\d{8}-0001$/);
+  assert.equal(res.body.reference_number, 'ADJ-0001');
+  assert.equal(res.body.barcode, 'ADJ-0001');
   assert.deepEqual(updateArgs?.[1], { $inc: { stock_quantity: 2 } });
   assert.equal((updateArgs?.[2] as { session?: unknown }).session, session);
   assert.equal(movementDocs?.movement_type, StockMovementType.PHYSICAL_COUNT);
@@ -104,7 +118,8 @@ test('48 → 50 writes +2, final 50, and a PHYSICAL_COUNT movement with before/a
   assert.equal(movementDocs?.quantity_change, 2);
   assert.equal(movementDocs?.quantity_after, 50);
   assert.equal(movementDocs?.reason, 'PHYSICAL_COUNT');
-  assert.equal(movementDocs?.notes, 'Warehouse recount');
+  assert.equal(movementDocs?.notes, undefined);
+  assert.equal(movementDocs?.reference_number, 'ADJ-0001');
   assert.equal(session.commitTransaction.mock.callCount(), 1);
   assert.equal(session.abortTransaction.mock.callCount(), 0);
 });
@@ -112,9 +127,9 @@ test('48 → 50 writes +2, final 50, and a PHYSICAL_COUNT movement with before/a
 test('48 → 45 writes -3, final 45', async () => {
   assertNoMongoConnection();
   stubCatalog();
+  stubSheet();
   const session = createFakeSession();
   mock.method(mongoose, 'startSession', async () => session);
-  mock.method(StockMovement, 'findOne', async () => null);
   mock.method(Product, 'findOneAndUpdate', async () => ({ _id: PRODUCT_A, stock_quantity: 45 }));
   mock.method(StockMovement, 'create', async () => [{}]);
 
@@ -130,6 +145,7 @@ test('48 → 45 writes -3, final 45', async () => {
 test('48 → 48 is a successful no-op with no stock mutation or movement', async () => {
   assertNoMongoConnection();
   stubCatalog();
+  stubSheet();
   const session = createFakeSession();
   mock.method(mongoose, 'startSession', async () => session);
 
@@ -143,14 +159,11 @@ test('48 → 48 is a successful no-op with no stock mutation or movement', async
     movementCreated = true;
     return [{}];
   });
-  mock.method(StockMovement, 'findOne', async () => {
-    throw new Error('number generation must not run for an all-noop count');
-  });
 
   const res = await postCount({ product_id: PRODUCT_A, counted_quantity: 48 });
 
   assert.equal(res.status, 200);
-  assert.equal(res.body.reference_number, null);
+  assert.equal(res.body.reference_number, 'ADJ-0001');
   assert.equal(res.body.lines[0].changed, false);
   assert.equal(res.body.lines[0].quantity_delta, 0);
   assert.equal(updated, false);
@@ -201,9 +214,9 @@ test('decimal counted quantity is rejected (stock is whole units)', async () => 
 test('movement create failure aborts and does not commit stock', async () => {
   assertNoMongoConnection();
   stubCatalog();
+  stubSheet();
   const session = createFakeSession();
   mock.method(mongoose, 'startSession', async () => session);
-  mock.method(StockMovement, 'findOne', async () => null);
   mock.method(Product, 'findOneAndUpdate', async () => ({ _id: PRODUCT_A, stock_quantity: 50 }));
   mock.method(StockMovement, 'create', async () => {
     throw new Error('movement write failed');
@@ -301,9 +314,9 @@ test('multi-line batch is all-or-nothing: one missing product aborts the rest', 
 test('multi-line success posts both movements then commits once', async () => {
   assertNoMongoConnection();
   stubCatalog();
+  stubSheet();
   const session = createFakeSession();
   mock.method(mongoose, 'startSession', async () => session);
-  mock.method(StockMovement, 'findOne', async () => null);
   mock.method(Product, 'findOneAndUpdate', async (_filter: unknown, update: { $inc?: { stock_quantity?: number } }) => {
     const inc = update.$inc?.stock_quantity ?? 0;
     return { stock_quantity: 48 + inc };

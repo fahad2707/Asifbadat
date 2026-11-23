@@ -2,6 +2,9 @@ import express from 'express';
 import mongoose from 'mongoose';
 import { z } from 'zod';
 import Invoice from '../models/Invoice';
+import { closeRfqsForConvertedQuotation } from '../services/closeRfqForQuotation';
+import { buildSalesStatement, type SalesStatementInvoice } from '../services/salesStatement';
+import Receipt from '../models/Receipt';
 import Customer from '../models/Customer';
 import StoreSettings from '../models/StoreSettings';
 import Product from '../models/Product';
@@ -262,68 +265,220 @@ router.get('/summary', authenticateAdmin, async (_req, res) => {
   }
 });
 
+const INVOICE_NUMBER_PREFIXES = ['INV#', 'QTN#', 'RQ#', 'WQ#', 'QI#', 'RI#', 'WI#'] as const;
+
+function settlementMatch(settlement: string) {
+  const paid = { $round: [{ $ifNull: ['$amount_paid', 0] }, 2] };
+  const balance = {
+    $round: [{ $subtract: [{ $ifNull: ['$total_amount', 0] }, { $ifNull: ['$amount_paid', 0] }] }, 2],
+  };
+  if (settlement === 'paid') {
+    return { invoice_type: DOCUMENT_TYPE_INVOICE, $expr: { $lte: [balance, 0] } };
+  }
+  if (settlement === 'unpaid') {
+    return { invoice_type: DOCUMENT_TYPE_INVOICE, $expr: { $and: [{ $lte: [paid, 0] }, { $gt: [balance, 0] }] } };
+  }
+  if (settlement === 'partial') {
+    return { invoice_type: DOCUMENT_TYPE_INVOICE, $expr: { $and: [{ $gt: [paid, 0] }, { $gt: [balance, 0] }] } };
+  }
+  return null;
+}
+
+function calendarBound(value: unknown, end: boolean): Date | null {
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
+  const [year, month, day] = value.split('-').map(Number);
+  const date = end
+    ? new Date(year, month - 1, day, 23, 59, 59, 999)
+    : new Date(year, month - 1, day, 0, 0, 0, 0);
+  if (date.getFullYear() !== year || date.getMonth() !== month - 1 || date.getDate() !== day) return null;
+  return date;
+}
+
+router.get('/sales-statement', authenticateAdmin, async (req: AuthRequest, res) => {
+  try {
+    const from = calendarBound(req.query.from, false);
+    const to = calendarBound(req.query.to, true);
+    if (!from || !to) return res.status(400).json({ error: 'Choose a from date and a to date.' });
+    if (from.getTime() > to.getTime()) return res.status(400).json({ error: 'The from date must be on or before the to date.' });
+
+    const invoices = await Invoice.find({
+      invoice_type: DOCUMENT_TYPE_INVOICE,
+      $or: [
+        { invoice_date: { $lte: to } },
+        { invoice_date: { $exists: false }, created_at: { $lte: to } },
+      ],
+    })
+      .select('invoice_number invoice_date created_at customer_id customer_name total_amount amount_paid items.product_name items.taxable items.tax_type_name items.tax_type_label items.tax_amount')
+      .lean();
+
+    const numbers = invoices.map((row) => String((row as { invoice_number?: string }).invoice_number || '')).filter(Boolean);
+    const receipts = numbers.length
+      ? await Receipt.find({
+          invoice_num: { $in: numbers },
+          trx_date: { $lte: to },
+        })
+          .select('trx_id trx_date invoice_num amount_received pmt_mode customer_name')
+          .lean()
+      : [];
+
+    const customerIds = invoices
+      .map((row) => (row as { customer_id?: mongoose.Types.ObjectId }).customer_id)
+      .filter((id): id is mongoose.Types.ObjectId => Boolean(id));
+    const customers = customerIds.length
+      ? await Customer.find({ _id: { $in: customerIds } }).select('company').lean()
+      : [];
+    const companyById = new Map(customers.map((row) => [String(row._id), String((row as { company?: string }).company || '')]));
+
+    const statement = buildSalesStatement(
+      invoices.map((row) => {
+        const doc = row as {
+          invoice_number?: string;
+          invoice_date?: Date;
+          created_at?: Date;
+          customer_id?: mongoose.Types.ObjectId;
+          customer_name?: string;
+          total_amount?: number;
+          amount_paid?: number;
+        };
+        return {
+          invoice_number: String(doc.invoice_number || ''),
+          invoice_date: doc.invoice_date ? new Date(doc.invoice_date) : new Date(doc.created_at || 0),
+          customer_name: doc.customer_name || '',
+          company: doc.customer_id ? companyById.get(String(doc.customer_id)) || '' : '',
+          total_amount: Number(doc.total_amount) || 0,
+          amount_paid: Number(doc.amount_paid) || 0,
+          items: Array.isArray((doc as { items?: unknown[] }).items) ? ((doc as { items: unknown[] }).items as SalesStatementInvoice['items']) : [],
+        };
+      }),
+      receipts.map((row) => {
+        const doc = row as {
+          trx_id?: string;
+          trx_date?: Date;
+          invoice_num?: string;
+          amount_received?: number;
+          pmt_mode?: string;
+          customer_name?: string;
+        };
+        return {
+          trx_id: String(doc.trx_id || ''),
+          trx_date: new Date(doc.trx_date || 0),
+          invoice_num: String(doc.invoice_num || ''),
+          amount_received: Number(doc.amount_received) || 0,
+          pmt_mode: String(doc.pmt_mode || ''),
+          customer_name: String(doc.customer_name || ''),
+        };
+      }),
+      from,
+      to
+    );
+    res.json(statement);
+  } catch (error) {
+    console.error('Sales statement error:', error);
+    res.status(500).json({ error: 'Failed to build the sales statement' });
+  }
+});
+
 // Get invoices
 router.get('/', authenticateAdmin, async (req: AuthRequest, res) => {
   try {
-    const { page = 1, limit = 50, search, customer_id, unpaid_only, type: docType } = req.query;
-    const skip = (Number(page) - 1) * Number(limit);
+    const { page = 1, limit = 50, search, customer_id, unpaid_only, type: docType, prefix, settlement } = req.query;
+    const pageNum = Math.max(1, Number(page) || 1);
+    const limitNum = Math.min(1000, Math.max(1, Number(limit) || 50));
+    const skip = (pageNum - 1) * limitNum;
+    const and: Record<string, unknown>[] = [];
 
-    let query: any = {};
-
-    if (search) {
-      query.$or = [
-        { invoice_number: { $regex: search, $options: 'i' } },
-        { customer_name: { $regex: search, $options: 'i' } },
-        { customer_phone: { $regex: search, $options: 'i' } },
-      ];
+    if (search && typeof search === 'string') {
+      and.push({
+        $or: [
+          { invoice_number: { $regex: search, $options: 'i' } },
+          { customer_name: { $regex: search, $options: 'i' } },
+          { customer_phone: { $regex: search, $options: 'i' } },
+        ],
+      });
     }
-    if (customer_id && typeof customer_id === 'string') {
-      query.customer_id = new mongoose.Types.ObjectId(customer_id);
+    if (customer_id && typeof customer_id === 'string' && mongoose.Types.ObjectId.isValid(customer_id)) {
+      and.push({ customer_id: new mongoose.Types.ObjectId(customer_id) });
     }
     if (docType === 'invoice' || docType === 'quotation') {
-      query.invoice_type = docType;
+      and.push({ invoice_type: docType });
     }
     if (unpaid_only === 'true' || unpaid_only === '1') {
-      Object.assign(query, derivedUnpaidReceivableMatch);
+      and.push(derivedUnpaidReceivableMatch);
     }
+    if (typeof prefix === 'string' && (INVOICE_NUMBER_PREFIXES as readonly string[]).includes(prefix)) {
+      and.push({ invoice_number: { $regex: `^${prefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}` } });
+    }
+    if (typeof settlement === 'string') {
+      const match = settlementMatch(settlement);
+      if (match) and.push(match);
+    }
+    const query = and.length ? { $and: and } : {};
 
-    const invoices = await Invoice.find(query)
-      .sort({ created_at: -1 })
-      .skip(skip)
-      .limit(Number(limit))
-      .lean();
+    const [invoices, total] = await Promise.all([
+      Invoice.find(query).sort({ created_at: -1 }).skip(skip).limit(limitNum).lean(),
+      Invoice.countDocuments(query),
+    ]);
 
-    const total = await Invoice.countDocuments(query);
+    const customerIds = invoices
+      .map((row) => (row as { customer_id?: mongoose.Types.ObjectId }).customer_id)
+      .filter((id): id is mongoose.Types.ObjectId => Boolean(id));
+    const customers = customerIds.length
+      ? await Customer.find({ _id: { $in: customerIds } }).select('company').lean()
+      : [];
+    const companyById = new Map(customers.map((row) => [String(row._id), String((row as { company?: string }).company || '')]));
 
-    res.json(
-      invoices.map((invoice: any) => {
-        const state = invoiceFinancialState(invoice);
-        return {
-          id: invoice._id.toString(),
-          invoice_number: invoice.invoice_number,
-          invoice_type: invoice.invoice_type,
-          customer_id: invoice.customer_id?.toString(),
-          customer_name: invoice.customer_name,
-          customer_phone: invoice.customer_phone,
-          customer_email: invoice.customer_email,
-          customer_address: invoice.customer_address,
-          total_amount: state.total,
-          amount_paid: state.amount_paid,
-          tax_amount: invoice.tax_amount || 0,
-          payment_method: invoice.payment_method,
-          payment_status: state.payment_status,
-          shipping_type: invoice.shipping_type,
-          terms: invoice.terms,
-          source: invoice.source,
-          ...fulfillmentPayload(invoice),
-          ...quotationMark(invoice.shipping_type),
-          invoice_date: invoice.invoice_date,
-          due_date: invoice.due_date,
-          created_at: invoice.created_at,
-          items: invoice.items || [],
-        };
-      })
-    );
+    const mapped = invoices.map((invoice: any) => {
+      const state = invoiceFinancialState(invoice);
+      const paid = state.amount_paid;
+      const balance = state.balance_due;
+      const settlementStatus =
+        invoice.invoice_type === DOCUMENT_TYPE_QUOTATION
+          ? null
+          : balance <= 0
+            ? 'paid'
+            : paid > 0
+              ? 'partial'
+              : 'unpaid';
+      return {
+        id: invoice._id.toString(),
+        invoice_number: invoice.invoice_number,
+        invoice_type: invoice.invoice_type,
+        customer_id: invoice.customer_id?.toString(),
+        customer_name: invoice.customer_name,
+        customer_company: invoice.customer_id ? companyById.get(String(invoice.customer_id)) || '' : '',
+        customer_phone: invoice.customer_phone,
+        customer_email: invoice.customer_email,
+        customer_address: invoice.customer_address,
+        total_amount: state.total,
+        amount_paid: state.amount_paid,
+        tax_amount: invoice.tax_amount || 0,
+        payment_method: invoice.payment_method,
+        payment_status: state.payment_status,
+        settlement: settlementStatus,
+        shipping_type: invoice.shipping_type,
+        terms: invoice.terms,
+        source: invoice.source,
+        ...fulfillmentPayload(invoice),
+        ...quotationMark(invoice.shipping_type),
+        invoice_date: invoice.invoice_date,
+        due_date: invoice.due_date,
+        created_at: invoice.created_at,
+        items: invoice.items || [],
+      };
+    });
+
+    if (req.query.paginated === '1') {
+      return res.json({
+        invoices: mapped,
+        pagination: {
+          page: pageNum,
+          limit: limitNum,
+          total,
+          totalPages: Math.ceil(total / limitNum) || 1,
+        },
+      });
+    }
+    res.json(mapped);
   } catch (error) {
     console.error('Get invoices error:', error);
     res.status(500).json({ error: 'Failed to fetch invoices' });
@@ -553,13 +708,22 @@ router.post('/:id/fulfill', authenticateAdmin, async (req: AuthRequest, res) => 
       shipment_id: String(shipment._id),
     });
   } catch (error: any) {
-    if (error instanceof z.ZodError) return res.status(400).json({ error: error.errors[0].message });
+    if (error instanceof z.ZodError) return res.status(400).json({ error: error.message });
     const wholesale = httpErrorFromWholesaleInventory(error);
     if (wholesale) return res.status(wholesale.status).json(wholesale.body);
     console.error('Fulfill invoice error:', error);
     return res.status(500).json({ error: 'Failed to fulfill invoice' });
   }
 });
+
+async function withCustomerCompany(invoice: any) {
+  let customer_company = '';
+  if (invoice?.customer_id) {
+    const customer = await Customer.findById(invoice.customer_id).select('company').lean();
+    customer_company = String((customer as { company?: string } | null)?.company || '');
+  }
+  return { ...invoice, customer_company };
+}
 
 // Generate and download invoice PDF (must be before GET /:id so /:id/pdf is matched)
 router.get('/:id/pdf', authenticateAdmin, async (req: AuthRequest, res) => {
@@ -579,7 +743,7 @@ router.get('/:id/pdf', authenticateAdmin, async (req: AuthRequest, res) => {
     products.forEach((p: any) => {
       idMap[p._id.toString()] = p.product_id || p.sku || p._id.toString();
     });
-    const buffer = await buildInvoicePdfBuffer(invoice as any, items as any[], idMap);
+    const buffer = await buildInvoicePdfBuffer(await withCustomerCompany(invoice), items as any[], idMap);
     const filename = `invoice-${(invoice as any).invoice_number || req.params.id}.pdf`;
     sendPdfResponse(res, buffer, filename);
   } catch (error) {
@@ -901,6 +1065,8 @@ router.post('/:id/convert', authenticateAdmin, async (req: AuthRequest, res) => 
 
     await saveCustomerProductPrices((quote as any).customer_id, items, inv._id, invoice_date);
 
+    await closeRfqsForConvertedQuotation(quote._id, invoice_number, (quote as any).invoice_number);
+
     const doc = (typeof (inv as any).toObject === 'function' ? (inv as any).toObject() : inv) as any;
     res.status(201).json({
       id: doc._id.toString(),
@@ -1005,7 +1171,7 @@ router.post('/:id/send-email', authenticateAdmin, async (req: AuthRequest, res) 
     products.forEach((p: any) => {
       idMap[p._id.toString()] = p.product_id || p.sku || p._id.toString();
     });
-    const pdfBuffer = await buildInvoicePdfBuffer(invoice as any, items as any[], idMap);
+    const pdfBuffer = await buildInvoicePdfBuffer(await withCustomerCompany(invoice), items as any[], idMap);
 
     await transporter.sendMail({
       from: process.env.SMTP_USER,

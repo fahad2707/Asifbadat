@@ -5,6 +5,12 @@ export type TaxTypeOption = {
   rate_type?: string;
 };
 
+export function taxMarkFromName(name?: string | null, taxable?: boolean): string {
+  if (taxable !== true) return '';
+  const letters = String(name || 'TAX').replace(/[^A-Za-z]/g, '').toUpperCase();
+  return (letters || 'TAX').slice(0, 6);
+}
+
 export function formatTaxTypeLabel(t: { name: string; rate: number; rate_type?: string }): string {
   const name = String(t.name || '').trim() || 'Tax';
   const rate = Number(t.rate);

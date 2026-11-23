@@ -134,6 +134,9 @@ export function ProductsAdminView({ initialView = 'all' }: { initialView?: Produ
   const [bulkPriceGroupName, setBulkPriceGroupName] = useState('');
   const [bulkPriceGroupAssigning, setBulkPriceGroupAssigning] = useState(false);
   const [togglingId, setTogglingId] = useState<string | null>(null);
+  const [assignTaxProduct, setAssignTaxProduct] = useState<Product | null>(null);
+  const [assignTaxTypeId, setAssignTaxTypeId] = useState('');
+  const [assigningTax, setAssigningTax] = useState(false);
   const [categoryFilter, setCategoryFilter] = useState('');
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(50);
@@ -316,13 +319,17 @@ export function ProductsAdminView({ initialView = 'all' }: { initialView?: Produ
     if (!confirm(`Delete ${selectedIds.size} selected product(s)?`)) return;
     const ids = Array.from(selectedIds);
     try {
-      await adminApi.post('/products/bulk-delete', { ids });
-      toast.success(`${ids.length} product(s) deleted`);
+      const { data } = await adminApi.post<{ deleted?: number }>('/products/bulk-delete', { ids });
+      const deleted = Number(data?.deleted ?? 0);
+      if (deleted <= 0) {
+        toast.error('No products were deleted');
+        return;
+      }
+      toast.success(deleted === 1 ? 'Product deleted' : `${deleted} products deleted`);
       setSelectedIds(new Set());
-      // Soft-delete on the server — remove from this list immediately so UI matches the toast.
       setProducts((prev) => prev.filter((p) => !ids.includes(String(p.id))));
-      setTotalCount((prev) => Math.max(0, (prev ?? 0) - ids.length));
-      await fetchProducts();
+      setTotalCount((prev) => Math.max(0, (prev ?? 0) - deleted));
+      await fetchProducts({ quiet: true });
     } catch (err: unknown) {
       toast.error(formatApiError(err, 'Failed to delete'));
     }
@@ -341,6 +348,33 @@ export function ProductsAdminView({ initialView = 'all' }: { initialView?: Produ
     } catch (err: unknown) {
       toast.error(formatApiError(err, 'Failed to activate'));
     }
+  };
+
+  const applyProductTaxType = async (id: string, tax_type_id: string | null, label: string) => {
+    setTogglingId(id);
+    try {
+      await adminApi.put(`/products/${id}`, { tax_type_id });
+      await fetchProducts({ quiet: true });
+      toast.success(tax_type_id ? `Assigned ${label}` : 'Product is no longer in a tax group');
+    } catch (err: unknown) {
+      toast.error(formatApiError(err, 'Could not update tax'));
+    } finally {
+      setTogglingId(null);
+    }
+  };
+
+  const handleTaxableToggle = (product: Product, next: boolean) => {
+    if (next) {
+      if (taxTypes.length === 0) {
+        toast.error('Add a tax type in Catalog first');
+        return;
+      }
+      setAssignTaxProduct(product);
+      setAssignTaxTypeId(taxTypes[0].id);
+      return;
+    }
+    if (!confirm(`Remove ${product.name} from ${productTaxLabel(product)}? Selling price stays the same.`)) return;
+    void applyProductTaxType(String(product.id), null, 'No Tax');
   };
 
   const handleWebsiteToggle = async (id: string, next: boolean) => {
@@ -886,7 +920,7 @@ export function ProductsAdminView({ initialView = 'all' }: { initialView?: Produ
               ) : (
                 <button type="button" onClick={handleBulkDelete} className={adminUi.btnGhost}>
                   <Trash2 className="w-3.5 h-3.5" />
-                  Deactivate
+                  Delete
                 </button>
               )}
               <button type="button" onClick={() => setSelectedIds(new Set())} className={adminUi.btnGhost}>
@@ -997,7 +1031,9 @@ export function ProductsAdminView({ initialView = 'all' }: { initialView?: Produ
                 </th>
                 <th className="text-left py-3.5 px-4 font-bold tracking-wider uppercase text-[10px]">Product name</th>
                 <th className="text-left py-3.5 px-4 font-bold tracking-wider uppercase text-[10px]">Category</th>
-                <th className="text-right py-3.5 px-4 font-bold tracking-wider uppercase text-[10px]">Price</th>
+                <th className="text-right py-3.5 px-4 font-bold tracking-wider uppercase text-[10px]">Cost</th>
+                <th className="text-right py-3.5 px-4 font-bold tracking-wider uppercase text-[10px]">Selling</th>
+                <th className="text-center py-3.5 px-4 font-bold tracking-wider uppercase text-[10px]">Taxable</th>
                 <th className="text-left py-3.5 px-4 font-bold tracking-wider uppercase text-[10px]">Tax</th>
                 <th className="text-right py-3.5 px-4 font-bold tracking-wider uppercase text-[10px]">Stock</th>
                 <th className="text-left py-3.5 px-4 font-bold tracking-wider uppercase text-[10px]">Product ID</th>
@@ -1038,7 +1074,22 @@ export function ProductsAdminView({ initialView = 'all' }: { initialView?: Produ
                     {product.category_name ? titleCaseWords(product.category_name) : '-'}
                   </td>
                   <td className="py-3 px-4 text-right font-bold text-slate-200">
+                    {product.cost_price != null && Number.isFinite(Number(product.cost_price))
+                      ? `$${Number(product.cost_price).toFixed(2)}`
+                      : '—'}
+                  </td>
+                  <td className="py-3 px-4 text-right font-bold text-slate-200">
                     ${parseFloat(product.price.toString()).toFixed(2)}
+                  </td>
+                  <td className="py-3 px-4 text-center" onClick={(e) => e.stopPropagation()}>
+                    <input
+                      type="checkbox"
+                      aria-label={`Taxable ${product.name}`}
+                      className="h-3.5 w-3.5 rounded border-[#C7C7C7] accent-black"
+                      checked={Boolean(product.tax_type_id)}
+                      disabled={togglingId === String(product.id)}
+                      onChange={(e) => handleTaxableToggle(product, e.target.checked)}
+                    />
                   </td>
                   <td className="py-3 px-4 text-slate-350 font-semibold whitespace-nowrap">{productTaxLabel(product)}</td>
                   <td className="py-3 px-4 text-right">
@@ -1110,6 +1161,38 @@ export function ProductsAdminView({ initialView = 'all' }: { initialView?: Produ
               </div>
             </div>
           )}
+        </div>
+      )}
+
+      {assignTaxProduct && (
+        <div className={adminUi.modalBackdrop} onClick={() => setAssignTaxProduct(null)}>
+          <div className={`${adminUi.modal} max-w-md w-full p-5`} onClick={(e) => e.stopPropagation()}>
+            <h2 className="text-lg font-medium text-[#1A1A1A]">Add to a tax group</h2>
+            <p className="mt-1 text-sm text-[#6B6C72]">{assignTaxProduct.name} is not in a tax group. Choose one. Selling price stays the same.</p>
+            <select aria-label="Tax group" value={assignTaxTypeId} onChange={(e) => setAssignTaxTypeId(e.target.value)} className={`${adminUi.field} mt-4`}>
+              {taxTypes.map((t) => (
+                <option key={t.id} value={t.id}>{formatTaxTypeLabel(t)}</option>
+              ))}
+            </select>
+            <div className="mt-4 flex justify-end gap-2">
+              <button type="button" className={adminUi.btnSecondary} onClick={() => setAssignTaxProduct(null)}>Cancel</button>
+              <button
+                type="button"
+                className={`${adminUi.btnPrimary} disabled:opacity-40`}
+                disabled={!assignTaxTypeId || assigningTax}
+                onClick={async () => {
+                  const chosen = taxTypes.find((t) => t.id === assignTaxTypeId);
+                  if (!chosen) return;
+                  setAssigningTax(true);
+                  await applyProductTaxType(String(assignTaxProduct.id), chosen.id, formatTaxTypeLabel(chosen));
+                  setAssigningTax(false);
+                  setAssignTaxProduct(null);
+                }}
+              >
+                {assigningTax ? 'Saving…' : 'Assign'}
+              </button>
+            </div>
+          </div>
         </div>
       )}
 

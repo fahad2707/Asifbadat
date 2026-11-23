@@ -1,7 +1,7 @@
 import express from 'express';
 import multer from 'multer';
 import mongoose from 'mongoose';
-import Product from '../models/Product';
+import Product, { PRODUCT_NOT_DELETED } from '../models/Product';
 import Category from '../models/Category';
 import SubCategory from '../models/SubCategory';
 import TaxType from '../models/TaxType';
@@ -294,7 +294,7 @@ router.get('/', optionalAuthenticateAdmin, optionalAuthenticateUser, async (req:
       return res.status(401).json({ error: 'Authentication required' });
     }
 
-    const andParts: any[] = [];
+    const andParts: any[] = [{ ...PRODUCT_NOT_DELETED }];
     if (!isAdmin) {
       // Storefront / guests: exclude explicitly inactive (boolean false, string "false", or 0)
       andParts.push({ $nor: [{ is_active: false }, { is_active: 'false' }, { is_active: 0 }] });
@@ -648,6 +648,9 @@ router.get('/:id', optionalAuthenticateAdmin, optionalAuthenticateUser, async (r
     if (!product) {
       return res.status(404).json({ error: 'Product not found' });
     }
+    if ((product as { deleted_at?: Date }).deleted_at) {
+      return res.status(404).json({ error: 'Product not found' });
+    }
 
     const isAdmin = req.userRole === 'admin';
     if (isExplicitlyInactive((product as any).is_active) && !isAdmin) {
@@ -800,7 +803,7 @@ router.post('/', authenticateAdmin, async (req: AuthRequest, res) => {
     }
   } catch (error: any) {
     if (error instanceof z.ZodError) {
-      return res.status(400).json({ error: error.errors[0].message });
+      return res.status(400).json({ error: error.message });
     }
     if (error?.status === 400) {
       return res.status(400).json({ error: error.message });
@@ -928,7 +931,7 @@ router.put('/:id', authenticateAdmin, async (req: AuthRequest, res) => {
     });
   } catch (error: any) {
     if (error instanceof z.ZodError) {
-      return res.status(400).json({ error: error.errors[0].message });
+      return res.status(400).json({ error: error.message });
     }
     if (error?.status === 400) {
       return res.status(400).json({ error: error.message });
@@ -949,15 +952,21 @@ router.delete('/:id', authenticateAdmin, async (req: AuthRequest, res) => {
   }
 });
 
-// Admin: Bulk delete products (soft)
+// Admin: Remove products from the catalog table (invoice history keeps the names).
 router.post('/bulk-delete', authenticateAdmin, async (req: AuthRequest, res) => {
   try {
     const schema = z.object({ ids: z.array(z.string()).min(1) });
     const { ids } = schema.parse(req.body);
-    await Product.updateMany({ _id: { $in: ids } }, { is_active: false });
-    res.json({ message: `${ids.length} product(s) deleted`, deleted: ids.length });
+    const validIds = ids.filter((id) => mongoose.isValidObjectId(id));
+    if (validIds.length === 0) return res.status(400).json({ error: 'No valid product IDs' });
+    const result = await Product.updateMany(
+      { _id: { $in: validIds }, ...PRODUCT_NOT_DELETED },
+      { $set: { deleted_at: new Date(), is_active: false, updated_at: new Date() } }
+    );
+    const deleted = Number(result.modifiedCount || 0);
+    res.json({ message: `${deleted} product(s) deleted`, deleted });
   } catch (error: any) {
-    if (error instanceof z.ZodError) return res.status(400).json({ error: error.errors[0].message });
+    if (error instanceof z.ZodError) return res.status(400).json({ error: error.message });
     console.error('Bulk delete products error:', error);
     res.status(500).json({ error: 'Failed to delete products' });
   }
@@ -973,7 +982,7 @@ router.post('/bulk-activate', authenticateAdmin, async (req: AuthRequest, res) =
     const result = await Product.updateMany({ _id: { $in: validIds } }, { is_active: true, updated_at: new Date() });
     res.json({ message: `${result.modifiedCount} product(s) activated`, modified: result.modifiedCount });
   } catch (error: any) {
-    if (error instanceof z.ZodError) return res.status(400).json({ error: error.errors[0].message });
+    if (error instanceof z.ZodError) return res.status(400).json({ error: error.message });
     console.error('Bulk activate products error:', error);
     res.status(500).json({ error: 'Failed to activate products' });
   }
@@ -1024,7 +1033,7 @@ router.post('/bulk-assign-category', authenticateAdmin, async (req: AuthRequest,
       matched: result.matchedCount,
     });
   } catch (error: any) {
-    if (error instanceof z.ZodError) return res.status(400).json({ error: error.errors[0].message });
+    if (error instanceof z.ZodError) return res.status(400).json({ error: error.message });
     console.error('Bulk assign category error:', error);
     res.status(500).json({ error: 'Failed to assign category' });
   }
@@ -1065,7 +1074,7 @@ router.post('/bulk-assign-tax-type', authenticateAdmin, async (req: AuthRequest,
       matched: result.matchedCount,
     });
   } catch (error: any) {
-    if (error instanceof z.ZodError) return res.status(400).json({ error: error.errors[0].message });
+    if (error instanceof z.ZodError) return res.status(400).json({ error: error.message });
     if (error?.status === 400) return res.status(400).json({ error: error.message });
     console.error('Bulk assign tax type error:', error);
     res.status(500).json({ error: 'Failed to assign tax type' });

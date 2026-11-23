@@ -22,10 +22,14 @@ export function isObjectIdString(value: string | null | undefined): boolean {
 
 /** UX safeguard mirroring backend safe-path eligibility. Backend remains authoritative. */
 export function canApproveApplication(app: WebsiteSignupResolutionApp): boolean {
+  const ownLinkedCustomer =
+    app.link_outcome === 'linked' &&
+    app.match_kind === 'none' &&
+    app.matched_customer_ids.length === 0;
+  const safeNewCustomer = app.link_outcome === 'created' && app.match_kind === 'none';
   return (
     app.status === 'pending' &&
-    app.link_outcome === 'created' &&
-    app.match_kind === 'none' &&
+    (safeNewCustomer || ownLinkedCustomer) &&
     isObjectIdString(app.user_id) &&
     isObjectIdString(app.customer_id)
   );

@@ -1,0 +1,322 @@
+diff --git a/frontend/app/admin/inventory/page.tsx b/frontend/app/admin/inventory/page.tsx
+index 8e1c3f4..f2d7a8b 100644
+--- a/frontend/app/admin/inventory/page.tsx
++++ b/frontend/app/admin/inventory/page.tsx
+@@
+-                        <button type="button" onClick={() => openHistory(p)} className="text-[#64748B] hover:text-[#0F9F8F] hover:underline font-semibold">
+-                          History
+-                        </button>
+-                        <button type="button" onClick={() => openEdit(p)} className="text-[#0F9F8F] hover:underline font-semibold">
+-                          Edit
+-                        </button>
+-                        <button type="button" onClick={() => handleDelete(p.id)} className="text-[#64748B] hover:text-rose-600 hover:underline font-semibold">
+-                          Deactivate
+-                        </button>
++                        <button type="button" onClick={() => openHistory(p)} className="text-[#64748B] hover:text-[#0F9F8F] hover:underline font-semibold">
++                          History
++                        </button>
++                        <button type="button" onClick={() => openEdit(p)} className="text-[#0F9F8F] hover:underline font-semibold">
++                          Edit
++                        </button>
++                        <button type="button" onClick={() => handleDelete(p.id)} className="text-[#64748B] hover:text-rose-600 hover:underline font-semibold">
++                          Deactivate
++                        </button>
++                        {/* New Mark as Damage button */}
++                        <button
++                          type="button"
++                          onClick={() => openMarkDamage(p)}
++                          className="ml-2 text-[#D97706] hover:text-[#B45309] hover:underline font-semibold"
++                        >
++                          Mark as Damage
++                        </button>
+@@
+-                      <div className="flex items-center justify-end gap-3">
++                      <div className="flex items-center justify-end gap-3">
+                         <button type="button" onClick={() => openHistory(p)} className="text-[#64748B] hover:text-[#0F9F8F] hover:underline font-semibold">
+                           History
+                         </button>
+@@
+-                      <div className="flex items-center justify-end gap-3">
++                      <div className="flex items-center justify-end gap-3">
+                         <button type="button" onClick={() => openHistory(p)} className="text-[#64748B] hover:text-[#0F9F8F] hover:underline font-semibold">
+                           History
+                         </button>
+@@
+-                        <button type="button" onClick={() => openEdit(p)} className="text-[#0F9F8F] hover:underline font-semibold">
++                        <button type="button" onClick={() => openEdit(p)} className="text-[#0F9F8F] hover:underline font-semibold">
+                           Edit
+                         </button>
+@@
+-                        <button type="button" onClick={() => handleDelete(p.id)} className="text-[#64748B] hover:text-rose-600 hover:underline font-semibold">
++                        <button type="button" onClick={() => handleDelete(p.id)} className="text-[#64748B] hover:text-rose-600 hover:underline font-semibold">
+                           Deactivate
+                         </button>
++                        {/* Mark as Damage */}
++                        <button
++                          type="button"
++                          onClick={() => openMarkDamage(p)}
++                          className="ml-2 text-[#D97706] hover:text-[#B45309] hover:underline font-semibold"
++                        >
++                          Mark as Damage
++                        </button>
+diff --git a/frontend/components/admin/MarkDamageModal.tsx b/frontend/components/admin/MarkDamageModal.tsx
+new file mode 100644
+index 0000000..e1c2d12
+--- /dev/null
++++ b/frontend/components/admin/MarkDamageModal.tsx
+@@
++import React, { useState } from 'react';
++import toast from 'react-hot-toast';
++
++type Props = {
++  product: any;
++  onClose: () => void;
++  onSuccess: () => void;
++};
++
++export default function MarkDamageModal({ product, onClose, onSuccess }: Props) {
++  const [qty, setQty] = useState(product.stock_quantity);
++
++  const handleSubmit = async () => {
++    if (qty <= 0 || qty > product.stock_quantity) {
++      toast.error('Invalid quantity');
++      return;
++    }
++    try {
++      await fetch('/api/inventory/mark-damage', {
++        method: 'POST',
++        headers: { 'Content-Type': 'application/json' },
++        body: JSON.stringify({ productId: product.id, quantity: qty }),
++      });
++      toast.success('Marked as damaged');
++      onSuccess();
++    } catch (e) {
++      toast.error('Failed to mark damage');
++    }
++  };
++
++  return (
++    <div className="fixed inset-0 flex items-center justify-center bg-black/30">
++      <div className="bg-white p-6 rounded shadow-lg w-96">
++        <h2 className="text-lg font-semibold mb-4">Mark {product.name} as Damage</h2>
++        <input
++          type="number"
++          min={1}
++          max={product.stock_quantity}
++          value={qty}
++          onChange={(e) => setQty(Number(e.target.value))}
++          className="w-full border rounded p-2 mb-4"
++        />
++        <div className="flex justify-end gap-2">
++          <button className="px-4 py-2 bg-gray-200 rounded" onClick={onClose}>
++            Cancel
++          </button>
++          <button className="px-4 py-2 bg-blue-600 text-white rounded" onClick={handleSubmit}>
++            Apply
++          </button>
++        </div>
++      </div>
++    </div>
++  );
++}
++
+diff --git a/frontend/app/admin/inventory/page.tsx b/frontend/app/admin/inventory/page.tsx
+index 8e1c3f4..f2d7a8b 100644
+--- a/frontend/app/admin/inventory/page.tsx
++++ b/frontend/app/admin/inventory/page.tsx
+@@
++import MarkDamageModal from '@/components/admin/MarkDamageModal';
+@@
++  const [damageModalProduct, setDamageModalProduct] = useState<any>(null);
+@@
++  const openMarkDamage = (p: any) => setDamageModalProduct(p);
++  const closeMarkDamage = () => setDamageModalProduct(null);
++  const reloadAfterDamage = () => {
++    // re‑fetch inventory after marking damage
++    router.refresh();
++    closeMarkDamage();
++  };
+@@
++            {damageModalProduct && (
++              <MarkDamageModal
++                product={damageModalProduct}
++                onClose={closeMarkDamage}
++                onSuccess={reloadAfterDamage}
++              />
++            )}
+ diff --git a/frontend/lib/moneyTone.ts b/frontend/lib/moneyTone.ts
+index a6cdef0..b2cda10 100644
+--- a/frontend/lib/moneyTone.ts
++++ b/frontend/lib/moneyTone.ts
+@@
+-export const moneyOut = 'text-red-600';
+-export const moneyPlain = 'text-gray-600';
++// Money tone helpers – green for money we owe the vendor, red for money we need to pay
++export const moneyOut = 'text-green-600';
++export const moneyPlain = 'text-red-600';
+diff --git a/frontend/app/admin/bank-transaction/page.tsx b/frontend/app/admin/bank-transaction/page.tsx
+new file mode 100644
+index 0000000..d5c3b1a
+--- /dev/null
++++ b/frontend/app/admin/bank-transaction/page.tsx
+@@
++import React, { useState, useEffect } from 'react';
++import Link from 'next/link';
++import toast from 'react-hot-toast';
++import StatementModal from '@/components/admin/StatementModal';
++
++type Transaction = {
++  id: string;
++  date: string;
++  amount: number;
++  mode: string;
++  account: string;
++  type: 'receive' | 'pay';
++};
++
++export default function BankTransactionPage() {
++  const [type, setType] = useState<'receive' | 'pay'>('receive');
++  const [transactions, setTransactions] = useState<Transaction[]>([]);
++  const [showStatement, setShowStatement] = useState(false);
++
++  const fetchTx = async (t: typeof type) => {
++    const res = await fetch(`/api/bank-transactions?type=${t}`);
++    const data = await res.json();
++    setTransactions(data);
++  };
++
++  useEffect(() => {
++    fetchTx(type);
++  }, [type]);
++
++  return (
++    <div className="space-y-6">
++      <div className="flex gap-4">
++        <button
++          className={`px-4 py-2 rounded ${type === 'receive' ? 'bg-blue-600 text-white' : 'bg-gray-200'}`}
++          onClick={() => setType('receive')}
++        >
++          Received
++        </button>
++        <button
++          className={`px-4 py-2 rounded ${type === 'pay' ? 'bg-blue-600 text-white' : 'bg-gray-200'}`}
++          onClick={() => setType('pay')}
++        >
++          Paid
++        </button>
++        <button className="ml-auto px-4 py-2 bg-indigo-600 text-white rounded" onClick={() => setShowStatement(true)}>
++          Statement
++        </button>
++      </div>
++
++      <table className="w-full text-sm border-collapse">
++        <thead className="bg-gray-50">
++          <tr>
++            <th className="p-2 text-left">Date</th>
++            <th className="p-2 text-left">Account</th>
++            <th className="p-2 text-left">Mode</th>
++            <th className="p-2 text-right">Amount</th>
++          </tr>
++        </thead>
++        <tbody>
++          {transactions.map((tx) => (
++            <tr key={tx.id} className="border-b">
++              <td className="p-2">{new Date(tx.date).toLocaleDateString()}</td>
++              <td className="p-2">{tx.account}</td>
++              <td className="p-2">{tx.mode}</td>
++              <td className="p-2 text-right">{`$${tx.amount.toFixed(2)}`}</td>
++            </tr>
++          ))}
++        </tbody>
++      </table>
++
++      {showStatement && <StatementModal onClose={() => setShowStatement(false)} />}
++    </div>
++  );
++}
++
+diff --git a/frontend/components/admin/StatementModal.tsx b/frontend/components/admin/StatementModal.tsx
+new file mode 100644
+index 0000000..5f7c1c9
+--- /dev/null
++++ b/frontend/components/admin/StatementModal.tsx
+@@
++import React, { useState } from 'react';
++import toast from 'react-hot-toast';
++import { downloadPdf } from '@/lib/download-pdf';
++import { exportCsv } from '@/lib/export-csv';
++
++type Props = {
++  onClose: () => void;
++};
++
++export default function StatementModal({ onClose }: Props) {
++  const [range, setRange] = useState({ from: '', to: '' });
++  const [account, setAccount] = useState('');
++  const [mode, setMode] = useState('');
++
++  const generate = async (format: 'pdf' | 'csv') => {
++    try {
++      const res = await fetch('/api/bank-statement', {
++        method: 'POST',
++        headers: { 'Content-Type': 'application/json' },
++        body: JSON.stringify({ ...range, account, mode }),
++      });
++      const blob = await res.blob();
++      if (format === 'pdf') downloadPdf(blob, 'BankStatement.pdf');
++      else exportCsv(blob, 'BankStatement.csv');
++    } catch (e) {
++      toast.error('Failed to generate statement');
++    }
++  };
++
++  return (
++    <div className="fixed inset-0 flex items-center justify-center bg-black/30">
++      <div className="bg-white rounded p-6 w-96">
++        <h2 className="text-lg font-semibold mb-4">Bank Statement</h2>
++        <div className="space-y-2">
++          <input
++            type="date"
++            placeholder="From"
++            value={range.from}
++            onChange={(e) => setRange((r) => ({ ...r, from: e.target.value }))}
++            className="w-full border rounded p-2"
++          />
++          <input
++            type="date"
++            placeholder="To"
++            value={range.to}
++            onChange={(e) => setRange((r) => ({ ...r, to: e.target.value }))}
++            className="w-full border rounded p-2"
++          />
++          <input
++            type="text"
++            placeholder="Account"
++            value={account}
++            onChange={(e) => setAccount(e.target.value)}
++            className="w-full border rounded p-2"
++          />
++          <input
++            type="text"
++            placeholder="Mode (cash, cheque, …)"
++            value={mode}
++            onChange={(e) => setMode(e.target.value)}
++            className="w-full border rounded p-2"
++          />
++        </div>
++        <div className="flex justify-end gap-2 mt-4">
++          <button className="px-3 py-1 bg-gray-200 rounded" onClick={onClose}>
++            Close
++          </button>
++          <button className="px-3 py-1 bg-indigo-600 text-white rounded" onClick={() => generate('pdf')}>
++            Print / PDF
++          </button>
++          <button className="px-3 py-1 bg-green-600 text-white rounded" onClick={() => generate('csv')}>
++            Export CSV
++          </button>
++        </div>
++      </div>
++    </div>
++  );
++}
++

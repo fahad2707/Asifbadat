@@ -8,7 +8,7 @@ import {
   ChevronRight,
   ClipboardList,
   RefreshCw,
-  UserPlus,
+  Trash2,
   X,
 } from 'lucide-react';
 import adminApi from '@/lib/admin-api';
@@ -122,11 +122,13 @@ export default function WebsiteSignupsPage() {
   const [applications, setApplications] = useState<WebsiteSignupApplication[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [statusTab, setStatusTab] = useState<StatusTab>('pending');
+  const [statusTab, setStatusTab] = useState<StatusTab>('all');
   const [page, setPage] = useState(1);
   const [pagination, setPagination] = useState({ page: 1, limit: PAGE_LIMIT, total: 0, totalPages: 0 });
 
   const [selected, setSelected] = useState<WebsiteSignupApplication | null>(null);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [deleting, setDeleting] = useState(false);
   const [decisionBusyId, setDecisionBusyId] = useState<string | null>(null);
   const [rejectTarget, setRejectTarget] = useState<WebsiteSignupApplication | null>(null);
   const [rejectNote, setRejectNote] = useState('');
@@ -154,6 +156,12 @@ export default function WebsiteSignupsPage() {
         if (!cur) return null;
         return rows.find((r) => r.id === cur.id) ?? null;
       });
+      setSelectedIds((prev) => {
+        if (prev.size === 0) return prev;
+        const visible = new Set(rows.map((r) => r.id));
+        const next = new Set([...prev].filter((id) => visible.has(id)));
+        return next.size === prev.size ? prev : next;
+      });
     } catch (error) {
       if (isAdminAuthRedirectError(error)) return;
       const message = formatApiError(error, 'Failed to load website signup applications');
@@ -171,6 +179,8 @@ export default function WebsiteSignupsPage() {
 
   useEffect(() => {
     setPage(1);
+    setSelected(null);
+    setSelectedIds(new Set());
   }, [statusTab]);
 
   useEffect(() => {
@@ -324,11 +334,64 @@ export default function WebsiteSignupsPage() {
     }
   };
 
+  const allVisibleSelected = applications.length > 0 && applications.every((app) => selectedIds.has(app.id));
+  const someVisibleSelected = applications.some((app) => selectedIds.has(app.id));
+
+  const toggleOne = (id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const toggleAllVisible = () => {
+    setSelectedIds((prev) => {
+      if (allVisibleSelected) {
+        const next = new Set(prev);
+        applications.forEach((app) => next.delete(app.id));
+        return next;
+      }
+      const next = new Set(prev);
+      applications.forEach((app) => next.add(app.id));
+      return next;
+    });
+  };
+
+  const handleDeleteSelected = async () => {
+    if (selectedIds.size === 0 || deleting) return;
+    const n = selectedIds.size;
+    if (
+      !confirm(
+        `Remove ${n} website signup${n === 1 ? '' : 's'} from this queue?\n\nCustomers and website logins stay on file.`
+      )
+    ) {
+      return;
+    }
+    setDeleting(true);
+    try {
+      const res = await adminApi.post<{ deleted: number }>('/admin/website-signup-applications/bulk-delete', {
+        ids: [...selectedIds],
+      });
+      const deleted = Number(res.data?.deleted || 0);
+      toast.success(deleted === 1 ? 'Removed 1 website signup' : `Removed ${deleted} website signups`);
+      setSelectedIds(new Set());
+      setSelected((cur) => (cur && selectedIds.has(cur.id) ? null : cur));
+      await fetchApplications({ quiet: true });
+    } catch (error) {
+      if (isAdminAuthRedirectError(error)) return;
+      toast.error(formatApiError(error, 'Failed to delete website signups'));
+    } finally {
+      setDeleting(false);
+    }
+  };
+
   const tabs: { key: StatusTab; label: string }[] = [
+    { key: 'all', label: 'All' },
     { key: 'pending', label: 'Pending' },
     { key: 'approved', label: 'Approved' },
     { key: 'rejected', label: 'Rejected' },
-    { key: 'all', label: 'All' },
   ];
 
   return (
@@ -336,22 +399,29 @@ export default function WebsiteSignupsPage() {
       <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
         <div>
           <h1 className={adminUi.pageTitle}>Website signups</h1>
-          <p className={`${adminUi.meta} mt-1 max-w-2xl`}>
-            Review storefront registration applications. Approve only new customers with no CRM
-            collision. Email or phone matches stay pending until you confirm identity here and
-            bind the login, or reject the signup. Rejection does not change existing CRM customers.
-          </p>
         </div>
-        <button
-          type="button"
-          onClick={() => fetchApplications()}
-          disabled={loading || Boolean(decisionBusyId)}
-          className={adminUi.btnSecondary}
-          aria-label="Refresh website signup applications"
-        >
-          <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
-          Refresh
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={handleDeleteSelected}
+            disabled={selectedIds.size === 0 || deleting || Boolean(decisionBusyId)}
+            className={`${adminUi.btnSecondary} disabled:opacity-40`}
+            aria-label="Delete selected website signups"
+          >
+            <Trash2 className="w-4 h-4" />
+            Delete selected
+          </button>
+          <button
+            type="button"
+            onClick={() => fetchApplications()}
+            disabled={loading || Boolean(decisionBusyId)}
+            className={adminUi.btnSecondary}
+            aria-label="Refresh website signup applications"
+          >
+            <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+            Refresh
+          </button>
+        </div>
       </div>
 
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[#E3E5E8]">
@@ -378,6 +448,33 @@ export default function WebsiteSignupsPage() {
         </p>
       </div>
 
+      {selectedIds.size > 0 && (
+        <div className="flex items-center justify-between gap-3 rounded-md border border-[#E3E5E8] bg-[#F4F5F8] px-4 py-2">
+          <span className="text-sm font-medium text-[#1A1A1A]">{selectedIds.size} selected</span>
+          <div className="flex items-center gap-1">
+            <button
+              type="button"
+              title="Delete selected"
+              aria-label="Delete selected website signups"
+              onClick={handleDeleteSelected}
+              disabled={deleting || Boolean(decisionBusyId)}
+              className={`${adminUi.btnIcon} disabled:opacity-40`}
+            >
+              <Trash2 className="w-4 h-4" />
+            </button>
+            <button
+              type="button"
+              title="Clear selection"
+              aria-label="Clear selection"
+              onClick={() => setSelectedIds(new Set())}
+              className={adminUi.btnIcon}
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+      )}
+
       {loading ? (
         <div className="flex items-center justify-center py-16" role="status" aria-live="polite">
           <div className="animate-spin rounded-full h-8 w-8 border-2 border-black border-t-transparent" />
@@ -402,12 +499,24 @@ export default function WebsiteSignupsPage() {
           </p>
         </div>
       ) : (
-        <div className="grid grid-cols-1 xl:grid-cols-5 gap-4">
-          <div className={`xl:col-span-3 ${adminUi.panel} overflow-hidden`}>
+        <div className={selected ? 'grid grid-cols-1 xl:grid-cols-5 gap-4' : ''}>
+          <div className={`${selected ? 'xl:col-span-3 ' : ''}${adminUi.panel} overflow-hidden`}>
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead className={adminUi.tableHead}>
                   <tr>
+                    <th className="w-10 px-4 py-3">
+                      <input
+                        type="checkbox"
+                        aria-label="Select all website signups on this page"
+                        checked={allVisibleSelected}
+                        ref={(el) => {
+                          if (el) el.indeterminate = !allVisibleSelected && someVisibleSelected;
+                        }}
+                        onChange={toggleAllVisible}
+                        className="h-4 w-4 rounded border-[#C7C7C7] accent-black cursor-pointer"
+                      />
+                    </th>
                     <th className="text-left px-4 py-3 font-medium">Submitted</th>
                     <th className="text-left px-4 py-3 font-medium">Applicant</th>
                     <th className="text-left px-4 py-3 font-medium">Status</th>
@@ -425,27 +534,28 @@ export default function WebsiteSignupsPage() {
                       <tr
                         key={app.id}
                         className={`border-t border-[#E3E5E8] ${adminUi.tableRowHover} ${
-                          selectedRow ? 'bg-[#F4F5F8]' : ''
+                          selectedRow || selectedIds.has(app.id) ? 'bg-[#F4F5F8]' : ''
                         }`}
                       >
+                        <td className="px-4 py-3 align-top" onClick={(e) => e.stopPropagation()}>
+                          <input
+                            type="checkbox"
+                            aria-label={`Select ${displayOrDash(app.submitted_name)}`}
+                            checked={selectedIds.has(app.id)}
+                            onChange={() => toggleOne(app.id)}
+                            className="h-4 w-4 rounded border-[#C7C7C7] accent-black cursor-pointer"
+                          />
+                        </td>
                         <td className="px-4 py-3 whitespace-nowrap align-top">
-                          <button
-                            type="button"
-                            className="text-left"
-                            onClick={() => setSelected(app)}
-                          >
-                            <span className="text-[#1A1A1A] block">{formatWhen(app.created_at)}</span>
-                            <span className={`${adminUi.helper} font-mono`}>{app.id.slice(-8)}</span>
-                          </button>
+                          <span className="text-[#1A1A1A] block">{formatWhen(app.created_at)}</span>
+                          <span className={`${adminUi.helper} font-mono`}>{app.id.slice(-8)}</span>
                         </td>
                         <td className="px-4 py-3 align-top">
-                          <button type="button" className="text-left" onClick={() => setSelected(app)}>
-                            <span className="font-medium text-[#1A1A1A] block">
-                              {displayOrDash(app.submitted_name)}
-                            </span>
-                            <span className={`${adminUi.helper} block`}>{displayOrDash(app.submitted_email)}</span>
-                            <span className={adminUi.helper}>{displayOrDash(app.submitted_phone)}</span>
-                          </button>
+                          <span className="font-medium text-[#1A1A1A] block">
+                            {displayOrDash(app.submitted_name)}
+                          </span>
+                          <span className={`${adminUi.helper} block`}>{displayOrDash(app.submitted_email)}</span>
+                          <span className={adminUi.helper}>{displayOrDash(app.submitted_phone)}</span>
                         </td>
                         <td className="px-4 py-3 align-top">
                           <span className={STATUS_BADGE[app.status] || adminUi.badge}>{app.status}</span>
@@ -453,6 +563,8 @@ export default function WebsiteSignupsPage() {
                         <td className="px-4 py-3 align-top">
                           {manual ? (
                             <span className={adminUi.badgeUnpaid}>Manual resolution required</span>
+                          ) : app.link_outcome === 'linked' && app.match_kind === 'none' ? (
+                            <span className={adminUi.badgeDraft}>Signed in · online approval</span>
                           ) : app.link_outcome === 'created' && app.match_kind === 'none' ? (
                             <span className={adminUi.badgeDraft}>Safe new customer</span>
                           ) : (
@@ -464,6 +576,14 @@ export default function WebsiteSignupsPage() {
                         </td>
                         <td className="px-4 py-3 align-top">
                           <div className="flex flex-wrap justify-end gap-2">
+                            <button
+                              type="button"
+                              onClick={() => setSelected(app)}
+                              className={adminUi.btnGhost}
+                              aria-label={`View application for ${displayOrDash(app.submitted_name)}`}
+                            >
+                              View
+                            </button>
                             {app.status === 'pending' && approvable && (
                               <button
                                 type="button"
@@ -497,15 +617,6 @@ export default function WebsiteSignupsPage() {
                               >
                                 <X className="w-3.5 h-3.5" />
                                 Reject
-                              </button>
-                            )}
-                            {app.status !== 'pending' && (
-                              <button
-                                type="button"
-                                onClick={() => setSelected(app)}
-                                className={adminUi.btnGhost}
-                              >
-                                View
                               </button>
                             )}
                           </div>
@@ -548,23 +659,20 @@ export default function WebsiteSignupsPage() {
             )}
           </div>
 
+          {selected && (
           <aside className={`xl:col-span-2 ${adminUi.panel} p-5 space-y-4`} aria-label="Application details">
-            {!selected ? (
-              <div className="py-10 text-center">
-                <UserPlus className="w-8 h-8 text-[#C7C7C7] mx-auto mb-2" aria-hidden />
-                <p className="text-sm text-[#1A1A1A]">Select an application</p>
-                <p className={`${adminUi.meta} mt-1`}>
-                  Applicant details and identity-resolution metadata appear here.
-                </p>
-              </div>
-            ) : (
               <>
                 <div className="flex items-start justify-between gap-3">
                   <div>
                     <h2 className={adminUi.sectionTitle}>{displayOrDash(selected.submitted_name)}</h2>
                     <p className={adminUi.meta}>Application detail</p>
                   </div>
-                  <span className={STATUS_BADGE[selected.status]}>{selected.status}</span>
+                  <div className="flex items-center gap-2">
+                    <span className={STATUS_BADGE[selected.status]}>{selected.status}</span>
+                    <button type="button" onClick={() => setSelected(null)} className={adminUi.btnIcon} aria-label="Close application details">
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
                 </div>
 
                 <dl className="space-y-3 text-sm">
@@ -754,8 +862,8 @@ export default function WebsiteSignupsPage() {
                   </button>
                 )}
               </>
-            )}
           </aside>
+          )}
         </div>
       )}
 

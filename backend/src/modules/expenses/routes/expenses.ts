@@ -10,6 +10,7 @@ import {
   getExpenseSummary,
   processRecurringExpenses,
 } from '../services/expenseService';
+import { buildExpenseStatement, statementDayKey, statementWindow, type ExpenseBook } from '../../../services/booksStatements';
 
 const router = express.Router();
 
@@ -123,6 +124,35 @@ router.get('/', authenticateAdmin, async (req: AuthRequest, res) => {
   } catch (e) {
     console.error('List expenses:', e);
     res.status(500).json({ error: 'Failed to list expenses' });
+  }
+});
+
+router.get('/statement', authenticateAdmin, async (req: AuthRequest, res) => {
+  try {
+    const window = statementWindow(String(req.query.period || 'month'));
+    if (!window) return res.status(400).json({ error: 'Choose a statement period.' });
+    const rows = await Expense.find({
+      date: { $lte: window.end },
+      $or: [{ deleted_at: null }, { deleted_at: { $exists: false } }],
+    }).sort({ date: 1 }).lean();
+    const expenses: ExpenseBook[] = (rows as any[]).map((row) => ({
+      number: row.expense_number || '',
+      at: new Date(row.date || row.created_at || 0),
+      expenseType: row.expense_type || '',
+      description: row.description || '',
+      payee: row.vendor_name || '',
+      paymentMode: row.payment_mode || '',
+      amount: Number(row.amount) || 0,
+      recurring: Boolean(row.is_recurring),
+    }));
+    res.json({
+      period: String(req.query.period || 'month'),
+      generated_on: statementDayKey(new Date()),
+      ...buildExpenseStatement(expenses, window.start, window.end),
+    });
+  } catch (error) {
+    console.error('Expense statement error:', error);
+    res.status(500).json({ error: 'Failed to build the expense statement' });
   }
 });
 

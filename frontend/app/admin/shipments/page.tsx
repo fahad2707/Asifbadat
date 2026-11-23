@@ -10,6 +10,7 @@ import SearchableProductDropdown, { type ProductOption } from '@/components/admi
 import ShipmentDrawer from '@/components/admin/ShipmentDrawer';
 import { toastBarcodeNotFound, toastProductAdded } from '@/lib/barcode-feedback';
 import { openPdfFromResponse } from '@/lib/download-pdf';
+import { queryFromUrl } from '@/lib/queryFromUrl';
 import {
   formatShipmentDate,
   shipmentStatusBadgeClass,
@@ -65,7 +66,7 @@ export default function ShipmentsPage() {
   const [invoices, setInvoices] = useState<InvoiceOption[]>([]);
   const [previewNumber, setPreviewNumber] = useState('');
   const [printingId, setPrintingId] = useState<string | null>(null);
-  const [search, setSearch] = useState('');
+  const [search, setSearch] = useState(() => queryFromUrl());
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [bulkActing, setBulkActing] = useState(false);
 

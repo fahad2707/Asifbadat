@@ -47,6 +47,7 @@ export interface RawProductDoc {
   plu?: string;
   sku?: string;
   stock_quantity?: number;
+  damaged_quantity?: number;
   committed_quantity?: number;
   low_stock_threshold?: number;
   reorder_point?: number;
@@ -154,6 +155,7 @@ export function toStaffProduct(product: RawProductDoc) {
     ...pub,
     price: Number(product.price) || 0,
     stock_quantity: onHand,
+    damaged_quantity: nonNegative(product.damaged_quantity),
     committed_quantity: committed,
     available_quantity: Math.max(0, onHand - committed),
     cost_price: product.cost_price != null ? Number(product.cost_price) : null,

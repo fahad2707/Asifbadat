@@ -235,10 +235,10 @@ export default function ReceivePaymentLightbox({ isOpen, onClose, onRecorded, pr
                   <p className="text-xs text-gray-500 mt-1">This amount will be applied to the invoice below. For partial payment, enter the amount you received.</p>
                 )}
               </div>
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-2 items-start gap-3">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Payment date</label>
-                  <input type="date" value={paymentDate} onChange={(e) => { setPaymentDate(e.target.value); setDirty(true); }} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" />
+                  <input type="date" value={paymentDate} onChange={(e) => { setPaymentDate(e.target.value); setDirty(true); }} className="box-border h-10 w-full border border-gray-300 rounded-lg px-3 text-sm" />
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Payment method</label>
@@ -255,8 +255,9 @@ export default function ReceivePaymentLightbox({ isOpen, onClose, onRecorded, pr
                         setDirty(true);
                       }
                     }}
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                    className="box-border h-10 w-full border border-gray-300 rounded-lg px-3 text-sm"
                   >
+                    <option value="__add_new__">+ Add new payment method</option>
                     {paymentMethods.map((pm) => (
                       <option key={pm.id} value={pm.name}>{pm.name}</option>
                     ))}
@@ -269,7 +270,6 @@ export default function ReceivePaymentLightbox({ isOpen, onClose, onRecorded, pr
                         <option value="Other">Other</option>
                       </>
                     )}
-                    <option value="__add_new__">+ Add new payment method</option>
                   </select>
                   {showAddPaymentMethod && (
                     <div className="mt-2 flex gap-2">

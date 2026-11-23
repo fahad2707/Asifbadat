@@ -7,8 +7,9 @@ import PurchaseOrder from '../models/PurchaseOrder';
 import Product from '../models/Product';
 import Vendor from '../models/Vendor';
 import { authenticateAdmin, AuthRequest } from '../middleware/auth';
-import { buildBusinessDocumentPdf } from '../utils/businessDocPdf';
+import { buildInvoicePdfBuffer } from '../utils/invoicePdfLayout';
 import { sendPdfResponse } from '../utils/pdfHelpers';
+import { purchaseBooksStatement } from '../services/loadPurchaseBooksStatement';
 import { z } from 'zod';
 import { receivePurchaseOrder, PurchaseOrderReceiveError } from '../services/purchaseOrderReceiveService';
 import { postVendorLedger } from '../modules/vendors/services/vendorLedgerService';
@@ -131,42 +132,42 @@ function assertVendorInvoiceBuffer(buffer: Buffer, claimedMime: string, original
 }
 
 async function generatePOPDFBuffer(po: any): Promise<Buffer> {
-  const poNumber = po.po_number || po._id?.toString() || '—';
   const vendor = po.vendor_id as any;
-  const vendorName = vendor?.name ?? '—';
-  const vendorLines: string[] = [];
-  if (vendor?.phone) vendorLines.push(`Tel: ${vendor.phone}`);
-  if (vendor?.city || vendor?.state) vendorLines.push([vendor.city, vendor.state].filter(Boolean).join(', '));
-  const created = po.created_at
-    ? new Date(po.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
-    : '—';
-  const items = (po.items || []).map((item: any) => ({
-    name: item.product_name || 'Product',
-    qty: item.quantity_ordered ?? 0,
-    unitPrice: Number(item.unit_cost ?? 0),
-    lineTotal: Number(item.subtotal ?? (item.quantity_ordered ?? 0) * (item.unit_cost ?? 0)),
-  }));
-
-  return buildBusinessDocumentPdf({
-    title: 'PURCHASE ORDER',
-    subtitle: poNumber,
-    partyLabel: 'Vendor',
-    partyName: vendorName,
-    partyLines: vendorLines,
-    meta: [
-      { label: 'PO number', value: poNumber },
-      { label: 'Date', value: created },
-      { label: 'Status', value: String(po.status || '—') },
-      { label: 'Expected', value: po.expected_date ? new Date(po.expected_date).toLocaleDateString('en-US') : '—' },
-    ],
-    items,
-    totals: [
-      { label: 'Subtotal', value: `$${Number(po.subtotal ?? 0).toFixed(2)}` },
-      { label: 'Tax', value: `$${Number(po.tax_amount ?? 0).toFixed(2)}` },
-      { label: 'Total', value: `$${Number(po.total_amount ?? 0).toFixed(2)}`, bold: true },
-    ],
-    itemColumns: { showProductId: false },
+  const region = [vendor?.city, vendor?.state, vendor?.zip].filter(Boolean).join(' ');
+  const address = [vendor?.address, region].filter(Boolean).join(', ');
+  const items = (po.items || []).map((item: any) => {
+    const ordered = Number(item.quantity_ordered ?? 0);
+    const received = Number(item.quantity_received ?? 0);
+    return {
+      product_name: item.product_name || 'Product',
+      quantity: ordered,
+      price: Number(item.unit_cost ?? 0),
+      subtotal: Number(item.subtotal ?? ordered * Number(item.unit_cost ?? 0)),
+      sku: `Received ${received} of ${ordered}`,
+    };
   });
+  const paid = Number(po.amount_paid ?? 0);
+  return buildInvoicePdfBuffer(
+    {
+      invoice_number: po.po_number || po._id?.toString() || '—',
+      invoice_date: po.created_at,
+      due_date: po.expected_date,
+      document_kind: 'purchase_order',
+      party_heading: 'VENDOR',
+      customer_name: vendor?.name || '—',
+      customer_company: vendor?.contact_name || '',
+      customer_address: address,
+      customer_phone: vendor?.phone || '',
+      customer_email: vendor?.email || '',
+      terms: String(po.status || 'draft'),
+      payment_method: String(po.payment_status || 'unpaid'),
+      subtotal_amount: Number(po.subtotal ?? 0),
+      tax_amount: Number(po.tax_amount ?? 0),
+      total_amount: Number(po.total_amount ?? 0),
+      amount_paid: paid,
+    },
+    items
+  );
 }
 
 async function generatePONumber(): Promise<string> {
@@ -222,6 +223,17 @@ router.get('/', authenticateAdmin, async (req: AuthRequest, res) => {
   } catch (error) {
     console.error('List POs error:', error);
     res.status(500).json({ error: 'Failed to fetch purchase orders' });
+  }
+});
+
+router.get('/statement', authenticateAdmin, async (req: AuthRequest, res) => {
+  try {
+    const statement = await purchaseBooksStatement(String(req.query.period || 'month'));
+    if (!statement) return res.status(400).json({ error: 'Choose a statement period.' });
+    res.json(statement);
+  } catch (error) {
+    console.error('Purchase order statement error:', error);
+    res.status(500).json({ error: 'Failed to build the purchase order statement' });
   }
 });
 
@@ -391,7 +403,7 @@ router.post('/', authenticateAdmin, async (req: AuthRequest, res) => {
       created_at: po.created_at,
     });
   } catch (error: any) {
-    if (error instanceof z.ZodError) return res.status(400).json({ error: error.errors[0].message });
+    if (error instanceof z.ZodError) return res.status(400).json({ error: error.message });
     console.error('Create PO error:', error);
     res.status(500).json({ error: 'Failed to create purchase order' });
   }
@@ -447,7 +459,7 @@ router.put('/:id', authenticateAdmin, async (req: AuthRequest, res) => {
     }
     res.json({ id: po._id.toString(), ...po.toObject() });
   } catch (error: any) {
-    if (error instanceof z.ZodError) return res.status(400).json({ error: error.errors[0].message });
+    if (error instanceof z.ZodError) return res.status(400).json({ error: error.message });
     console.error('Update PO error:', error);
     res.status(500).json({ error: 'Failed to update purchase order' });
   }
@@ -503,7 +515,7 @@ router.post('/:id/receive', authenticateAdmin, async (req: AuthRequest, res) => 
     if (error instanceof PurchaseOrderReceiveError) {
       return res.status(error.status).json(error.body);
     }
-    if (error instanceof z.ZodError) return res.status(400).json({ error: error.errors[0].message });
+    if (error instanceof z.ZodError) return res.status(400).json({ error: error.message });
     console.error('Receive PO error:', error);
     res.status(500).json({ error: 'Failed to receive PO' });
   }
@@ -646,7 +658,7 @@ router.post('/:id/payments', authenticateAdmin, async (req: AuthRequest, res) =>
       payments: po.payments,
     });
   } catch (error: any) {
-    if (error instanceof z.ZodError) return res.status(400).json({ error: error.errors[0].message });
+    if (error instanceof z.ZodError) return res.status(400).json({ error: error.message });
     console.error('Record PO payment error:', error);
     res.status(500).json({ error: 'Failed to record payment' });
   }

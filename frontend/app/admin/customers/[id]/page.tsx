@@ -164,7 +164,7 @@ export default function Customer360Page() {
   const invoiceOpenBalance = saleInvoices
     .filter((i) => (i.payment_status || '').toLowerCase() !== 'paid')
     .reduce((s, i) => s + ((i.total_amount || 0) - (i.amount_paid || 0)), 0);
-  const netDue = Math.max(0, invoiceOpenBalance - approvedCreditTotal);
+  const accountPosition = Math.round((invoiceOpenBalance - approvedCreditTotal) * 100) / 100;
   const money = (n: number) => n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
   const lifetimeSpent = saleInvoices
@@ -300,7 +300,7 @@ export default function Customer360Page() {
                       toast.error('Name is required');
                       throw new Error('required');
                     }
-                    await saveCustomerFields({ name: next.trim() });
+                    await saveCustomerFields({ name: titleCaseWords(next.trim()) });
                   }}
                 />
               </div>
@@ -368,11 +368,10 @@ export default function Customer360Page() {
             </div>
             <div>
               <span className="text-[10px] font-bold text-slate-500 tracking-wider block uppercase">Open invoices</span>
-              <span className={`text-lg font-black block mt-1 ${moneyIn}`}>${money(invoiceOpenBalance)}</span>
+              <span className={`text-lg font-black block mt-1 ${moneyNet(accountPosition)}`}>{accountPosition < 0 ? '-' : ''}${money(Math.abs(accountPosition))}</span>
               {approvedCreditTotal > 0 && (
                 <span className="text-[10px] text-slate-500 block mt-0.5">
-                  <span className={moneyOut}>− ${money(approvedCreditTotal)}</span> credit memos →{' '}
-                  <span className={moneyNet(netDue)}>${money(netDue)} due</span>
+                  Invoices ${money(invoiceOpenBalance)} − credits ${money(approvedCreditTotal)}
                 </span>
               )}
             </div>
@@ -453,7 +452,7 @@ export default function Customer360Page() {
                       toast.error('Name is required');
                       throw new Error('required');
                     }
-                    await saveCustomerFields({ name: next.trim() });
+                    await saveCustomerFields({ name: titleCaseWords(next.trim()) });
                   }}
                 />
                 <EditableField
@@ -706,8 +705,8 @@ export default function Customer360Page() {
                 <span className={`font-mono font-bold ${moneyOut}`}>${money(approvedCreditTotal)}</span>
               </div>
               <div className="rounded-lg border border-white/5 bg-slate-950/40 px-3 py-2">
-                <span className="block text-[10px] uppercase tracking-wider text-slate-500">Closing / net due</span>
-                <span className={`font-mono font-bold ${moneyNet(netDue)}`}>${money(netDue)}</span>
+                <span className="block text-[10px] uppercase tracking-wider text-slate-500">Open balance</span>
+                <span className={`font-mono font-bold ${moneyNet(accountPosition)}`}>{accountPosition < 0 ? '-' : ''}${money(Math.abs(accountPosition))}</span>
               </div>
             </div>
 

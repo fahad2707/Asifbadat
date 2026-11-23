@@ -60,7 +60,7 @@ router.post('/', authenticateAdmin, async (req: AuthRequest, res) => {
       category_name: (populated as any).category_id?.name,
     });
   } catch (error: any) {
-    if (error instanceof z.ZodError) return res.status(400).json({ error: error.errors[0].message });
+    if (error instanceof z.ZodError) return res.status(400).json({ error: error.message });
     console.error('Create sub-category error:', error);
     res.status(500).json({ error: 'Failed to create sub-category' });
   }
@@ -80,7 +80,7 @@ router.put('/:id', authenticateAdmin, async (req: AuthRequest, res) => {
     if (!sub) return res.status(404).json({ error: 'Sub-category not found' });
     res.json({ id: sub._id.toString(), ...sub.toObject() });
   } catch (error: any) {
-    if (error instanceof z.ZodError) return res.status(400).json({ error: error.errors[0].message });
+    if (error instanceof z.ZodError) return res.status(400).json({ error: error.message });
     res.status(500).json({ error: 'Failed to update' });
   }
 });

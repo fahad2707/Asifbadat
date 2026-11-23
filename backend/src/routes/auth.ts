@@ -8,6 +8,7 @@ import Admin from '../models/Admin';
 import WebsiteSignupApplication, {
   WEBSITE_SIGNUP_STATUS_PENDING,
 } from '../models/WebsiteSignupApplication';
+import { recordAdminNotice } from '../services/adminNotice';
 import bcrypt from 'bcryptjs';
 import {
   linkOrCreateCustomerForNewUser,
@@ -20,6 +21,7 @@ import {
   pickLoginIdentifier,
 } from '../utils/onlineLoginCredentials';
 import { provisionOnlineLogin } from '../utils/provisionOnlineUser';
+import { ensureWebsiteSignupForUser } from '../services/ensureCustomerWebsiteSignup';
 import { logSecurityEvent } from '../utils/securityLog';
 import {
   loginLimiter,
@@ -147,7 +149,7 @@ router.post('/admin/login', loginLimiter, async (req, res) => {
     });
   } catch (error: any) {
     if (error instanceof z.ZodError) {
-      return res.status(400).json({ error: error.errors[0].message });
+      return res.status(400).json({ error: error.message });
     }
     console.error('Admin login error:', error);
     logSecurityEvent('api_error', req, { where: 'admin_login' });
@@ -227,6 +229,13 @@ router.post('/register', registerLimiter, async (req, res) => {
         phone,
         link,
       });
+      void recordAdminNotice({
+        kind: 'website_signup',
+        title: 'Website signup',
+        body: `${name || email} requested a website account`,
+        href: `/admin/website-signups?q=${encodeURIComponent(email || name || '')}`,
+        ref: String(user._id),
+      });
     } catch (appErr) {
       // Review-queue insert must not undo a completed User. Duplicate user_id means
       // the application already exists from a parallel request.
@@ -264,7 +273,7 @@ router.post('/register', registerLimiter, async (req, res) => {
     });
   } catch (error: any) {
     if (error instanceof z.ZodError) {
-      return res.status(400).json({ error: error.errors[0].message });
+      return res.status(400).json({ error: error.message });
     }
     if (isDuplicateKey(error)) {
       return res.status(400).json({ error: 'A user with this email or phone already exists' });
@@ -323,7 +332,7 @@ router.post('/verify-email', async (req, res) => {
     res.json({ message: 'Email verified. You can sign in.' });
   } catch (error: any) {
     if (error instanceof z.ZodError) {
-      return res.status(400).json({ error: error.errors[0].message });
+      return res.status(400).json({ error: error.message });
     }
     console.error('Verify email error:', error);
     res.status(500).json({ error: 'Verification failed' });
@@ -355,7 +364,7 @@ router.post('/forgot-password', forgotPasswordLimiter, async (req, res) => {
     res.json(generic);
   } catch (error: any) {
     if (error instanceof z.ZodError) {
-      return res.status(400).json({ error: error.errors[0].message });
+      return res.status(400).json({ error: error.message });
     }
     console.error('Forgot password error:', error);
     res.status(500).json({ error: 'Request failed' });
@@ -385,7 +394,7 @@ router.post('/reset-password', loginLimiter, async (req, res) => {
     res.json({ message: 'Password updated. You can sign in.' });
   } catch (error: any) {
     if (error instanceof z.ZodError) {
-      return res.status(400).json({ error: error.errors[0].message });
+      return res.status(400).json({ error: error.message });
     }
     console.error('Reset password error:', error);
     res.status(500).json({ error: 'Reset failed' });
@@ -450,6 +459,12 @@ router.post('/login', loginLimiter, async (req, res) => {
       return res.status(401).json({ error: 'Invalid credentials' });
     }
 
+    try {
+      await ensureWebsiteSignupForUser(user._id);
+    } catch (signupErr) {
+      console.error('Website signup sync on login:', signupErr);
+    }
+
     const secret = process.env.JWT_SECRET!;
     const expiresIn = process.env.JWT_EXPIRES_IN || '8h';
     const token = (jwt as any).sign(
@@ -471,7 +486,7 @@ router.post('/login', loginLimiter, async (req, res) => {
     });
   } catch (error: any) {
     if (error instanceof z.ZodError) {
-      return res.status(400).json({ error: error.errors[0].message });
+      return res.status(400).json({ error: error.message });
     }
     console.error('User login error:', error);
     res.status(500).json({ error: 'Login failed' });

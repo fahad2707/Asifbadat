@@ -10,6 +10,7 @@ import NumberInput from '@/components/admin/NumberInput';
 import { adminUi } from '@/lib/admin-ui';
 import { exportBankTransactionsToExcel } from '@/lib/export-bank-transactions-excel';
 import { printBankTransactions } from '@/lib/print-bank-transactions';
+import { queryFromUrl } from '@/lib/queryFromUrl';
 
 interface Receipt {
   id: string;
@@ -111,7 +112,7 @@ function ReceiptsPageInner() {
   const [bankAccounts, setBankAccounts] = useState<BankAccount[]>([]);
   const [overview, setOverview] = useState<Overview | null>(null);
   const [loading, setLoading] = useState(true);
-  const [search, setSearch] = useState('');
+  const [search, setSearch] = useState(() => queryFromUrl());
   const [showCreate, setShowCreate] = useState(false);
   const [depositTarget, setDepositTarget] = useState<{ kind: 'receipt' | 'expense'; id: string; label: string; amount: number }[] | null>(null);
   const [depositBank, setDepositBank] = useState('');

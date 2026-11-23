@@ -316,6 +316,16 @@ img {
   border-color: var(--admin-border);
 }
 
+.admin-workspace tbody td.text-emerald-600,
+.admin-workspace .text-emerald-600 {
+  color: #16a34a;
+}
+
+.admin-workspace tbody td.text-red-600,
+.admin-workspace .text-red-600 {
+  color: #dc2626;
+}
+
 .admin-workspace tbody tr:hover {
   background-color: var(--admin-bg);
 }

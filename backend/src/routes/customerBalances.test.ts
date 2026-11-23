@@ -280,6 +280,8 @@ test('GET /api/customers/balances keeps invoice AR in open_balance and nets cred
   assert.equal(byId[customerB].open_balance, 60);
   assert.equal(byId[customerB].credit_memo_total, 100);
   assert.equal(byId[customerB].net_due, 0);
+  assert.equal(byId[customerA].account_position, 210);
+  assert.equal(byId[customerB].account_position, -40);
 });
 
 test('customer balances route source uses derivedUnpaidReceivableMatch', () => {

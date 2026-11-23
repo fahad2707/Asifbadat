@@ -59,9 +59,31 @@ function userTestToken(): string {
   return jwt.sign({ userId: USER_ID, phone: '5550100' }, secret, { expiresIn: '8h' });
 }
 
+function chainableFind(value: unknown) {
+  return {
+    select() {
+      return this;
+    },
+    lean: async () => value,
+    then(onFulfilled: (v: unknown) => unknown, onRejected?: (e: unknown) => unknown) {
+      return Promise.resolve(value).then(onFulfilled, onRejected);
+    },
+  };
+}
+
+function stubQuietOnlineLogin() {
+  mock.method(User, 'findOne', async () => null);
+  mock.method(User, 'create', async (doc: Record<string, unknown>) => ({
+    _id: { toString: () => USER_ID },
+    ...doc,
+  }));
+  mock.method(WebsiteSignupApplication, 'findOne', () => chainableFind(null));
+}
+
 test('1 — admin POST customer starts pending and ignores body.account_status', async () => {
   assertNoMongoConnection();
-  mock.method(Customer, 'findOne', async () => null);
+  mock.method(Customer, 'findOne', () => chainableFind(null));
+  stubQuietOnlineLogin();
   let created: Record<string, unknown> | undefined;
   mock.method(Customer, 'create', async (doc: Record<string, unknown>) => {
     created = doc;
@@ -816,7 +838,24 @@ test('website-signups queue requires admin auth', async () => {
 
 test('admin-created CRM customers are not website_signup', async () => {
   assertNoMongoConnection();
-  mock.method(Customer, 'findOne', async () => null);
+  mock.method(Customer, 'findOne', (query: Record<string, unknown> = {}) => {
+    if (query.user_id) {
+      return chainableFind({
+        _id: new mongoose.Types.ObjectId(CUSTOMER_ID),
+        user_id: query.user_id,
+        name: 'CRM Only',
+        phone: '5550191',
+        account_status: ACCOUNT_STATUS_PENDING,
+      });
+    }
+    return chainableFind(null);
+  });
+  stubQuietOnlineLogin();
+  const applications: Record<string, unknown>[] = [];
+  mock.method(WebsiteSignupApplication, 'create', async (doc: Record<string, unknown>) => {
+    applications.push(doc);
+    return doc;
+  });
   let created: Record<string, unknown> | undefined;
   mock.method(Customer, 'create', async (doc: Record<string, unknown>) => {
     created = doc;
@@ -835,4 +874,9 @@ test('admin-created CRM customers are not website_signup', async () => {
   assert.equal(res.status, 201);
   assert.equal(created?.account_status, ACCOUNT_STATUS_PENDING);
   assert.notEqual(created?.website_signup, true);
+  assert.equal(applications.length, 1);
+  assert.equal(applications[0].status, WEBSITE_SIGNUP_STATUS_PENDING);
+  assert.equal(applications[0].link_outcome, 'linked');
+  assert.equal(applications[0].match_kind, 'none');
+  assert.equal(String(applications[0].customer_id), CUSTOMER_ID);
 });

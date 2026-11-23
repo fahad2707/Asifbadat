@@ -55,7 +55,7 @@ router.post('/', authenticateAdmin, async (req: AuthRequest, res) => {
     const b = bank as any;
     res.status(201).json({ id: b._id.toString(), name: b.name, account_number: b.account_number });
   } catch (error: any) {
-    if (error instanceof z.ZodError) return res.status(400).json({ error: error.errors[0].message });
+    if (error instanceof z.ZodError) return res.status(400).json({ error: error.message });
     res.status(500).json({ error: 'Failed to create bank account' });
   }
 });
@@ -74,7 +74,7 @@ router.put('/:id', authenticateAdmin, async (req: AuthRequest, res) => {
     const b = bank as any;
     res.json({ id: b._id.toString(), name: b.name, account_number: b.account_number, is_active: b.is_active !== false });
   } catch (error: any) {
-    if (error instanceof z.ZodError) return res.status(400).json({ error: error.errors[0].message });
+    if (error instanceof z.ZodError) return res.status(400).json({ error: error.message });
     res.status(500).json({ error: 'Failed to update' });
   }
 });

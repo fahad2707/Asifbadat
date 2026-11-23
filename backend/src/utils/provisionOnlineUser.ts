@@ -16,7 +16,10 @@ export type ProvisionedLogin = {
 };
 
 /** Create a website user for a CRM customer (idempotent if user_id already set). */
-export async function provisionOnlineLogin(customer: any): Promise<ProvisionedLogin | null> {
+export async function provisionOnlineLogin(
+  customer: any,
+  options?: { notify?: boolean }
+): Promise<ProvisionedLogin | null> {
   if (customer.user_id) return null;
 
   if (!customer.customer_code) {
@@ -55,7 +58,8 @@ export async function provisionOnlineLogin(customer: any): Promise<ProvisionedLo
 
   let emailed = false;
   const mailTo = String(customer.email || '').trim();
-  if (mailTo) {
+  const notify = options?.notify !== false;
+  if (notify && mailTo) {
     try {
       emailed = await sendOnlineAccessEmail(mailTo, {
         name: customer.name,
@@ -67,6 +71,31 @@ export async function provisionOnlineLogin(customer: any): Promise<ProvisionedLo
     }
   }
 
+  return {
+    username: String(customer.customer_code),
+    password,
+    emailed,
+    email: mailTo || null,
+  };
+}
+
+/** Login was created earlier (for example when the customer was added). Show the same credentials on approval. */
+export async function revealExistingOnlineLogin(customer: any): Promise<ProvisionedLogin | null> {
+  if (!customer?.user_id || !customer?.customer_code) return null;
+  const password = onlinePasswordFromName(String(customer.name || ''));
+  const mailTo = String(customer.email || '').trim();
+  let emailed = false;
+  if (mailTo) {
+    try {
+      emailed = await sendOnlineAccessEmail(mailTo, {
+        name: customer.name,
+        username: String(customer.customer_code),
+        password,
+      });
+    } catch (err) {
+      console.error('Online access email failed:', err);
+    }
+  }
   return {
     username: String(customer.customer_code),
     password,

@@ -97,6 +97,28 @@ export function invoiceTookStock(invoice: { inventory_applied?: unknown }): bool
   return invoice.inventory_applied !== false;
 }
 
+/** Goods are with the customer after store pickup or after a shipment is delivered. */
+export function invoiceGoodsWithCustomer(invoice: {
+  inventory_applied?: unknown;
+  fulfillment_method?: unknown;
+}): boolean {
+  if (invoice.inventory_applied === false) return false;
+  if (invoice.fulfillment_method === 'unfulfilled') return false;
+  return true;
+}
+
+/** Customer credits refund the sold merchandise. Sales tax stays with the house. */
+export function customerCreditLineAmounts(item: { quantity: number; unit_price: number; tax_percent?: number }) {
+  const quantity = Number(item.quantity) || 0;
+  const unitPrice = Number(item.unit_price) || 0;
+  const merchandise = Math.round(quantity * unitPrice * 100) / 100;
+  return {
+    tax_percent: Number(item.tax_percent) || 0,
+    tax_amount: 0,
+    total: merchandise,
+  };
+}
+
 export function shouldCreditInventory(opts: {
   reason: string;
   invoice: { inventory_applied?: unknown };
@@ -106,7 +128,7 @@ export function shouldCreditInventory(opts: {
 }
 
 export function validateCustomerReturnLines(opts: {
-  invoice: { customer_id?: unknown; invoice_type?: unknown; items?: InvoiceSaleLine[] };
+  invoice: { customer_id?: unknown; invoice_type?: unknown; inventory_applied?: unknown; fulfillment_method?: unknown; items?: InvoiceSaleLine[] };
   customerId: string;
   existingMemos: Array<{ items?: CreditAgainstInvoiceLine[] }>;
   requested: Array<{ product_id: string; quantity: number; unit_price?: number }>;
@@ -119,6 +141,9 @@ export function validateCustomerReturnLines(opts: {
   const invoiceCustomer = partyId(opts.invoice.customer_id);
   if (invoiceCustomer && invoiceCustomer !== opts.customerId) {
     throw new CreditMemoFromInvoiceError('That invoice does not belong to this customer');
+  }
+  if (!invoiceGoodsWithCustomer(opts.invoice)) {
+    throw new CreditMemoFromInvoiceError('Credit a return after the invoice is picked up or delivered');
   }
 
   const sold = soldQtyByLineKey(opts.invoice.items);
@@ -206,7 +231,7 @@ export async function loadCustomerInvoicesForCredit(customerId: string) {
     memosByInvoice.set(invId, list);
   }
 
-  return invoices.map((inv) => {
+  return invoices.filter((inv) => invoiceGoodsWithCustomer(inv)).map((inv) => {
     const invId = String(inv._id);
     const related = memosByInvoice.get(invId) || [];
     const sold = soldQtyByLineKey(inv.items as InvoiceSaleLine[]);
@@ -262,7 +287,7 @@ export async function buildValidatedCustomerCreditItems(opts: {
     status: { $in: ['DRAFT', ...CREDIT_MEMO_BALANCE_STATUSES] },
   }).lean();
   const validated = validateCustomerReturnLines({
-    invoice: invoice as { customer_id?: unknown; invoice_type?: unknown; items?: InvoiceSaleLine[] },
+    invoice: invoice as { customer_id?: unknown; invoice_type?: unknown; inventory_applied?: unknown; fulfillment_method?: unknown; items?: InvoiceSaleLine[] },
     customerId: opts.customerId,
     existingMemos,
     requested: opts.requested,

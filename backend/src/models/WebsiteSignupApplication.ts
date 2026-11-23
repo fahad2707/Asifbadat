@@ -43,6 +43,8 @@ export interface IWebsiteSignupApplication extends Document {
   reviewed_by?: mongoose.Types.ObjectId;
   reviewed_at?: Date;
   review_note?: string;
+  /** Set when an admin removes the row from the review queue. Customers and users stay. */
+  removed_at?: Date;
   created_at: Date;
   updated_at: Date;
 }
@@ -78,6 +80,7 @@ const WebsiteSignupApplicationSchema = new Schema<IWebsiteSignupApplication>(
     reviewed_by: { type: Schema.Types.ObjectId, ref: 'Admin' },
     reviewed_at: Date,
     review_note: String,
+    removed_at: Date,
   },
   { timestamps: { createdAt: 'created_at', updatedAt: 'updated_at' } }
 );

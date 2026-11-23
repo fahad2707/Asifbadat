@@ -86,6 +86,41 @@ export async function downloadPdfFromResponse(
   return true;
 }
 
+/** Print a PDF through a hidden frame so the browser print dialog opens on this page. */
+export async function printPdfFromResponse(data: BlobPart, contentType?: unknown): Promise<boolean> {
+  const blob = await toPdfBlob(data, contentType);
+  if (!blob) {
+    const buf = await toUint8Array(data);
+    reportNotPdf(buf, 'Could not print — file is not a valid PDF');
+    return false;
+  }
+  const url = window.URL.createObjectURL(blob);
+  const frame = document.createElement('iframe');
+  frame.setAttribute('title', 'Print document');
+  frame.style.position = 'fixed';
+  frame.style.right = '0';
+  frame.style.bottom = '0';
+  frame.style.width = '0';
+  frame.style.height = '0';
+  frame.style.border = '0';
+  frame.src = url;
+  document.body.appendChild(frame);
+  await new Promise<void>((resolve, reject) => {
+    const timer = window.setTimeout(() => reject(new Error('The document did not open for printing')), 20000);
+    frame.onload = () => {
+      window.clearTimeout(timer);
+      frame.contentWindow?.focus();
+      frame.contentWindow?.print();
+      resolve();
+    };
+  });
+  window.setTimeout(() => {
+    frame.remove();
+    window.URL.revokeObjectURL(url);
+  }, 60000);
+  return true;
+}
+
 /** Open the PDF in a new tab (for printing). */
 export async function openPdfFromResponse(data: BlobPart, contentType?: unknown): Promise<boolean> {
   const buf = await toUint8Array(data);

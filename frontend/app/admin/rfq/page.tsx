@@ -1,6 +1,8 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { queryFromUrl } from '@/lib/queryFromUrl';
+import { createPortal } from 'react-dom';
 import {
   Search,
   ClipboardList,
@@ -11,6 +13,7 @@ import {
   MessageSquare,
   Trash2,
   X,
+  Printer,
 } from 'lucide-react';
 import adminApi from '@/lib/admin-api';
 import { isAdminAuthRedirectError } from '@/lib/admin-auth-redirect';
@@ -42,6 +45,7 @@ interface RFQ {
   item_count: number;
   quotation_id: string | null;
   quotation_number?: string;
+  invoice_number?: string;
   source: 'website' | 'store' | 'manual';
   created_at: string;
   updated_at: string;
@@ -62,14 +66,28 @@ const STATUS_STYLES: Record<RFQ['status'], { label: string; cls: string }> = {
 
 const money = (n?: number | null) => (n != null && Number.isFinite(Number(n)) ? `$${Number(n).toFixed(2)}` : '—');
 
+function statusText(rfq: RFQ): string {
+  if (rfq.status === 'quoted' && rfq.quotation_number) return `Converted to ${rfq.quotation_number}`;
+  if (rfq.status === 'closed' && rfq.invoice_number) return `Converted to ${rfq.invoice_number}`;
+  return STATUS_STYLES[rfq.status].label;
+}
+
+function documentChain(rfq: RFQ): string {
+  const parts = [rfq.rfq_number];
+  if (rfq.quotation_number) parts.push(rfq.quotation_number);
+  if (rfq.invoice_number) parts.push(rfq.invoice_number);
+  else parts.push(STATUS_STYLES[rfq.status].label);
+  return parts.join(' → ');
+}
+
 const estimatedTotal = (rfq: RFQ) =>
   rfq.items.reduce((s, it) => s + (Number(it.price) || 0) * (Number(it.quantity) || 0), 0);
 
 export default function AdminRFQPage() {
   const [rfqs, setRfqs] = useState<RFQ[]>([]);
   const [loading, setLoading] = useState(true);
-  const [search, setSearch] = useState('');
-  const [statusFilter, setStatusFilter] = useState<'all' | RFQ['status']>('pending');
+  const [search, setSearch] = useState(() => queryFromUrl());
+  const [statusFilter, setStatusFilter] = useState<'all' | RFQ['status']>(queryFromUrl() ? 'all' : 'pending');
   const [selected, setSelected] = useState<RFQ | null>(null);
   const [summary, setSummary] = useState<{ pending: number; quoted: number }>({ pending: 0, quoted: 0 });
 
@@ -80,6 +98,9 @@ export default function AdminRFQPage() {
   const [quotationEditId, setQuotationEditId] = useState<string | null>(null);
   const [pendingRfqId, setPendingRfqId] = useState<string | null>(null);
   const [preparing, setPreparing] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [printRfqs, setPrintRfqs] = useState<RFQ[] | null>(null);
+  const [deletingSelected, setDeletingSelected] = useState(false);
 
   const fetchRfqs = async () => {
     try {
@@ -87,11 +108,17 @@ export default function AdminRFQPage() {
       if (search) params.search = search;
       if (statusFilter !== 'all') params.status = statusFilter;
       const res = await adminApi.get<RFQListResponse>('/rfq', { params });
-      setRfqs(res.data.rfqs || []);
+      const list = res.data.rfqs || [];
+      setRfqs(list);
       setSummary({
         pending: res.data.summary?.pending ?? 0,
         quoted: res.data.summary?.quoted ?? 0,
       });
+      const openId = queryFromUrl('open');
+      if (openId) {
+        const found = list.find((row) => row.id === openId);
+        if (found) setSelected(found);
+      }
     } catch (error) {
       if (isAdminAuthRedirectError(error)) return;
       toast.error(formatApiError(error, 'Failed to load quote requests'));
@@ -99,6 +126,10 @@ export default function AdminRFQPage() {
       setLoading(false);
     }
   };
+
+  useEffect(() => {
+    setSelectedIds(new Set());
+  }, [statusFilter]);
 
   useEffect(() => {
     const t = setTimeout(() => {
@@ -141,17 +172,6 @@ export default function AdminRFQPage() {
     }
   };
 
-  /** Open the quotation already linked to this RFQ (view / edit / re-share). */
-  const handleOpenQuotation = (rfq: RFQ) => {
-    if (!rfq.quotation_id) return;
-    setQuotationEditId(rfq.quotation_id);
-    setQuotationItems([]);
-    setQuotationCustomerId(null);
-    setPendingRfqId(null);
-    setSelected(null);
-    setQuotationOpen(true);
-  };
-
   const handleQuotationSaved = async (savedId?: string) => {
     if (pendingRfqId && savedId) {
       try {
@@ -183,6 +203,39 @@ export default function AdminRFQPage() {
     }
   };
 
+  const toggleSelected = (id: string) => {
+    setSelectedIds((cur) => {
+      const next = new Set(cur);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const handleDeleteSelected = async () => {
+    const chosen = rfqs.filter((rfq) => selectedIds.has(rfq.id));
+    if (!chosen.length || deletingSelected) return;
+    if (!confirm(`Delete ${chosen.length} quote request${chosen.length === 1 ? '' : 's'}? This cannot be undone.`)) return;
+    setDeletingSelected(true);
+    try {
+      const results = await Promise.allSettled(chosen.map((rfq) => adminApi.delete(`/rfq/${rfq.id}`)));
+      const failed = results.filter((result) => result.status === 'rejected').length;
+      if (failed) toast.error(`${chosen.length - failed} deleted. ${failed} could not be deleted.`);
+      else toast.success(chosen.length === 1 ? 'Quote request deleted' : `Deleted ${chosen.length} quote requests`);
+      setSelectedIds(new Set());
+      setSelected((cur) => (cur && chosen.some((rfq) => rfq.id === cur.id) ? null : cur));
+      fetchRfqs();
+    } finally {
+      setDeletingSelected(false);
+    }
+  };
+
+  const handlePrintSelected = () => {
+    const chosen = rfqs.filter((rfq) => selectedIds.has(rfq.id));
+    if (!chosen.length) return;
+    setPrintRfqs(chosen);
+  };
+
   const handleDelete = async (rfq: RFQ) => {
     if (!confirm(`Delete quote request ${rfq.rfq_number}? This cannot be undone.`)) return;
     try {
@@ -208,9 +261,6 @@ export default function AdminRFQPage() {
       <div className="flex items-start justify-between gap-4">
         <div>
           <h1 className={adminUi.pageTitle}>Quote requests</h1>
-          <p className={`${adminUi.meta} mt-1`}>
-            Requests submitted by website customers. Draft a quotation from any request — items and prices are filled in for you.
-          </p>
         </div>
       </div>
 
@@ -269,10 +319,36 @@ export default function AdminRFQPage() {
         </div>
       ) : (
         <div className={`${adminUi.panel} overflow-hidden`}>
+          {selectedIds.size > 0 && (
+            <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3 border-b border-[#E3E5E8] bg-[#FAFAFA]">
+              <p className="text-sm text-[#1A1A1A]">{selectedIds.size} selected</p>
+              <div className="flex items-center gap-2">
+                <button type="button" onClick={handlePrintSelected} className={adminUi.btnSecondary}>
+                  <Printer className="w-4 h-4" />
+                  Print
+                </button>
+                <button type="button" onClick={handleDeleteSelected} disabled={deletingSelected} className={`${adminUi.btnSecondary} text-[#C81916]`}>
+                  <Trash2 className="w-4 h-4" />
+                  {deletingSelected ? 'Deleting…' : 'Delete'}
+                </button>
+              </div>
+            </div>
+          )}
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead className={adminUi.tableHead}>
                 <tr>
+                  <th className="text-left px-4 py-3 font-medium w-10">
+                    <input
+                      type="checkbox"
+                      aria-label="Select all quote requests"
+                      checked={rfqs.length > 0 && rfqs.every((rfq) => selectedIds.has(rfq.id))}
+                      onChange={() => {
+                        const allChecked = rfqs.every((rfq) => selectedIds.has(rfq.id));
+                        setSelectedIds(allChecked ? new Set() : new Set(rfqs.map((rfq) => rfq.id)));
+                      }}
+                    />
+                  </th>
                   <th className="text-left px-4 py-3 font-medium">Received</th>
                   <th className="text-left px-4 py-3 font-medium">Request #</th>
                   <th className="text-left px-4 py-3 font-medium">Customer</th>
@@ -293,6 +369,14 @@ export default function AdminRFQPage() {
                       className={`border-t border-[#E3E5E8] ${adminUi.tableRowHover} cursor-pointer`}
                       onClick={() => setSelected(rfq)}
                     >
+                      <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
+                        <input
+                          type="checkbox"
+                          aria-label={`Select ${rfq.rfq_number}`}
+                          checked={selectedIds.has(rfq.id)}
+                          onChange={() => toggleSelected(rfq.id)}
+                        />
+                      </td>
                       <td className="px-4 py-3 text-[#1A1A1A] whitespace-nowrap">
                         {new Date(rfq.created_at).toLocaleDateString()}
                         <span className={`${adminUi.helper} block`}>
@@ -317,34 +401,25 @@ export default function AdminRFQPage() {
                       </td>
                       <td className="px-4 py-3 text-right text-[#1A1A1A] tabular-nums whitespace-nowrap">{money(estimatedTotal(rfq))}</td>
                       <td className="px-4 py-3">
-                        <span className={status.cls}>{status.label}</span>
-                        {rfq.quotation_number && (
-                          <span className={`${adminUi.helper} block mt-0.5`}>{rfq.quotation_number}</span>
-                        )}
+                        <span className={status.cls}>{statusText(rfq)}</span>
                       </td>
                       <td className="px-4 py-3 text-right whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
-                        {rfq.quotation_id ? (
-                          <button type="button" onClick={() => handleOpenQuotation(rfq)} className="text-[#0077C5] hover:underline">
-                            Open quotation
-                          </button>
-                        ) : (
-                          <button
-                            type="button"
-                            onClick={() => handleGenerateQuotation(rfq)}
-                            disabled={preparing}
-                            className="text-[#0077C5] hover:underline disabled:opacity-50"
-                          >
-                            Draft quotation
-                          </button>
-                        )}
-                        <span className="text-[#C7C7C7] mx-1.5">·</span>
                         <button type="button" onClick={() => setSelected(rfq)} className="text-[#6B6C72] hover:underline">
                           View
                         </button>
-                        <span className="text-[#C7C7C7] mx-1.5">·</span>
-                        <button type="button" onClick={() => handleDelete(rfq)} className="text-[#6B6C72] hover:text-[#C81916] hover:underline">
-                          Delete
-                        </button>
+                        {statusFilter === 'pending' && (
+                          <>
+                            <span className="text-[#C7C7C7] mx-1.5">·</span>
+                            <button
+                              type="button"
+                              onClick={() => handleGenerateQuotation(rfq)}
+                              disabled={preparing}
+                              className="text-[#0077C5] hover:underline disabled:opacity-50"
+                            >
+                              Draft a quotation
+                            </button>
+                          </>
+                        )}
                       </td>
                     </tr>
                   );
@@ -363,11 +438,12 @@ export default function AdminRFQPage() {
           >
             <div className="flex items-center justify-between p-5 border-b border-[#E3E5E8]">
               <div>
-                <h2 className="text-lg font-medium text-[#1A1A1A] flex items-center gap-2">
+                <p className="text-sm font-medium text-[#1A1A1A] tracking-wide">{documentChain(selected)}</p>
+                <h2 className="text-lg font-medium text-[#1A1A1A] flex items-center gap-2 mt-1">
                   <ClipboardList className="w-5 h-5 text-[#6B6C72]" />
                   Quote request {selected.rfq_number}
                   <span className={STATUS_STYLES[selected.status]?.cls || STATUS_STYLES.pending.cls}>
-                    {STATUS_STYLES[selected.status]?.label || 'Pending'}
+                    {statusText(selected)}
                   </span>
                 </h2>
                 <p className={`${adminUi.meta} mt-1`}>
@@ -481,20 +557,17 @@ export default function AdminRFQPage() {
                 Delete request
               </button>
               <div className="flex items-center gap-2">
-                {selected.quotation_id && (
-                  <button type="button" onClick={() => handleOpenQuotation(selected)} className={adminUi.btnSecondary}>
-                    Open {selected.quotation_number || 'quotation'}
+                {selected.status === 'pending' && (
+                  <button
+                    type="button"
+                    onClick={() => handleGenerateQuotation(selected)}
+                    disabled={preparing}
+                    className={`${adminUi.btnPrimary} disabled:opacity-50`}
+                  >
+                    <FileSignature className="w-4 h-4" />
+                    {preparing ? 'Preparing…' : 'Draft a quotation'}
                   </button>
                 )}
-                <button
-                  type="button"
-                  onClick={() => handleGenerateQuotation(selected)}
-                  disabled={preparing}
-                  className={`${adminUi.btnPrimary} disabled:opacity-50`}
-                >
-                  <FileSignature className="w-4 h-4" />
-                  {preparing ? 'Preparing…' : selected.quotation_id ? 'Draft new quotation' : 'Draft quotation'}
-                </button>
               </div>
             </div>
           </div>
@@ -511,6 +584,68 @@ export default function AdminRFQPage() {
         initialItems={quotationItems}
         numberOrigin="rfq"
       />
+
+      {printRfqs && typeof document !== 'undefined' && createPortal(
+        <div className="rfq-print-root fixed inset-0 z-[80] bg-white overflow-y-auto">
+          <style>{`
+            @media print {
+              body * { visibility: hidden !important; }
+              .rfq-print-root, .rfq-print-root * { visibility: visible !important; }
+              .rfq-print-root { position: absolute; inset: 0; background: white; }
+              .rfq-print-toolbar { display: none !important; }
+            }
+          `}</style>
+          <div className="rfq-print-toolbar sticky top-0 flex items-center justify-between gap-3 border-b border-[#E3E5E8] bg-white px-6 py-4">
+            <p className="text-sm text-[#1A1A1A]">{printRfqs.length} quote request{printRfqs.length === 1 ? '' : 's'}</p>
+            <div className="flex items-center gap-2">
+              <button type="button" onClick={() => window.print()} className={adminUi.btnPrimary}>
+                <Printer className="w-4 h-4" />
+                Print
+              </button>
+              <button type="button" onClick={() => setPrintRfqs(null)} className={adminUi.btnSecondary}>Close</button>
+            </div>
+          </div>
+          <div className="mx-auto max-w-3xl space-y-8 px-6 py-8">
+            {printRfqs.map((rfq) => (
+              <article key={rfq.id} className="break-after-page">
+                <p className="text-sm font-medium tracking-wide text-[#1A1A1A]">{documentChain(rfq)}</p>
+                <h2 className="mt-1 text-xl text-[#1A1A1A]">{rfq.rfq_number}</h2>
+                <p className="mt-2 text-sm text-[#1A1A1A]">
+                  {rfq.customer_name}
+                  {rfq.customer_company ? ` · ${rfq.customer_company}` : ''}
+                </p>
+                <p className="text-sm text-[#6B6C72]">
+                  {rfq.customer_phone}
+                  {rfq.customer_email ? ` · ${rfq.customer_email}` : ''}
+                </p>
+                <p className="mt-1 text-xs text-[#6B6C72]">{new Date(rfq.created_at).toLocaleString()}</p>
+                {rfq.customer_comments && (
+                  <p className="mt-3 text-sm text-[#1A1A1A] whitespace-pre-wrap">{rfq.customer_comments}</p>
+                )}
+                <table className="mt-4 w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-[#E3E5E8] text-left">
+                      <th className="py-2 font-medium">Product</th>
+                      <th className="py-2 font-medium text-right">Qty</th>
+                      <th className="py-2 font-medium text-right">Price</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {rfq.items.map((item, index) => (
+                      <tr key={`${item.product_name}-${index}`} className="border-b border-[#E3E5E8]">
+                        <td className="py-2">{item.product_name}</td>
+                        <td className="py-2 text-right tabular-nums">{item.quantity}</td>
+                        <td className="py-2 text-right tabular-nums">{money(item.price)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </article>
+            ))}
+          </div>
+        </div>,
+        document.body
+      )}
     </div>
   );
 }

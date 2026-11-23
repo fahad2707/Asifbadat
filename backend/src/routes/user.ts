@@ -1,12 +1,27 @@
 import express from 'express';
+import bcrypt from 'bcryptjs';
 import User from '../models/User';
+import Customer from '../models/Customer';
 import OnlineOrder from '../models/OnlineOrder';
+import RFQ from '../models/RFQ';
 import { authenticateUser, AuthRequest } from '../middleware/auth';
 import {
   getLinkedCustomerAccountStatus,
   isApprovedAccountStatus,
 } from '../utils/customerAccount';
 import { z } from 'zod';
+
+const BCRYPT_ROUNDS = 12;
+
+function displayPhone(value: unknown): string {
+  const phone = typeof value === 'string' ? value.trim() : '';
+  if (!phone || phone.startsWith('acct:')) return '';
+  return phone;
+}
+
+function escapeRegex(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
 
 const router = express.Router();
 
@@ -23,17 +38,33 @@ router.get('/profile', authenticateUser, async (req: AuthRequest, res) => {
     // account_approved remains the boolean commercial gate; account_status is for UI routing.
     const account_status = await getLinkedCustomerAccountStatus(req.userId);
     const account_approved = isApprovedAccountStatus(account_status);
+    const customer = await Customer.findOne({ user_id: user._id })
+      .select('name company phone email address city state zip shipping_address billing_address')
+      .lean();
+    const contactPhone = displayPhone(customer?.phone) || displayPhone(user.phone);
 
     res.json({
       id: user._id.toString(),
       phone: user.phone,
-      name: user.name || '',
-      email: user.email || '',
+      name: user.name || customer?.name || '',
+      email: user.email || customer?.email || '',
       loyalty_points: user.loyalty_points || 0,
       total_spent: user.total_spent || 0,
       created_at: user.created_at,
       account_approved,
       account_status,
+      contact: {
+        name: customer?.name || user.name || '',
+        company: customer?.company || '',
+        phone: contactPhone,
+        email: customer?.email || user.email || '',
+        address: customer?.address || '',
+        city: customer?.city || '',
+        state: customer?.state || '',
+        zip: customer?.zip || '',
+        shipping_address: customer?.shipping_address || customer?.address || '',
+        billing_address: customer?.billing_address || '',
+      },
     });
   } catch (error) {
     console.error('Get profile error:', error);
@@ -71,10 +102,81 @@ router.put('/profile', authenticateUser, async (req: AuthRequest, res) => {
     });
   } catch (error: any) {
     if (error instanceof z.ZodError) {
-      return res.status(400).json({ error: error.errors[0].message });
+      return res.status(400).json({ error: error.message });
     }
     console.error('Update profile error:', error);
     res.status(500).json({ error: 'Failed to update profile' });
+  }
+});
+
+router.put('/password', authenticateUser, async (req: AuthRequest, res) => {
+  try {
+    const schema = z.object({
+      current_password: z.string().min(1).max(128),
+      new_password: z.string().min(8).max(128),
+    });
+    const { current_password, new_password } = schema.parse(req.body);
+    const user = await User.findById(req.userId);
+    if (!user || !user.password_hash) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+    const matches = await bcrypt.compare(current_password, user.password_hash);
+    if (!matches) {
+      return res.status(400).json({ error: 'Current password is incorrect' });
+    }
+    user.password_hash = await bcrypt.hash(new_password, BCRYPT_ROUNDS);
+    user.password_reset_token_hash = undefined;
+    user.password_reset_expires = undefined;
+    await user.save();
+    res.json({ message: 'Password updated' });
+  } catch (error: any) {
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({ error: error.message });
+    }
+    console.error('Change password error:', error);
+    res.status(500).json({ error: 'Failed to update password' });
+  }
+});
+
+router.get('/rfqs', authenticateUser, async (req: AuthRequest, res) => {
+  try {
+    const user = await User.findById(req.userId).select('email phone').lean();
+    if (!user) return res.status(404).json({ error: 'User not found' });
+    const customer = await Customer.findOne({ user_id: user._id }).select('email phone').lean();
+    const clauses: Record<string, unknown>[] = [];
+    if (customer?._id) clauses.push({ customer_id: customer._id });
+    const emails = [customer?.email, user.email]
+      .map((value) => (typeof value === 'string' ? value.trim().toLowerCase() : ''))
+      .filter((value) => value.includes('@'));
+    for (const email of [...new Set(emails)]) {
+      clauses.push({ customer_email: { $regex: new RegExp(`^${escapeRegex(email)}$`, 'i') } });
+    }
+    const phones = [customer?.phone, user.phone]
+      .map((value) => displayPhone(value))
+      .filter(Boolean);
+    for (const phone of [...new Set(phones)]) {
+      clauses.push({ customer_phone: phone });
+    }
+    if (!clauses.length) {
+      return res.json({ rfqs: [] });
+    }
+    const rows = await RFQ.find({ $or: clauses }).sort({ created_at: -1 }).limit(100).lean();
+    res.json({
+      rfqs: rows.map((row) => ({
+        id: String(row._id),
+        rfq_number: row.rfq_number,
+        status: row.status,
+        created_at: row.created_at,
+        customer_comments: row.customer_comments || '',
+        items: (row.items || []).map((item) => ({
+          product_name: item.product_name,
+          quantity: item.quantity,
+        })),
+      })),
+    });
+  } catch (error) {
+    console.error('List customer RFQs error:', error);
+    res.status(500).json({ error: 'Failed to load quote requests' });
   }
 });
 
@@ -155,7 +257,7 @@ router.post('/redeem-points', authenticateUser, async (req: AuthRequest, res) =>
     });
   } catch (error: any) {
     if (error instanceof z.ZodError) {
-      return res.status(400).json({ error: error.errors[0].message });
+      return res.status(400).json({ error: error.message });
     }
     console.error('Redeem points error:', error);
     res.status(500).json({ error: 'Failed to redeem points' });

@@ -25,6 +25,7 @@ import {
   missingPosSaleIds,
   yearMonthKey,
 } from '../utils/posFinancialReporting';
+import { ensureWebsiteSignupsForLinkedCustomers } from '../services/ensureCustomerWebsiteSignup';
 import WebsiteSignupApplication, {
   WEBSITE_SIGNUP_STATUS_APPROVED,
   WEBSITE_SIGNUP_STATUS_PENDING,
@@ -87,6 +88,15 @@ const websiteSignupReviewBodySchema = z.object({
   review_note: z.string().trim().max(2000).optional(),
 });
 
+const websiteSignupBulkDeleteBodySchema = z.object({
+  ids: z.array(z.string().trim().min(1)).min(1).max(100),
+});
+
+/** Queue rows still shown to admins (not removed from the desk). */
+function websiteSignupVisibleFilter(): Record<string, unknown> {
+  return { $or: [{ removed_at: { $exists: false } }, { removed_at: null }] };
+}
+
 const websiteSignupResolveBindBodySchema = websiteSignupReviewBodySchema.extend({
   customer_id: z.string().trim().min(1).optional(),
   confirmed_same_person: z.literal(true),
@@ -140,11 +150,16 @@ function isSafeCreatedWebsiteSignupPath(app: {
   link_outcome?: unknown;
   match_kind?: unknown;
   customer_id?: unknown;
+  matched_customer_ids?: unknown;
 }): boolean {
-  return (
-    app.link_outcome === 'created' &&
+  const ownLinkedCustomer =
+    app.link_outcome === 'linked' &&
     app.match_kind === 'none' &&
-    Boolean(app.customer_id)
+    Boolean(app.customer_id) &&
+    (!Array.isArray(app.matched_customer_ids) || app.matched_customer_ids.length === 0);
+  return (
+    ownLinkedCustomer ||
+    (app.link_outcome === 'created' && app.match_kind === 'none' && Boolean(app.customer_id))
   );
 }
 
@@ -700,7 +715,12 @@ router.get('/website-signup-applications', authenticateAdmin, async (req: AuthRe
 
     const { page, limit } = pagination;
     const skip = (page - 1) * limit;
-    const query: Record<string, unknown> = {};
+    try {
+      await ensureWebsiteSignupsForLinkedCustomers();
+    } catch (syncErr) {
+      console.error('Sync linked customers into website signups:', syncErr);
+    }
+    const query: Record<string, unknown> = { ...websiteSignupVisibleFilter() };
     if (typeof statusFilter === 'string') {
       query.status = statusFilter;
     }
@@ -728,6 +748,43 @@ router.get('/website-signup-applications', authenticateAdmin, async (req: AuthRe
     res.status(500).json({ error: 'Failed to fetch website signup applications' });
   }
 });
+
+/**
+ * Remove website signup rows from the admin queue.
+ * Does not delete Customer or User records and does not change commercial access.
+ */
+router.post(
+  '/website-signup-applications/bulk-delete',
+  authenticateAdmin,
+  async (req: AuthRequest, res) => {
+    try {
+      const body = websiteSignupBulkDeleteBodySchema.parse(req.body ?? {});
+      const objectIds: mongoose.Types.ObjectId[] = [];
+      const seen = new Set<string>();
+      for (const raw of body.ids) {
+        if (!mongoose.Types.ObjectId.isValid(raw) || seen.has(raw)) continue;
+        seen.add(raw);
+        objectIds.push(new mongoose.Types.ObjectId(raw));
+      }
+      if (objectIds.length === 0) {
+        return res.status(400).json({ error: 'No valid application ids' });
+      }
+
+      const result = await WebsiteSignupApplication.updateMany(
+        { _id: { $in: objectIds }, ...websiteSignupVisibleFilter() },
+        { $set: { removed_at: new Date() } }
+      );
+      const deleted = Number(result.modifiedCount || 0);
+      return res.json({ deleted });
+    } catch (error: any) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: error.message || 'Invalid request' });
+      }
+      console.error('Bulk delete website signup applications error:', error);
+      res.status(500).json({ error: 'Failed to delete website signup applications' });
+    }
+  }
+);
 
 /**
  * Approve a pending website signup that used the safe new-Customer path only.
@@ -988,7 +1045,7 @@ router.post(
       });
     } catch (error: any) {
       if (error instanceof z.ZodError) {
-        return res.status(400).json({ error: error.errors[0]?.message || 'Invalid request' });
+        return res.status(400).json({ error: error.message || 'Invalid request' });
       }
       console.error('Approve website signup application error:', error);
       res.status(500).json({ error: 'Failed to approve website signup application' });
@@ -1206,7 +1263,7 @@ router.post(
       return res.json({ application: serializeWebsiteSignupApplication(rejectedApp) });
     } catch (error: any) {
       if (error instanceof z.ZodError) {
-        return res.status(400).json({ error: error.errors[0]?.message || 'Invalid request' });
+        return res.status(400).json({ error: error.message || 'Invalid request' });
       }
       console.error('Reject website signup application error:', error);
       res.status(500).json({ error: 'Failed to reject website signup application' });
@@ -1398,7 +1455,7 @@ router.post(
       return res.json({ application: serializeWebsiteSignupApplication(approvedApp) });
     } catch (error: any) {
       if (error instanceof z.ZodError) {
-        return res.status(400).json({ error: error.errors[0]?.message || 'Invalid request' });
+        return res.status(400).json({ error: error.message || 'Invalid request' });
       }
       console.error('Resolve-bind website signup application error:', error);
       res.status(500).json({ error: 'Failed to resolve website signup application' });

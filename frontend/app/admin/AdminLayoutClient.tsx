@@ -6,10 +6,8 @@ import Link from 'next/link';
 import {
   Users,
   ClipboardList,
-  Bell,
   Landmark,
   ChevronDown,
-  Search,
   ShoppingCart,
   Menu,
   X,
@@ -31,8 +29,9 @@ import {
   LogOut,
   type LucideIcon,
 } from 'lucide-react';
-import adminApi from '@/lib/admin-api';
 import { adminCreateTagClass, adminNavItemClass, adminNavUtilityClass, adminUi } from '@/lib/admin-ui';
+import { AdminDeskSearch } from '@/components/admin/AdminDeskSearch';
+import { AdminNoticeCenter, InboxBadge, useDeskInbox } from '@/components/admin/AdminNotices';
 
 function pathMatches(pathname: string | null | undefined, href: string): boolean {
   if (!pathname) return false;
@@ -57,7 +56,7 @@ function navGroupForRoute(
   if (creatingInvoice || pathname.startsWith('/admin/returns')) return 'inventory';
   if (receivingPayment) return 'sales';
   if (countingStock || pathname.startsWith('/admin/inventory')) return 'inventory';
-  if (pathname.startsWith('/admin/customers') || pathname.startsWith('/admin/invoices') || pathname.startsWith('/admin/rfq') || pathname.startsWith('/admin/orders') || pathname.startsWith('/admin/website-signups') || pathname.startsWith('/admin/shipments') || pathname.includes('/admin/credit-memos/customers') || pathname === '/admin/credit-memos') {
+  if (pathname.startsWith('/admin/customers') || pathname.startsWith('/admin/invoices') || pathname.startsWith('/admin/payments') || pathname.startsWith('/admin/rfq') || pathname.startsWith('/admin/orders') || pathname.startsWith('/admin/website-signups') || pathname.startsWith('/admin/shipments') || pathname.includes('/admin/credit-memos/customers') || pathname === '/admin/credit-memos') {
     return 'sales';
   }
   if (pathname.startsWith('/admin/products')) return 'catalog';
@@ -90,13 +89,15 @@ type NavLinkDef = {
   label: string;
   icon: LucideIcon;
   active: boolean;
+  badge?: number;
 };
 
-function SidebarLink({ href, label, icon: Icon, active }: NavLinkDef) {
+function SidebarLink({ href, label, icon: Icon, active, badge }: NavLinkDef) {
   return (
     <Link href={href} className={adminNavItemClass(active)}>
       <Icon className={`w-4 h-4 shrink-0 ${active ? 'text-[#1A1A1A]' : 'text-[#8D9096]'}`} />
       <span className="truncate">{label}</span>
+      <InboxBadge count={badge || 0} />
     </Link>
   );
 }
@@ -104,6 +105,7 @@ function SidebarLink({ href, label, icon: Icon, active }: NavLinkDef) {
 function headerContextLabel(pathname: string | null | undefined, creatingInvoice = false, catalogTab = '', receivingPayment = false, adjustingStock = false, countingStock = false): string {
   if (!pathname) return 'Express Distributors';
   if (pathname === '/admin/dashboard' || pathname.startsWith('/admin/dashboard/')) return 'Overview';
+  if (pathname === '/admin/payments' || pathname.startsWith('/admin/payments/')) return 'Receive payments';
   if ((pathname === '/admin/invoices' || pathname.startsWith('/admin/invoices/')) && receivingPayment) return 'Receive payments';
   if ((pathname === '/admin/invoices' || pathname.startsWith('/admin/invoices/')) && creatingInvoice) return 'Offline sales';
   if (pathname === '/admin/invoices' || pathname.startsWith('/admin/invoices/')) return 'Invoices & quotations';
@@ -113,6 +115,7 @@ function headerContextLabel(pathname: string | null | undefined, creatingInvoice
   if (pathname === '/admin/products/new') return 'Product';
   if (pathname === '/admin/products' || pathname.startsWith('/admin/products/')) return 'Products';
   if (pathname === '/admin/receipts' || pathname.startsWith('/admin/receipts/')) return 'Bank transactions';
+  if (pathname === '/admin/inventory/damaged') return 'Damaged returns';
   if ((pathname === '/admin/inventory' || pathname.startsWith('/admin/inventory/')) && countingStock) return 'Physical count';
   if ((pathname === '/admin/inventory' || pathname.startsWith('/admin/inventory/')) && adjustingStock) return 'Stock adjustments';
   if (pathname === '/admin/inventory' || pathname.startsWith('/admin/inventory/')) return 'Inventory';
@@ -135,13 +138,6 @@ function headerContextLabel(pathname: string | null | undefined, creatingInvoice
   return 'Express Distributors';
 }
 
-interface SearchResult {
-  type: 'Customer' | 'Product' | 'Invoice' | 'Order';
-  title: string;
-  subtitle: string;
-  url: string;
-}
-
 export default function AdminLayoutClient({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
@@ -159,13 +155,11 @@ export default function AdminLayoutClient({ children }: { children: React.ReactN
 
   // Search & Command Palette States
   const [globalSearch, setGlobalSearch] = useState('');
-  const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
-  const [searching, setSearching] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [searchFocused, setSearchFocused] = useState(false);
-  const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
+  const inbox = useDeskInbox(pathname !== '/admin/login');
 
   const searchRef = useRef<HTMLDivElement>(null);
   const closeMobileNav = () => setMobileNavOpen(false);
@@ -201,6 +195,8 @@ export default function AdminLayoutClient({ children }: { children: React.ReactN
   // Handle outside click for search dropdown
   useEffect(() => {
     const clickOutside = (e: MouseEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (target?.closest('[data-desk-search-panel]')) return;
       if (searchRef.current && !searchRef.current.contains(e.target as Node)) {
         setSearchFocused(false);
       }
@@ -208,69 +204,6 @@ export default function AdminLayoutClient({ children }: { children: React.ReactN
     document.addEventListener('mousedown', clickOutside);
     return () => document.removeEventListener('mousedown', clickOutside);
   }, []);
-
-  // Global search implementation
-  useEffect(() => {
-    if (!globalSearch.trim()) {
-      setSearchResults([]);
-      return;
-    }
-    const delayDebounce = setTimeout(async () => {
-      setSearching(true);
-      try {
-        const query = globalSearch.trim();
-        const results: SearchResult[] = [];
-
-        // Dynamic parallel fetches
-        const [custRes, prodRes, invRes] = await Promise.allSettled([
-          adminApi.get('/customers', { params: { search: query, limit: 3 } }),
-          adminApi.get('/products', { params: { search: query, limit: 3 } }),
-          adminApi.get('/invoices', { params: { search: query, limit: 3 } }),
-        ]);
-
-        if (custRes.status === 'fulfilled' && Array.isArray(custRes.value.data)) {
-          custRes.value.data.forEach((c: any) => {
-            results.push({
-              type: 'Customer',
-              title: c.name,
-              subtitle: c.company || c.phone,
-              url: `/admin/customers/${c.id}`,
-            });
-          });
-        }
-
-        if (prodRes.status === 'fulfilled' && Array.isArray(prodRes.value.data?.products)) {
-          prodRes.value.data.products.forEach((p: any) => {
-            results.push({
-              type: 'Product',
-              title: p.name,
-              subtitle: `SKU: ${p.sku || 'N/A'} | Stock: ${p.stock_quantity}`,
-              url: `/admin/products?search=${encodeURIComponent(p.name)}`,
-            });
-          });
-        }
-
-        if (invRes.status === 'fulfilled' && Array.isArray(invRes.value.data)) {
-          invRes.value.data.forEach((i: any) => {
-            results.push({
-              type: 'Invoice',
-              title: `Inv: ${i.invoice_number}`,
-              subtitle: `${i.customer_name} | Total: $${i.total_amount}`,
-              url: `/admin/invoices?search=${encodeURIComponent(i.invoice_number)}`,
-            });
-          });
-        }
-
-        setSearchResults(results);
-      } catch (err) {
-        console.error('Universal Search Error:', err);
-      } finally {
-        setSearching(false);
-      }
-    }, 300);
-
-    return () => clearTimeout(delayDebounce);
-  }, [globalSearch]);
 
   // Auth checking hooks
   useEffect(() => {
@@ -346,10 +279,10 @@ export default function AdminLayoutClient({ children }: { children: React.ReactN
       items: [
         { href: '/admin/customers', label: 'Customers', icon: Users, active: pathMatches(pathname, '/admin/customers') },
         { href: '/admin/invoices', label: 'Invoices & quotations', icon: FileText, active: pathMatches(pathname, '/admin/invoices') && !creatingInvoice && !receivingPayment },
-        { href: '/admin/rfq', label: 'RFQ', icon: ClipboardList, active: pathMatches(pathname, '/admin/rfq') },
-        { href: '/admin/orders', label: 'Online sales', icon: ShoppingCart, active: pathMatches(pathname, '/admin/orders') },
-        { href: '/admin/website-signups', label: 'Website signups', icon: UserPlus, active: pathMatches(pathname, '/admin/website-signups') },
-        { href: '/admin/invoices?receive=1', label: 'Receive payments', icon: CreditCard, active: receivingPayment },
+        { href: '/admin/rfq', label: 'RFQ', icon: ClipboardList, active: pathMatches(pathname, '/admin/rfq'), badge: inbox.rfq },
+        { href: '/admin/orders', label: 'Online sales', icon: ShoppingCart, active: pathMatches(pathname, '/admin/orders'), badge: inbox.online_orders },
+        { href: '/admin/website-signups', label: 'Website signups', icon: UserPlus, active: pathMatches(pathname, '/admin/website-signups'), badge: inbox.website_signups },
+        { href: '/admin/payments', label: 'Receive payments', icon: CreditCard, active: pathMatches(pathname, '/admin/payments') },
         { href: '/admin/credit-memos/customers', label: 'Customer credit memos', icon: RotateCcw, active: !!pathname?.includes('/admin/credit-memos/customers') || pathname === '/admin/credit-memos' },
         { href: '/admin/shipments', label: 'Shipments', icon: Truck, active: pathMatches(pathname, '/admin/shipments') },
       ],
@@ -376,7 +309,8 @@ export default function AdminLayoutClient({ children }: { children: React.ReactN
       slug: 'inventory',
       label: 'Inventory',
       items: [
-        { href: '/admin/inventory', label: 'Stock on hand', icon: Boxes, active: pathMatches(pathname, '/admin/inventory') && !adjustingStock && !countingStock },
+        { href: '/admin/inventory', label: 'Stock on hand', icon: Boxes, active: pathname === '/admin/inventory' && !adjustingStock && !countingStock },
+        { href: '/admin/inventory/damaged', label: 'Damaged returns', icon: RotateCcw, active: pathname === '/admin/inventory/damaged' },
         { href: '/admin/inventory?count=1', label: 'Physical count', icon: ClipboardList, active: countingStock },
         { href: '/admin/invoices?create=invoice', label: 'Offline sales', icon: ShoppingCart, active: creatingInvoice },
         { href: '/admin/returns', label: 'POS returns', icon: RotateCcw, active: pathMatches(pathname, '/admin/returns') },
@@ -410,44 +344,19 @@ export default function AdminLayoutClient({ children }: { children: React.ReactN
     <div className={`h-dvh min-h-0 overflow-hidden flex font-sans ${adminUi.app}`}>
       {paletteOpen && (
         <div className="fixed inset-0 z-50 flex items-start justify-center pt-[15dvh] px-4 bg-[rgba(26,26,26,0.45)]">
-          <div className={`w-full max-w-lg overflow-hidden ${adminUi.overlay}`}>
+          <div className={`w-full max-w-lg overflow-visible ${adminUi.overlay}`}>
             <div className="p-3 border-b border-[#E3E5E8] flex items-center gap-3">
-              <Search className="w-4 h-4 text-[#8D9096]" />
-              <input
-                type="text"
-                placeholder="Navigate. Find transactions, contacts, help, reports, and more."
-                className="bg-transparent text-[#1A1A1A] border-0 focus:ring-0 outline-none w-full text-sm placeholder-[#8D9096]"
-                autoFocus
+              <AdminDeskSearch
                 value={globalSearch}
-                onChange={(e) => setGlobalSearch(e.target.value)}
+                onChange={setGlobalSearch}
+                focused
+                onFocus={() => setSearchFocused(true)}
+                onNavigate={() => { setPaletteOpen(false); setSearchFocused(false); }}
               />
-              <span className={`${adminUi.badge} font-mono`}>ESC</span>
+              <span className={`${adminUi.badge} font-mono shrink-0`}>ESC</span>
             </div>
             <div className="max-h-[350px] overflow-y-auto p-2 space-y-1">
-              {globalSearch.trim() ? (
-                <>
-                  <p className={`${adminUi.navSection} px-2 py-1`}>Search results</p>
-                  {searching ? (
-                    <div className={`py-8 text-center ${adminUi.meta}`}>Searching…</div>
-                  ) : searchResults.length > 0 ? (
-                    searchResults.map((r, idx) => (
-                      <button
-                        key={idx}
-                        onClick={() => { router.push(r.url); setPaletteOpen(false); setGlobalSearch(''); }}
-                        className="w-full flex items-center justify-between p-2 rounded-md hover:bg-[#F4F5F8] text-left"
-                      >
-                        <div>
-                          <p className="text-sm font-medium text-[#1A1A1A]">{r.title}</p>
-                          <p className={adminUi.helper}>{r.subtitle}</p>
-                        </div>
-                        <span className={adminUi.badge}>{r.type}</span>
-                      </button>
-                    ))
-                  ) : (
-                    <div className={`py-8 text-center ${adminUi.helper}`}>No matches found. Try again.</div>
-                  )}
-                </>
-              ) : (
+              {globalSearch.trim() ? null : (
                 <>
                   <p className={`${adminUi.navSection} px-2 py-1`}>Create</p>
                   {paletteActions.map((act) => {
@@ -620,62 +529,24 @@ export default function AdminLayoutClient({ children }: { children: React.ReactN
             Express Distributors Inc
           </p>
 
-          <div ref={searchRef} className="relative z-40 flex-1 min-w-0 max-w-2xl mx-auto">
-            <div className="relative">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#8D9096]" />
-              <input
-                type="text"
-                placeholder="Navigate. Find transactions, contacts, help, reports, and more."
-                value={globalSearch}
-                onFocus={() => setSearchFocused(true)}
-                onChange={(e) => setGlobalSearch(e.target.value)}
-                className={`${adminUi.input} pl-9 pr-4`}
-              />
-            </div>
-            {searchFocused && (globalSearch.trim() || searchResults.length > 0) && (
-              <div className={`absolute top-full left-0 right-0 mt-2 p-2 max-h-[300px] overflow-y-auto space-y-1 ${adminUi.overlay}`}>
-                {searching ? (
-                  <div className={`p-4 text-center ${adminUi.meta}`}>Searching...</div>
-                ) : searchResults.length > 0 ? (
-                  searchResults.map((r, i) => (
-                    <button
-                      key={i}
-                      type="button"
-                      onClick={() => { router.push(r.url); setSearchFocused(false); setGlobalSearch(''); }}
-                      className="w-full p-2 hover:bg-[#F4F5F8] rounded-md flex items-center justify-between text-left"
-                    >
-                      <div>
-                        <p className="text-sm font-medium text-[#1A1A1A]">{r.title}</p>
-                        <p className={adminUi.helper}>{r.subtitle}</p>
-                      </div>
-                      <span className={adminUi.badge}>{r.type}</span>
-                    </button>
-                  ))
-                ) : (
-                  <p className={`text-center py-4 ${adminUi.helper}`}>No results found for &ldquo;{globalSearch}&rdquo;</p>
-                )}
-              </div>
-            )}
+          <div className="relative z-40 flex-1 min-w-0 max-w-2xl mx-auto">
+            <AdminDeskSearch
+              value={globalSearch}
+              onChange={setGlobalSearch}
+              focused={searchFocused}
+              onFocus={() => setSearchFocused(true)}
+              onNavigate={() => setSearchFocused(false)}
+              onBlurContainer={(node) => {
+                searchRef.current = node;
+              }}
+            />
           </div>
 
           <div className="ml-auto flex items-center gap-1 shrink-0">
             <button type="button" className={adminUi.btnIcon} aria-label="Help">
               <HelpCircle className="w-4 h-4" />
             </button>
-            <div className="relative">
-              <button type="button" onClick={() => setNotificationsOpen(!notificationsOpen)} className={adminUi.btnIcon} aria-label="Notifications">
-                <Bell className="w-4 h-4" />
-              </button>
-              {notificationsOpen && (
-                <>
-                  <div className="fixed inset-0 z-40" onClick={() => setNotificationsOpen(false)} />
-                  <div className={`absolute right-0 top-full mt-2 w-72 max-w-[calc(100vw-2rem)] p-3 z-50 space-y-2 ${adminUi.overlay}`}>
-                    <p className={adminUi.navSection}>Notifications</p>
-                    <p className={adminUi.helper}>No notifications</p>
-                  </div>
-                </>
-              )}
-            </div>
+            <AdminNoticeCenter />
             <Link href="/admin/settings" className={adminUi.btnIcon} aria-label="Settings">
               <Settings className="w-4 h-4" />
             </Link>

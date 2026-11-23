@@ -56,9 +56,9 @@ export const adminUi = {
   label: 'text-xs font-medium text-[#6B6C72]',
 
   btnPrimary:
-    'inline-flex items-center justify-center gap-2 px-4 py-2 rounded-full bg-black text-white text-sm font-medium hover:bg-[#2C2C2C] focus:outline-none focus-visible:ring-2 focus-visible:ring-black',
+    'inline-flex items-center justify-center gap-2 px-4 py-2 rounded-full bg-black text-white text-sm font-medium whitespace-nowrap hover:bg-[#2C2C2C] focus:outline-none focus-visible:ring-2 focus-visible:ring-black',
   btnSecondary:
-    'inline-flex items-center justify-center gap-2 px-4 py-2 rounded-full bg-white text-[#393A3D] text-sm font-medium border border-[#C7C7C7] hover:bg-[#F4F5F8] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#C7C7C7]',
+    'inline-flex items-center justify-center gap-2 px-4 py-2 rounded-full bg-white text-[#393A3D] text-sm font-medium whitespace-nowrap border border-[#C7C7C7] hover:bg-[#F4F5F8] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#C7C7C7]',
   btnGhost:
     'inline-flex items-center gap-2 px-3 py-2 rounded-md text-[#6B6C72] text-sm font-medium hover:text-[#1A1A1A] hover:bg-[#F4F5F8] focus:outline-none',
   btnDanger:
@@ -70,6 +70,10 @@ export const adminUi = {
     'w-full bg-[#F4F5F8] border-0 rounded-full px-3 py-2 text-sm text-[#1A1A1A] placeholder-[#8D9096] focus:outline-none focus:ring-2 focus:ring-[#0077C5]',
   field:
     'w-full bg-white border border-[#C7C7C7] rounded-md px-3 py-2 text-sm text-[#1A1A1A] placeholder-[#8D9096] focus:outline-none focus:ring-2 focus:ring-[#0077C5] focus:border-[#0077C5]',
+  filter:
+    'border border-[#E2E8F0] rounded-lg bg-white px-3 py-1.5 text-xs text-[#0F172A] w-auto shrink-0 focus:outline-none focus:ring-1 focus:ring-[#0077C5] focus:border-[#0077C5]',
+  filterSearch:
+    'w-full border border-[#E2E8F0] rounded-lg bg-white py-1.5 pl-9 pr-3 text-xs text-[#0F172A] placeholder-[#8D9096] focus:outline-none focus:ring-1 focus:ring-[#0077C5] focus:border-[#0077C5]',
 
   tableHead: 'bg-[#FAFAFA] text-[11px] font-semibold text-[#6B6C72] uppercase border-b border-[#E3E5E8]',
   tableCell: 'px-3 py-3 text-sm text-[#1A1A1A] border-b border-[#E3E5E8]',

@@ -8,6 +8,14 @@ export interface ICreditMemoItem {
   tax_percent: number;
   tax_amount: number;
   total: number;
+  /** Product cost rate used to find the purchase. Null when the product has no cost rate. */
+  purchase_rate?: number | null;
+  purchase_match?: 'rate' | 'none';
+  purchase_vendor_id?: mongoose.Types.ObjectId;
+  purchase_vendor_name?: string;
+  purchase_po_id?: mongoose.Types.ObjectId;
+  purchase_po_number?: string;
+  purchase_unit_cost?: number;
 }
 
 export interface ICreditMemo extends Document {
@@ -49,6 +57,13 @@ const CreditMemoItemSchema = new Schema<ICreditMemoItem>(
     tax_percent: { type: Number, default: 0 },
     tax_amount: { type: Number, default: 0 },
     total: { type: Number, required: true },
+    purchase_rate: { type: Number, default: undefined },
+    purchase_match: { type: String, enum: ['rate', 'none'], default: undefined },
+    purchase_vendor_id: { type: Schema.Types.ObjectId, ref: 'Vendor' },
+    purchase_vendor_name: String,
+    purchase_po_id: { type: Schema.Types.ObjectId, ref: 'PurchaseOrder' },
+    purchase_po_number: String,
+    purchase_unit_cost: Number,
   },
   { _id: true }
 );

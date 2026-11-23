@@ -11,6 +11,8 @@ import { DOCUMENT_TYPE_INVOICE, DOCUMENT_TYPE_QUOTATION } from '../../utils/docu
 import {
   creditedQtyByLineKey,
   invoiceLineKey,
+  customerCreditLineAmounts,
+  invoiceGoodsWithCustomer,
   remainingReturnQty,
   shouldCreditInventory,
   soldQtyByLineKey,
@@ -144,6 +146,36 @@ test('incomplete snapshot zero is currently indistinguishable from a confirmed z
   assert.equal(confirmedNonTaxable, 0);
   assert.equal(incompleteSnapshot, 0);
   assert.equal(incompleteSnapshot, confirmedNonTaxable);
+});
+
+test('a full return credits the merchandise and leaves the sales tax', () => {
+  const line = customerCreditLineAmounts({ quantity: 5, unit_price: 40, tax_percent: 18 });
+  assert.equal(line.tax_percent, 18);
+  assert.equal(line.tax_amount, 0);
+  assert.equal(line.total, 200);
+});
+
+test('an invoice is creditable only after pickup or delivery', () => {
+  assert.equal(invoiceGoodsWithCustomer({ inventory_applied: false, fulfillment_method: 'unfulfilled' }), false);
+  assert.equal(invoiceGoodsWithCustomer({ inventory_applied: false, fulfillment_method: 'shipment' }), false);
+  assert.equal(invoiceGoodsWithCustomer({ inventory_applied: true, fulfillment_method: 'store_pickup' }), true);
+  assert.equal(invoiceGoodsWithCustomer({ inventory_applied: true, fulfillment_method: 'shipment' }), true);
+  assert.throws(
+    () =>
+      validateCustomerReturnLines({
+        invoice: {
+          customer_id: CUSTOMER,
+          invoice_type: DOCUMENT_TYPE_INVOICE,
+          inventory_applied: false,
+          fulfillment_method: 'unfulfilled',
+          items: [{ product_id: PRODUCT_A, product_name: 'Photoframe', quantity: 5, price: 40, tax_amount: 36 }],
+        },
+        customerId: CUSTOMER,
+        existingMemos: [],
+        requested: [{ product_id: PRODUCT_A, quantity: 5, unit_price: 40 }],
+      }),
+    /picked up or delivered/
+  );
 });
 
 test('stock comes back only when the invoice already took stock and the reason is a return', () => {

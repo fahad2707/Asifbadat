@@ -2,10 +2,10 @@
 
 import { useEffect, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
-import { Plus, Search, X, Trash2, Download } from 'lucide-react';
+import { Plus, Search, X, Trash2, Download, Printer, ChevronLeft, ChevronRight } from 'lucide-react';
 import adminApi from '@/lib/admin-api';
 import toast from 'react-hot-toast';
-import { downloadPdfFromResponse, openPdfFromResponse } from '@/lib/download-pdf';
+import { downloadPdfFromResponse, openPdfFromResponse, printPdfFromResponse } from '@/lib/download-pdf';
 import SearchableProductDropdown from '@/components/admin/SearchableProductDropdown';
 import NumberInput from '@/components/admin/NumberInput';
 import { adminUi } from '@/lib/admin-ui';
@@ -14,7 +14,8 @@ import { toastBarcodeNotFound, toastProductAdded } from '@/lib/barcode-feedback'
 
 import CreditMemoDrawer from '@/components/admin/CreditMemoDrawer';
 import CustomerCreditMemoLightbox from '@/components/admin/CustomerCreditMemoLightbox';
-import VendorCreditMemoLightbox from '@/components/admin/VendorCreditMemoLightbox';
+import CreditMemoStatement, { CREDIT_PERIODS } from '@/components/admin/CreditMemoStatement';
+import VendorCreditMemoLightbox, { type VendorCreditSeed } from '@/components/admin/VendorCreditMemoLightbox';
 import { moneyOut, moneyPlain } from '@/lib/moneyTone';
 
 interface CreditMemoItem {
@@ -25,6 +26,22 @@ interface CreditMemoItem {
   tax_percent?: number;
   tax_amount?: number;
   total?: number;
+  purchase_match?: string;
+  purchase_rate?: number | null;
+  purchase_vendor_name?: string;
+  purchase_po_number?: string;
+  purchase_unit_cost?: number;
+}
+
+function damagedSourceLabel(items?: CreditMemoItem[]): string | null {
+  if (!items?.length) return null;
+  const matched = items.filter((item) => item.purchase_match === 'rate' && item.purchase_vendor_name);
+  if (matched.length) {
+    return [...new Set(matched.map((item) => `${item.purchase_vendor_name} · ${item.purchase_po_number || 'PO'} · $${Number(item.purchase_unit_cost || 0).toFixed(2)}`))].join(', ');
+  }
+  if (!items.some((item) => item.purchase_match)) return null;
+  const rate = items.find((item) => item.purchase_rate != null)?.purchase_rate;
+  return rate != null ? `No purchase at $${Number(rate).toFixed(2)}` : 'Supplier not on file';
 }
 
 interface CreditMemo {
@@ -53,6 +70,7 @@ interface CreditMemo {
 
 const REASONS = ['DAMAGED', 'RATE_DIFFERENCE', 'RETURN', 'SCHEME', 'OTHER'] as const;
 const STATUS_OPTIONS = ['', 'DRAFT', 'APPROVED', 'ADJUSTED', 'CLOSED', 'CANCELLED'];
+const PAGE_SIZE = 25;
 
 export default function CreditMemosApp({ lockedType }: { lockedType: 'VENDOR' | 'CUSTOMER' }) {
   const searchParams = useSearchParams();
@@ -65,6 +83,7 @@ export default function CreditMemosApp({ lockedType }: { lockedType: 'VENDOR' | 
   const [customerWizardOpen, setCustomerWizardOpen] = useState(false);
   const [wizardCustomerId, setWizardCustomerId] = useState('');
   const [vendorWizardOpen, setVendorWizardOpen] = useState(false);
+  const [vendorSeed, setVendorSeed] = useState<VendorCreditSeed | null>(null);
   const [editId, setEditId] = useState<string | null>(null);
   const [detailId, setDetailId] = useState<string | null>(null);
   const [vendors, setVendors] = useState<{ id: string; name: string }[]>([]);
@@ -76,6 +95,9 @@ export default function CreditMemosApp({ lockedType }: { lockedType: 'VENDOR' | 
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [exporting, setExporting] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [page, setPage] = useState(1);
+  const [period, setPeriod] = useState<(typeof CREDIT_PERIODS)[number]['id']>('month');
+  const [statementOpen, setStatementOpen] = useState(false);
   const emptyLine = (): { product_id: string; product_name: string; quantity: number; unit_price: number; tax_percent: number } => ({ product_id: '', product_name: '', quantity: 1, unit_price: 0, tax_percent: 0 });
   const [form, setForm] = useState({
     type: lockedType as 'VENDOR' | 'CUSTOMER',
@@ -117,6 +139,10 @@ export default function CreditMemosApp({ lockedType }: { lockedType: 'VENDOR' | 
   }, [typeFilter, statusFilter]);
 
   useEffect(() => {
+    setPage(1);
+  }, [search, statusFilter]);
+
+  useEffect(() => {
     const newParam = searchParams?.get('new');
     const customerId = searchParams?.get('customer_id');
     if (newParam !== '1') return;
@@ -126,11 +152,52 @@ export default function CreditMemosApp({ lockedType }: { lockedType: 'VENDOR' | 
       return;
     }
     if (lockedType === 'VENDOR') {
+      setVendorSeed(null);
       setVendorWizardOpen(true);
       return;
     }
     if (customerId) setForm((f) => ({ ...f, type: 'VENDOR', customer_id: f.customer_id }));
     setShowModal(true);
+  }, [searchParams, lockedType]);
+
+  useEffect(() => {
+    if (lockedType !== 'VENDOR') return;
+    const fromMemo = searchParams?.get('from_memo');
+    const vendorId = searchParams?.get('vendor_id') || '';
+    const poId = searchParams?.get('po_id') || '';
+    if (!fromMemo || !vendorId || !poId) return;
+    let cancelled = false;
+    adminApi
+      .get(`/credit-memos/${fromMemo}`)
+      .then((res) => {
+        if (cancelled) return;
+        const memo = res.data;
+        const quantities: Record<string, number> = {};
+        for (const item of memo.items || []) {
+          const product = item.product_id;
+          const productId = product && typeof product === 'object' ? String(product._id || product.id || '') : String(product || '');
+          const itemVendor = item.purchase_vendor_id && typeof item.purchase_vendor_id === 'object'
+            ? String(item.purchase_vendor_id._id || item.purchase_vendor_id.id || '')
+            : String(item.purchase_vendor_id || '');
+          const itemPo = item.purchase_po_id && typeof item.purchase_po_id === 'object'
+            ? String(item.purchase_po_id._id || item.purchase_po_id.id || '')
+            : String(item.purchase_po_id || '');
+          if (itemVendor !== vendorId || itemPo !== poId || !productId) continue;
+          const key = `${productId}:${Number(item.purchase_unit_cost)}`;
+          quantities[key] = (quantities[key] || 0) + Number(item.quantity || 0);
+        }
+        setVendorSeed({
+          vendorId,
+          poId,
+          quantities,
+          notes: `Damaged return ${memo.credit_memo_number || ''}${memo.customer_name ? ` from ${memo.customer_name}` : ''}`.trim(),
+        });
+        setVendorWizardOpen(true);
+      })
+      .catch(() => toast.error('Could not open the supplier credit for that damaged return'));
+    return () => {
+      cancelled = true;
+    };
   }, [searchParams, lockedType]);
 
   useEffect(() => {
@@ -146,12 +213,20 @@ export default function CreditMemosApp({ lockedType }: { lockedType: 'VENDOR' | 
         (cm) =>
           cm.credit_memo_number?.toLowerCase().includes(search.toLowerCase()) ||
           cm.vendor_name?.toLowerCase().includes(search.toLowerCase()) ||
-          cm.customer_name?.toLowerCase().includes(search.toLowerCase())
+          cm.customer_name?.toLowerCase().includes(search.toLowerCase()) ||
+          cm.items?.some((item) =>
+            item.purchase_vendor_name?.toLowerCase().includes(search.toLowerCase()) ||
+            item.purchase_po_number?.toLowerCase().includes(search.toLowerCase())
+          )
       )
     : list;
 
-  const allVisibleSelected = filteredList.length > 0 && filteredList.every((c) => selectedIds.has(c.id));
-  const someVisibleSelected = filteredList.some((c) => selectedIds.has(c.id));
+  const totalDocs = filteredList.length;
+  const totalPages = Math.max(1, Math.ceil(totalDocs / PAGE_SIZE));
+  const safePage = Math.min(page, totalPages);
+  const pageRows = filteredList.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
+  const allVisibleSelected = pageRows.length > 0 && pageRows.every((c) => selectedIds.has(c.id));
+  const someVisibleSelected = pageRows.some((c) => selectedIds.has(c.id));
   const selectedRows = filteredList.filter((c) => selectedIds.has(c.id));
 
   const toggleOne = (id: string) => {
@@ -167,11 +242,11 @@ export default function CreditMemosApp({ lockedType }: { lockedType: 'VENDOR' | 
     setSelectedIds((prev) => {
       if (allVisibleSelected) {
         const next = new Set(prev);
-        filteredList.forEach((c) => next.delete(c.id));
+        pageRows.forEach((c) => next.delete(c.id));
         return next;
       }
       const next = new Set(prev);
-      filteredList.forEach((c) => next.add(c.id));
+      pageRows.forEach((c) => next.add(c.id));
       return next;
     });
   };
@@ -186,6 +261,22 @@ export default function CreditMemosApp({ lockedType }: { lockedType: 'VENDOR' | 
       toast.error('Export failed');
     } finally {
       setExporting(false);
+    }
+  };
+
+  const fetchMemoPdf = (id: string) => adminApi.get(`/credit-memos/${id}/pdf`, { responseType: 'blob' });
+
+  const printMemos = async (rows: CreditMemo[]) => {
+    for (const cm of rows) {
+      const res = await fetchMemoPdf(cm.id);
+      await printPdfFromResponse(res.data, res.headers['content-type']);
+    }
+  };
+
+  const downloadMemos = async (rows: CreditMemo[]) => {
+    for (const cm of rows) {
+      const res = await fetchMemoPdf(cm.id);
+      await downloadPdfFromResponse(res.data, `credit-memo-${cm.credit_memo_number || cm.id}.pdf`, res.headers['content-type']);
     }
   };
 
@@ -219,6 +310,7 @@ export default function CreditMemosApp({ lockedType }: { lockedType: 'VENDOR' | 
       return;
     }
     if (lockedType === 'VENDOR') {
+      setVendorSeed(null);
       setVendorWizardOpen(true);
       return;
     }
@@ -365,97 +457,85 @@ export default function CreditMemosApp({ lockedType }: { lockedType: 'VENDOR' | 
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-semibold text-[#0F172A] tracking-tight">
-            {lockedType === 'VENDOR' ? 'Credit memo for vendors' : 'Credit memo for customers'}
-          </h1>
-          <p className="text-xs text-slate-400 mt-1">
-            {lockedType === 'VENDOR'
-              ? 'Vendor rebates, damaged goods, and rate corrections.'
-              : 'Customer returns, scheme adjustments, and sales credits.'}
-          </p>
+      <div className="flex flex-wrap items-center justify-between gap-4">
+        <h1 className={adminUi.pageTitle}>
+          {lockedType === 'VENDOR' ? 'Credit memo for vendors' : 'Credit memo for customers'}
+        </h1>
+        <div className="flex items-center gap-2">
+          <select aria-label="Statement period" value={period} onChange={(e) => setPeriod(e.target.value as typeof period)} className={adminUi.filter}>
+            {CREDIT_PERIODS.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
+          </select>
+          <button type="button" onClick={() => setStatementOpen(true)} className={adminUi.btnSecondary}>Statement</button>
+          <button type="button" onClick={openNew} className={adminUi.btnPrimary}>
+            <Plus className="w-3.5 h-3.5" />
+            New credit memo
+          </button>
         </div>
       </div>
 
-      <div className="bg-white border border-[#E2E8F0] rounded-lg p-4 flex flex-wrap items-center gap-4 min-w-0">
-        <div className="relative flex-1 min-w-[200px]">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
+      <div className="flex flex-wrap items-center gap-2 rounded-lg border border-[#E2E8F0] bg-white p-3">
+        <div className="relative w-full max-w-xs">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#8D9096]" />
           <input
             type="text"
-            placeholder="Search memo number, vendor, customer..."
+            placeholder={lockedType === 'VENDOR' ? 'Search by memo number, vendor, or PO' : 'Search by memo number, customer, or invoice'}
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            className="w-full pl-10 pr-4 py-2 bg-slate-950/60 border border-white/10 rounded-xl text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-teal-500 focus:border-teal-500 focus:bg-slate-950/80 transition-all font-semibold"
+            className={adminUi.filterSearch}
           />
         </div>
-        <div className="flex items-center gap-2.5 flex-wrap">
-          <button
-            type="button"
-            onClick={openNew}
-            className="inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-[#0F9F8F] hover:bg-[#0B8275] border-transparent text-white rounded-xl text-xs font-bold shadow-sm transition-all"
-          >
-            <Plus className="w-3.5 h-3.5" />
-            New Credit Memo
-          </button>
-          <select
-            value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value)}
-            className="bg-slate-950/60 border border-white/10 rounded-xl px-3 py-2.5 text-xs text-slate-200 font-semibold focus:outline-none focus:ring-1 focus:ring-teal-500"
-          >
-            <option value="">All statuses</option>
-            {STATUS_OPTIONS.filter(Boolean).map((s) => (
-              <option key={s} value={s}>
-                {s}
-              </option>
-            ))}
-          </select>
-          <button
-            type="button"
-            onClick={() => fetchList()}
-            className="inline-flex items-center justify-center gap-1.5 px-4 py-2.5 bg-slate-900 border border-white/5 text-slate-300 hover:text-white rounded-xl text-xs font-semibold shadow-sm transition-all"
-          >
-            <Search className="w-3.5 h-3.5" />
-            Refresh
-          </button>
-          <button
-            type="button"
-            onClick={() => handleExport(filteredList)}
-            disabled={exporting || filteredList.length === 0}
-            className={`${adminUi.btnSecondary} disabled:opacity-50`}
-          >
-            <Download className="w-4 h-4" />
-            Export all ({filteredList.length})
-          </button>
-        </div>
+        <select
+          value={statusFilter}
+          onChange={(e) => setStatusFilter(e.target.value)}
+          className={adminUi.filter}
+        >
+          <option value="">All statuses</option>
+          {STATUS_OPTIONS.filter(Boolean).map((s) => (
+            <option key={s} value={s}>
+              {s}
+            </option>
+          ))}
+        </select>
+        <button
+          type="button"
+          onClick={() => handleExport(filteredList)}
+          disabled={exporting || filteredList.length === 0}
+          className={`${adminUi.btnSecondary} disabled:opacity-50`}
+        >
+          <Download className="w-4 h-4" />
+          Export
+        </button>
       </div>
 
       {selectedIds.size > 0 && (
-        <div className="flex flex-wrap items-center gap-3 rounded-md border border-[#E3E5E8] bg-[#F4F5F8] px-4 py-2.5">
+        <div className="flex items-center justify-between gap-3 rounded-md border border-[#E3E5E8] bg-[#F4F5F8] px-4 py-2">
           <span className="text-sm font-medium text-[#1A1A1A]">{selectedIds.size} selected</span>
-          <button type="button" onClick={() => handleExport(selectedRows)} disabled={exporting} className={`${adminUi.btnPrimary} disabled:opacity-50`}>
-            <Download className="w-4 h-4" />
-            {exporting ? 'Exporting…' : 'Export selected to Excel'}
-          </button>
-          <button type="button" onClick={handleDeleteSelected} disabled={deleting} className={`${adminUi.btnDanger} disabled:opacity-50`}>
-            <Trash2 className="w-4 h-4" />
-            {deleting ? 'Deleting…' : 'Delete selected'}
-          </button>
-          <button type="button" onClick={() => setSelectedIds(new Set())} className={adminUi.btnGhost}>
-            Clear selection
-          </button>
+          <div className="flex items-center gap-1">
+            <button type="button" title="Delete selected" aria-label="Delete selected" onClick={handleDeleteSelected} disabled={deleting} className={`${adminUi.btnIcon} disabled:opacity-40`}>
+              <Trash2 className="w-4 h-4" />
+            </button>
+            <button type="button" title="Clear selection" aria-label="Clear selection" onClick={() => setSelectedIds(new Set())} className={adminUi.btnIcon}>
+              <X className="w-4 h-4" />
+            </button>
+            <button type="button" title="Print selected" aria-label="Print selected" onClick={() => { void printMemos(selectedRows).catch(() => toast.error('Failed to print')); }} className={adminUi.btnIcon}>
+              <Printer className="w-4 h-4" />
+            </button>
+            <button type="button" title="Download selected" aria-label="Download selected" onClick={() => { void downloadMemos(selectedRows).catch(() => toast.error('Failed to download')); }} className={adminUi.btnIcon}>
+              <Download className="w-4 h-4" />
+            </button>
+          </div>
         </div>
       )}
 
-      <div className="bg-white border border-[#E2E8F0] rounded-lg overflow-hidden">
+      <div className={`${adminUi.panel} overflow-hidden`}>
         {loading ? (
           <div className="flex items-center justify-center py-16">
-            <div className="animate-spin rounded-full h-8 w-8 border-2 border-teal-500 border-t-transparent" />
+            <div className="animate-spin rounded-full h-8 w-8 border-2 border-black border-t-transparent" />
           </div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full border-collapse">
-              <thead className="bg-slate-950/60 text-slate-400 border-b border-white/5">
+            <table className="w-full text-sm">
+              <thead className={adminUi.tableHead}>
                 <tr>
                   <th className="w-10 px-4 py-3">
                     <input
@@ -467,37 +547,36 @@ export default function CreditMemosApp({ lockedType }: { lockedType: 'VENDOR' | 
                       className="h-4 w-4 rounded border-[#C7C7C7] accent-black cursor-pointer"
                     />
                   </th>
-                  <th className="text-left py-3.5 px-4 text-[10px] font-bold uppercase tracking-wider">Number</th>
-                  <th className="text-left py-3.5 px-4 text-[10px] font-bold uppercase tracking-wider">Type</th>
-                  <th className="text-left py-3.5 px-4 text-[10px] font-bold uppercase tracking-wider">Vendor / Customer</th>
-                  <th className="text-left py-3.5 px-4 text-[10px] font-bold uppercase tracking-wider">Reason</th>
+                  <th className="text-left px-4 py-3 font-medium">Date</th>
+                  <th className="text-left px-4 py-3 font-medium">Number</th>
+                  <th className="text-left px-4 py-3 font-medium">{lockedType === 'VENDOR' ? 'Vendor' : 'Customer'}</th>
+                  <th className="text-left px-4 py-3 font-medium">Reason</th>
                   {lockedType === 'CUSTOMER' && (
-                    <th className="text-left py-3.5 px-4 text-[10px] font-bold uppercase tracking-wider">Invoice</th>
+                    <th className="text-left px-4 py-3 font-medium">Invoice</th>
                   )}
                   {lockedType === 'VENDOR' && (
-                    <th className="text-left py-3.5 px-4 text-[10px] font-bold uppercase tracking-wider">PO</th>
+                    <th className="text-left px-4 py-3 font-medium">PO</th>
                   )}
-                  <th className="text-right py-3.5 px-4 text-[10px] font-bold uppercase tracking-wider">Total</th>
-                  <th className="text-left py-3.5 px-4 text-[10px] font-bold uppercase tracking-wider">Status</th>
-                  <th className="text-left py-3.5 px-4 text-[10px] font-bold uppercase tracking-wider">Created</th>
-                  <th className="text-right py-3.5 px-4 text-[10px] font-bold uppercase tracking-wider">Actions</th>
+                  <th className="text-right px-4 py-3 font-medium">Amount</th>
+                  <th className="text-left px-4 py-3 font-medium">Status</th>
+                  <th className="text-right px-4 py-3 font-medium">Action</th>
                 </tr>
               </thead>
               <tbody>
                 {filteredList.length === 0 ? (
                   <tr>
-                      <td colSpan={lockedType === 'CUSTOMER' || lockedType === 'VENDOR' ? 10 : 9} className="py-16 text-center text-slate-500 text-xs font-semibold">
-                      No credit memos found. Create a credit memo to get started.
+                    <td colSpan={lockedType === 'CUSTOMER' || lockedType === 'VENDOR' ? 9 : 8} className="px-4 py-10 text-center text-sm text-[#6B6C72]">
+                      No credit memos yet. Use New credit memo to create one.
                     </td>
                   </tr>
                 ) : (
-                  filteredList.map((cm) => (
+                  pageRows.map((cm) => (
                     <tr
                       key={cm.id}
-                      className={`border-b border-white/5 hover:bg-white/[0.02] transition-colors cursor-pointer ${selectedIds.has(cm.id) ? 'bg-[#F4F5F8]' : ''}`}
+                      className={`border-t border-[#E3E5E8] cursor-pointer ${adminUi.tableRowHover} ${selectedIds.has(cm.id) ? 'bg-[#F4F5F8]' : ''}`}
                       onClick={() => setDetailId(cm.id)}
                     >
-                      <td className="py-3 px-4" onClick={(e) => e.stopPropagation()}>
+                      <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
                         <input
                           type="checkbox"
                           aria-label={`Select ${cm.credit_memo_number}`}
@@ -506,32 +585,33 @@ export default function CreditMemosApp({ lockedType }: { lockedType: 'VENDOR' | 
                           className="h-4 w-4 rounded border-[#C7C7C7] accent-black cursor-pointer"
                         />
                       </td>
-                      <td className="py-3 px-4 text-xs font-mono font-bold text-teal-400">{cm.credit_memo_number}</td>
-                      <td className="py-3 px-4 text-xs text-slate-350">
-                        <span className={`inline-flex px-2 py-0.5 rounded text-[10px] font-bold border ${cm.type === 'VENDOR' ? 'bg-amber-500/10 text-amber-400 border-amber-500/20' : 'bg-blue-500/10 text-blue-400 border-blue-500/20'}`}>{cm.type}</span>
-                      </td>
-                      <td className="py-3 px-4 text-xs font-semibold text-slate-200">{cm.type === 'VENDOR' ? cm.vendor_name : cm.customer_name}</td>
-                      <td className="py-3 px-4 text-xs text-slate-300">
-                        <span className="inline-flex px-2 py-0.5 rounded text-[10px] border border-white/10 bg-slate-950/40">{cm.reason}</span>
+                      <td className="px-4 py-3 text-[#1A1A1A] whitespace-nowrap">{formatDate(cm.created_at)}</td>
+                      <td className="px-4 py-3 font-medium text-[#0077C5] whitespace-nowrap">{cm.credit_memo_number}</td>
+                      <td className="px-4 py-3 text-[#1A1A1A]">{cm.type === 'VENDOR' ? cm.vendor_name : cm.customer_name}</td>
+                      <td className="px-4 py-3">
+                        <span className={adminUi.badge}>{cm.reason.replace(/_/g, ' ')}</span>
+                        {cm.type === 'CUSTOMER' && cm.reason === 'DAMAGED' && damagedSourceLabel(cm.items) && (
+                          <span className="block mt-1 text-[11px] text-[#6B6C72]">{damagedSourceLabel(cm.items)}</span>
+                        )}
                       </td>
                       {lockedType === 'CUSTOMER' && (
-                        <td className="py-3 px-4 text-xs font-mono text-slate-300">{cm.reference_invoice_number || '—'}</td>
+                        <td className="px-4 py-3 text-[#1A1A1A]">{cm.reference_invoice_number || '—'}</td>
                       )}
                       {lockedType === 'VENDOR' && (
-                        <td className="py-3 px-4 text-xs font-mono text-slate-300">{cm.reference_po_number || '—'}</td>
+                        <td className="px-4 py-3 text-[#1A1A1A]">{cm.reference_po_number || '—'}</td>
                       )}
-                      <td className={`py-3 px-4 text-xs text-right font-extrabold font-mono ${moneyOut}`}>${Number(cm.total_amount).toLocaleString('en-US', { minimumFractionDigits: 2 })}</td>
-                      <td className="py-3 px-4 text-xs">
+                      <td className={`px-4 py-3 text-right tabular-nums ${moneyOut}`}>${Number(cm.total_amount).toLocaleString('en-US', { minimumFractionDigits: 2 })}</td>
+                      <td className="px-4 py-3">
                         <span
-                          className={`inline-flex px-2 py-0.5 rounded text-[10px] font-bold border ${
-                            cm.status === 'APPROVED'
-                              ? 'bg-teal-500/10 text-teal-450 border-teal-500/20'
+                          className={
+                            cm.status === 'APPROVED' || cm.status === 'ADJUSTED' || cm.status === 'CLOSED'
+                              ? adminUi.badgePaid
                               : cm.status === 'DRAFT'
-                                ? 'bg-slate-800/80 text-slate-400 border border-white/10'
+                                ? adminUi.badgeDraft
                                 : cm.status === 'CANCELLED'
-                                  ? 'bg-rose-500/10 text-rose-400 border-rose-500/20'
-                                  : 'bg-blue-500/10 text-blue-40 border-blue-500/20'
-                          }`}
+                                  ? adminUi.badgeUnpaid
+                                  : adminUi.badge
+                          }
                         >
                           {cm.type === 'CUSTOMER' && cm.status === 'ADJUSTED'
                             ? 'Received'
@@ -542,28 +622,14 @@ export default function CreditMemosApp({ lockedType }: { lockedType: 'VENDOR' | 
                                 : cm.status}
                         </span>
                       </td>
-                      <td className="py-3 px-4 text-xs text-slate-450 font-mono">{formatDate(cm.created_at)}</td>
-                      <td className="py-3 px-4 text-right text-xs" onClick={(e) => e.stopPropagation()}>
-                        <div className="flex items-center justify-end gap-2 flex-wrap">
-                          <button type="button" onClick={() => setDetailId(cm.id)} className="text-[#0077C5] hover:underline text-xs font-medium">View</button>
-                          {cm.status === 'DRAFT' && lockedType !== 'VENDOR' && (
-                            <button type="button" onClick={() => openEdit(cm.id)} className="text-[#0077C5] hover:underline text-xs font-medium">Edit</button>
-                          )}
-                          <button
-                            type="button"
-                            onClick={async () => {
-                              try {
-                                const res = await adminApi.get(`/credit-memos/${cm.id}/pdf`, { responseType: 'blob' });
-                                if (await downloadPdfFromResponse(res.data, `credit-memo-${cm.credit_memo_number || cm.id}.pdf`, res.headers['content-type'])) {
-                                  toast.success('PDF downloaded');
-                                }
-                              } catch {
-                                toast.error('Failed to download PDF');
-                              }
-                            }}
-                            className="text-[#6B6C72] hover:underline text-xs font-medium"
-                          >
-                            Print
+                      <td className="px-4 py-3 text-right whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
+                        <div className="flex items-center justify-end gap-1 whitespace-nowrap">
+                          <button type="button" onClick={() => (cm.status === 'DRAFT' && lockedType !== 'VENDOR' ? openEdit(cm.id) : setDetailId(cm.id))} className="text-sm text-[#0077C5] hover:underline">View/Edit</button>
+                          <button type="button" title="Print" aria-label="Print" onClick={() => { void printMemos([cm]).catch(() => toast.error('Failed to print')); }} className={adminUi.btnIcon}>
+                            <Printer className="w-4 h-4" />
+                          </button>
+                          <button type="button" title="Download" aria-label="Download" onClick={() => { void downloadMemos([cm]).catch(() => toast.error('Failed to download')); }} className={adminUi.btnIcon}>
+                            <Download className="w-4 h-4" />
                           </button>
                           {(cm.status === 'DRAFT' || cm.status === 'CANCELLED') && (
                             <button
@@ -595,11 +661,37 @@ export default function CreditMemosApp({ lockedType }: { lockedType: 'VENDOR' | 
         )}
       </div>
 
+      {!loading && (
+        <div className="flex flex-wrap items-center justify-between gap-3 px-1">
+          <p className={adminUi.meta}>
+            {totalDocs === 0 ? '0 credit memos' : `${(safePage - 1) * PAGE_SIZE + 1}–${Math.min(safePage * PAGE_SIZE, totalDocs)} of ${totalDocs}`}
+          </p>
+          <div className="flex items-center gap-2">
+            <button type="button" className={adminUi.btnSecondary} disabled={safePage <= 1} onClick={() => setPage((current) => Math.max(1, current - 1))} aria-label="Previous page">
+              <ChevronLeft className="w-4 h-4" />
+              Previous
+            </button>
+            <span className="min-w-[3.5rem] text-center text-sm tabular-nums text-[#1A1A1A]">{safePage} / {totalPages}</span>
+            <button type="button" className={adminUi.btnSecondary} disabled={safePage >= totalPages} onClick={() => setPage((current) => current + 1)} aria-label="Next page">
+              Next
+              <ChevronRight className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+      )}
+
+      {statementOpen && <CreditMemoStatement period={period} type={lockedType} onClose={() => setStatementOpen(false)} />}
+
       <VendorCreditMemoLightbox
         open={vendorWizardOpen}
-        onClose={() => setVendorWizardOpen(false)}
+        seed={vendorSeed}
+        onClose={() => {
+          setVendorWizardOpen(false);
+          setVendorSeed(null);
+        }}
         onSaved={(id) => {
           setVendorWizardOpen(false);
+          setVendorSeed(null);
           fetchList();
           setDetailId(id);
         }}

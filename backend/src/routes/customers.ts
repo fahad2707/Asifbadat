@@ -5,6 +5,7 @@ import path from 'path';
 import fs from 'fs';
 import Customer from '../models/Customer';
 import Invoice from '../models/Invoice';
+import Receipt from '../models/Receipt';
 import CustomerProductPrice from '../models/CustomerProductPrice';
 import { authenticateAdmin, AuthRequest } from '../middleware/auth';
 import { derivedUnpaidReceivableMatch } from '../utils/invoiceFinancialState';
@@ -19,7 +20,15 @@ import {
 } from '../utils/customerAccount';
 import { z } from 'zod';
 import { generateCustomerCode } from '../utils/customerCode';
-import { provisionOnlineLogin, type ProvisionedLogin } from '../utils/provisionOnlineUser';
+import { provisionOnlineLogin, revealExistingOnlineLogin, type ProvisionedLogin } from '../utils/provisionOnlineUser';
+import { ensureWebsiteSignupForUser } from '../services/ensureCustomerWebsiteSignup';
+
+/** First letter of each word, matching the customer form. */
+function titleCaseWords(value: string): string {
+  return String(value).replace(/(^|[^A-Za-z0-9]+)([A-Za-z])/g, (_m, sep: string, letter: string) => {
+    return `${sep}${letter.toUpperCase()}`;
+  });
+}
 
 function customerAccountFields(c: {
   account_status?: unknown;
@@ -147,12 +156,119 @@ router.get('/balances', authenticateAdmin, async (_req, res) => {
           open_balance,
           credit_memo_total,
           net_due: Math.max(0, open_balance - credit_memo_total),
+          account_position: Math.round((open_balance - credit_memo_total) * 100) / 100,
         };
       }),
     });
   } catch (error) {
     console.error('Customers balances error:', error);
     res.status(500).json({ error: 'Failed to fetch balances' });
+  }
+});
+
+function localDay(value?: Date | string | null) {
+  if (!value) return '';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${date.getFullYear()}-${month}-${day}`;
+}
+
+router.get('/statement', authenticateAdmin, async (_req, res) => {
+  try {
+    const [customers, invoices, receipts, credits] = await Promise.all([
+      Customer.find({}).select('name company phone email customer_code payment_terms credit_limit account_status').sort({ name: 1 }).lean(),
+      Invoice.find({ invoice_type: 'invoice' }).select('customer_id invoice_number invoice_date total_amount amount_paid').lean(),
+      Receipt.find({}).select('customer_id trx_date amount_received pmt_mode invoice_num').sort({ trx_date: -1 }).lean(),
+      getCreditMemoTotalsByParty('CUSTOMER'),
+    ]);
+
+    const invoicesByCustomer = new Map<string, Array<{ number: string; date: string; total: number; paid: number; balance: number }>>();
+    for (const raw of invoices) {
+      const doc = raw as { customer_id?: { toString(): string }; invoice_number?: string; invoice_date?: Date; total_amount?: number; amount_paid?: number };
+      const id = doc.customer_id ? doc.customer_id.toString() : '';
+      if (!id) continue;
+      const total = Number(doc.total_amount) || 0;
+      const paid = Number(doc.amount_paid) || 0;
+      const balance = Math.max(0, Math.round((total - paid) * 100) / 100);
+      const row = {
+        number: String(doc.invoice_number || ''),
+        date: localDay(doc.invoice_date),
+        total,
+        paid,
+        balance,
+      };
+      invoicesByCustomer.set(id, [...(invoicesByCustomer.get(id) || []), row]);
+    }
+
+    const paymentsByCustomer = new Map<string, { count: number; last_date: string; last_amount: number; last_method: string }>();
+    for (const raw of receipts) {
+      const doc = raw as { customer_id?: { toString(): string }; trx_date?: Date; amount_received?: number; pmt_mode?: string };
+      const id = doc.customer_id ? doc.customer_id.toString() : '';
+      if (!id) continue;
+      const current = paymentsByCustomer.get(id);
+      const date = localDay(doc.trx_date);
+      if (!current) {
+        paymentsByCustomer.set(id, { count: 1, last_date: date, last_amount: Number(doc.amount_received) || 0, last_method: String(doc.pmt_mode || '') });
+      } else {
+        current.count += 1;
+      }
+    }
+
+    const round = (n: number) => Math.round(n * 100) / 100;
+    const rows = customers.map((raw) => {
+      const customer = raw as { _id: { toString(): string }; name?: string; company?: string; phone?: string; email?: string; customer_code?: string; payment_terms?: string; credit_limit?: number; account_status?: string };
+      const id = customer._id.toString();
+      const docs = invoicesByCustomer.get(id) || [];
+      const unpaid = docs.filter((doc) => doc.balance > 0);
+      const billed = round(docs.reduce((sum, doc) => sum + doc.total, 0));
+      const paid = round(docs.reduce((sum, doc) => sum + doc.paid, 0));
+      const open = round(unpaid.reduce((sum, doc) => sum + doc.balance, 0));
+      const credit = round(credits.get(id) || 0);
+      const payment = paymentsByCustomer.get(id);
+      const lastInvoice = docs.map((doc) => doc.date).filter(Boolean).sort().at(-1) || '';
+      return {
+        id,
+        name: customer.name || '',
+        company: customer.company || '',
+        phone: customer.phone || '',
+        email: customer.email || '',
+        customer_code: customer.customer_code || '',
+        payment_terms: customer.payment_terms || '',
+        credit_limit: Number(customer.credit_limit) || 0,
+        account_status: customer.account_status || '',
+        invoice_count: docs.length,
+        unpaid_count: unpaid.length,
+        partial_count: docs.filter((doc) => doc.paid > 0 && doc.balance > 0).length,
+        paid_count: docs.filter((doc) => doc.balance <= 0 && doc.total > 0).length,
+        billed,
+        paid,
+        open_balance: round(open - credit),
+        credits: credit,
+        last_invoice_date: lastInvoice,
+        last_payment_date: payment?.last_date || '',
+        last_payment_amount: payment?.last_amount || 0,
+        last_payment_method: payment?.last_method || '',
+        payment_count: payment?.count || 0,
+        unpaid_invoices: unpaid,
+      };
+    });
+
+    res.json({
+      customers: rows,
+      totals: {
+        customers: rows.length,
+        billed: round(rows.reduce((sum, row) => sum + row.billed, 0)),
+        paid: round(rows.reduce((sum, row) => sum + row.paid, 0)),
+        open_balance: round(rows.reduce((sum, row) => sum + row.open_balance, 0)),
+        unpaid_invoices: rows.reduce((sum, row) => sum + row.unpaid_count, 0),
+        credits: round(rows.reduce((sum, row) => sum + row.credits, 0)),
+      },
+    });
+  } catch (error) {
+    console.error('Customer statement error:', error);
+    res.status(500).json({ error: 'Failed to build the customer statement' });
   }
 });
 
@@ -329,15 +445,25 @@ router.post('/', authenticateAdmin, async (req: AuthRequest, res) => {
     const data = schema.parse(req.body);
     const createData: any = { ...data };
     if (data.email === '') createData.email = undefined;
+    createData.name = titleCaseWords(String(createData.name).trim());
+    if (createData.company) createData.company = titleCaseWords(String(createData.company).trim());
     if (!createData.customer_code) createData.customer_code = await generateCustomerCode();
     createData.account_status = ACCOUNT_STATUS_PENDING;
     const customer = await Customer.create(createData);
+    try {
+      // Pending queue only. notify:false so credentials are still issued on approval.
+      const login = await provisionOnlineLogin(customer, { notify: false });
+      if (login && typeof customer.save === 'function') await customer.save();
+      if (customer.user_id) await ensureWebsiteSignupForUser(customer.user_id);
+    } catch (err) {
+      console.error('Pending website signup for new customer failed:', err);
+    }
     res.status(201).json({
       id: customer._id.toString(),
       ...customer.toObject(),
     });
   } catch (error: any) {
-    if (error instanceof z.ZodError) return res.status(400).json({ error: error.errors[0].message });
+    if (error instanceof z.ZodError) return res.status(400).json({ error: error.message });
     console.error('Create customer error:', error);
     res.status(500).json({ error: 'Failed to create customer' });
   }
@@ -395,7 +521,7 @@ router.put('/:id', authenticateAdmin, async (req: AuthRequest, res) => {
     if (!customer) return res.status(404).json({ error: 'Customer not found' });
     res.json({ id: customer._id.toString(), ...customer.toObject(), ...customerAccountFields(customer) });
   } catch (error: any) {
-    if (error instanceof z.ZodError) return res.status(400).json({ error: error.errors[0].message });
+    if (error instanceof z.ZodError) return res.status(400).json({ error: error.message });
     console.error('Update customer error:', error);
     res.status(500).json({ error: 'Failed to update customer' });
   }
@@ -411,8 +537,12 @@ router.put('/:id/account-status', authenticateAdmin, async (req: AuthRequest, re
     const customer = await Customer.findById(req.params.id);
     if (!customer) return res.status(404).json({ error: 'Customer not found' });
     let online_login: ProvisionedLogin | null = null;
+    const wasApproved = customer.account_status === ACCOUNT_STATUS_APPROVED;
     if (account_status === ACCOUNT_STATUS_APPROVED) {
       online_login = await provisionOnlineLogin(customer);
+      if (!online_login && !wasApproved) {
+        online_login = await revealExistingOnlineLogin(customer);
+      }
     }
     customer.account_status = account_status;
     await customer.save();
@@ -422,7 +552,7 @@ router.put('/:id/account-status', authenticateAdmin, async (req: AuthRequest, re
       ...(online_login ? { online_login } : {}),
     });
   } catch (error: any) {
-    if (error instanceof z.ZodError) return res.status(400).json({ error: error.errors[0].message });
+    if (error instanceof z.ZodError) return res.status(400).json({ error: error.message });
     console.error('Update customer account status error:', error);
     res.status(500).json({ error: 'Failed to update account status' });
   }
@@ -447,7 +577,7 @@ router.post('/bulk-delete', authenticateAdmin, async (req: AuthRequest, res) => 
     await Customer.updateMany({ _id: { $in: ids } }, { is_active: false });
     res.json({ message: `${ids.length} customer(s) deactivated`, deleted: ids.length });
   } catch (error: any) {
-    if (error instanceof z.ZodError) return res.status(400).json({ error: error.errors[0].message });
+    if (error instanceof z.ZodError) return res.status(400).json({ error: error.message });
     console.error('Bulk delete customers error:', error);
     res.status(500).json({ error: 'Failed to delete customers' });
   }

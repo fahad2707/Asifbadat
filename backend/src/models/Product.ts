@@ -17,11 +17,15 @@ export interface IProduct extends Document {
   plu?: string; // Legacy — unused
   sku?: string; // Barcode / UPC / vendor SKU (scannable)
   stock_quantity: number;
+  /** Customer returns marked damaged. Not part of sellable stock_quantity. */
+  damaged_quantity?: number;
   committed_quantity: number; // Reserved by open orders (available = stock_quantity - committed_quantity)
   low_stock_threshold: number;
   reorder_point?: number; // Alert when stock falls below (for purchasing)
   vendor_id?: mongoose.Types.ObjectId; // Primary vendor for this product
   is_active: boolean;
+  /** Set when an admin removes the product from the catalog table. Invoice history keeps the name. */
+  deleted_at?: Date;
   tax_rate?: number; // Tax percentage used by POS / online checkout. Do not remove.
   /**
    * Optional TaxType assignment for admin / future invoice inheritance.
@@ -64,11 +68,13 @@ const ProductSchema = new Schema<IProduct>(
     plu: { type: String, unique: true, sparse: true },
     sku: { type: String, unique: true, sparse: true },
     stock_quantity: { type: Number, default: 0 },
+    damaged_quantity: { type: Number, default: 0 },
     committed_quantity: { type: Number, default: 0 }, // Reserved by open orders
     low_stock_threshold: { type: Number, default: 10 },
     reorder_point: Number,
     vendor_id: { type: Schema.Types.ObjectId, ref: 'Vendor' },
     is_active: { type: Boolean, default: true },
+    deleted_at: Date,
     tax_rate: { type: Number, default: 0 }, // Tax percentage — POS / online snapshot source
     tax_type_id: { type: Schema.Types.ObjectId, ref: 'TaxType', default: undefined },
     tobacco_class: {
@@ -94,5 +100,10 @@ const ProductSchema = new Schema<IProduct>(
 );
 
 ProductSchema.index({ category_id: 1 });
+
+/** Catalog lists omit rows an admin deleted from the products table. */
+export const PRODUCT_NOT_DELETED = {
+  $or: [{ deleted_at: { $exists: false } }, { deleted_at: null }],
+} as const;
 
 export default mongoose.model<IProduct>('Product', ProductSchema);

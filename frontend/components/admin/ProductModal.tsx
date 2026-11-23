@@ -23,6 +23,70 @@ const ADD_TAX = '__add_tax__';
 const ADD_VENDOR = '__add_vendor__';
 const ADD_PRICE_GROUP = '__add_price_group__';
 
+function AddPriceGroupModal({
+  onClose,
+  onSaved,
+}: {
+  onClose: () => void;
+  onSaved: (group: { id: string; name: string }) => void;
+}) {
+  const [name, setName] = useState('');
+  const [loading, setLoading] = useState(false);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const trimmed = titleCaseWords(name.trim());
+    if (!trimmed) {
+      toast.error('Enter a price group name');
+      return;
+    }
+    setLoading(true);
+    try {
+      const { data } = await adminApi.post<{ id: string; name: string }>('/price-groups', { name: trimmed });
+      onSaved({ id: String(data.id), name: data.name || trimmed });
+      toast.success('Price group added');
+    } catch (err: unknown) {
+      const message = (err as { response?: { data?: { error?: string } } })?.response?.data?.error;
+      toast.error(message || 'Failed to add price group');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[90] p-4" onClick={onClose}>
+      <div
+        className="bg-white border border-[#E2E8F0] text-[#0F172A] rounded-lg max-w-sm w-full p-6 shadow-xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <h3 className="text-sm font-semibold text-[#0F172A] mb-4">+ Add new price group</h3>
+        <form onSubmit={handleSubmit}>
+          <input
+            type="text"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="Price group name"
+            className="w-full px-3 py-2 border border-gray-300 rounded-lg mb-4"
+            autoFocus
+          />
+          <div className="flex justify-end gap-2">
+            <button type="button" onClick={onClose} className="px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded-lg">
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={loading}
+              className="px-4 py-2 bg-[#0F9F8F] hover:bg-[#0B8275] text-white rounded-lg text-sm font-semibold disabled:opacity-50"
+            >
+              {loading ? 'Saving…' : 'Save group'}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
 interface Product {
   id?: string | number;
   name: string;
@@ -381,7 +445,7 @@ export default function ProductModal({ product, onClose, onSuccess }: ProductMod
   const [taxTypeId, setTaxTypeId] = useState<string | null | undefined>(null);
   const [priceGroups, setPriceGroups] = useState<PriceGroupOption[]>([]);
   const [priceGroupId, setPriceGroupId] = useState('');
-  const [newPriceGroupName, setNewPriceGroupName] = useState('');
+  const [showAddPriceGroup, setShowAddPriceGroup] = useState(false);
   const [tobacco, setTobacco] = useState<TobaccoComplianceFormValue>(emptyTobaccoComplianceForm());
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -557,15 +621,6 @@ export default function ProductModal({ product, onClose, onSuccess }: ProductMod
     : [];
 
   const assignSelectedPriceGroup = async (productMongoId: string) => {
-    if (priceGroupId === ADD_PRICE_GROUP) {
-      const name = titleCaseWords(newPriceGroupName.trim());
-      if (!name) {
-        toast.error('Enter a price group name');
-        throw new Error('Price group name required');
-      }
-      await adminApi.post('/price-groups', { name, product_ids: [productMongoId] });
-      return;
-    }
     if (priceGroupId) {
       await adminApi.post(`/price-groups/${priceGroupId}/products`, { product_ids: [productMongoId] });
     }
@@ -577,10 +632,6 @@ export default function ProductModal({ product, onClose, onSuccess }: ProductMod
     const cost = Number(formData.cost_price) || 0;
     if (sellingBelowMin(sell, cost)) {
       toast.error(`Selling price must be at least 5% above cost. Minimum is $${minSellingPrice(cost).toFixed(2)}.`);
-      return;
-    }
-    if (priceGroupId === ADD_PRICE_GROUP && !newPriceGroupName.trim()) {
-      toast.error('Enter a price group name');
       return;
     }
     setLoading(true);
@@ -883,33 +934,26 @@ export default function ProductModal({ product, onClose, onSuccess }: ProductMod
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">Price range group</label>
+            <label className="block text-sm font-medium text-gray-700 mb-2">Price group</label>
             <select
               value={priceGroupId}
               onChange={(e) => {
+                if (e.target.value === ADD_PRICE_GROUP) {
+                  setShowAddPriceGroup(true);
+                  return;
+                }
                 setPriceGroupId(e.target.value);
-                if (e.target.value !== ADD_PRICE_GROUP) setNewPriceGroupName('');
               }}
               className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500"
             >
               <option value="">No price group</option>
-              <option value={ADD_PRICE_GROUP}>+ Add new group</option>
               {priceGroups.map((g) => (
                 <option key={g.id} value={g.id}>
                   {titleCaseWords(g.name)}
                 </option>
               ))}
+              <option value={ADD_PRICE_GROUP}>+ Add new price group</option>
             </select>
-            {priceGroupId === ADD_PRICE_GROUP && (
-              <input
-                type="text"
-                value={newPriceGroupName}
-                onChange={(e) => setNewPriceGroupName(e.target.value)}
-                onBlur={() => setNewPriceGroupName((n) => titleCaseWords(n))}
-                placeholder="New group name"
-                className="w-full mt-2 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500"
-              />
-            )}
             {existingPriceGroups.length > 0 && (
               <ul className="mt-2 space-y-1">
                 {existingPriceGroups.map((g) => (
@@ -1058,6 +1102,20 @@ export default function ProductModal({ product, onClose, onSuccess }: ProductMod
             fetchVendors();
             setFormData((f) => ({ ...f, vendor_id: id }));
             setShowAddVendor(false);
+          }}
+        />
+      )}
+      {showAddPriceGroup && (
+        <AddPriceGroupModal
+          onClose={() => setShowAddPriceGroup(false)}
+          onSaved={(group) => {
+            setPriceGroups((prev) =>
+              [...prev.filter((g) => g.id !== group.id), { id: group.id, name: group.name, product_ids: [] }].sort((a, b) =>
+                a.name.localeCompare(b.name)
+              )
+            );
+            setPriceGroupId(group.id);
+            setShowAddPriceGroup(false);
           }}
         />
       )}

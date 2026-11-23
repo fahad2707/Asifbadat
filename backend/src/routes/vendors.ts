@@ -17,6 +17,7 @@ import {
 import { getCreditMemoTotalsByParty } from '../modules/credit-memo/services/creditMemoBalances';
 import { loadBestSupplierRates } from '../modules/vendors/services/bestSupplierRates';
 import { STATE_PROVINCE_OPTIONS } from '../utils/regions';
+import { purchaseBooksStatement } from '../services/loadPurchaseBooksStatement';
 
 const router = express.Router();
 
@@ -220,6 +221,17 @@ router.get('/analytics/last-purchase-prices', authenticateAdmin, async (req: Aut
 });
 
 // Get one vendor
+router.get('/statement', authenticateAdmin, async (req: AuthRequest, res) => {
+  try {
+    const statement = await purchaseBooksStatement(String(req.query.period || 'month'));
+    if (!statement) return res.status(400).json({ error: 'Choose a statement period.' });
+    res.json(statement);
+  } catch (error) {
+    console.error('Supplier statement error:', error);
+    res.status(500).json({ error: 'Failed to build the supplier statement' });
+  }
+});
+
 router.get('/:id', authenticateAdmin, async (req: AuthRequest, res) => {
   try {
     const vendor = await Vendor.findById(req.params.id).lean();
@@ -371,7 +383,7 @@ router.post('/', authenticateAdmin, async (req: AuthRequest, res) => {
     const vendor = await Vendor.create(payload);
     res.status(201).json({ id: vendor._id.toString(), ...vendor.toObject() });
   } catch (error: any) {
-    if (error instanceof z.ZodError) return res.status(400).json({ error: error.errors[0].message });
+    if (error instanceof z.ZodError) return res.status(400).json({ error: error.message });
     console.error('Create vendor error:', error);
     res.status(500).json({ error: 'Failed to create vendor' });
   }
@@ -406,7 +418,7 @@ router.put('/:id', authenticateAdmin, async (req: AuthRequest, res) => {
     if (!vendor) return res.status(404).json({ error: 'Vendor not found' });
     res.json({ id: vendor._id.toString(), ...vendor.toObject() });
   } catch (error: any) {
-    if (error instanceof z.ZodError) return res.status(400).json({ error: error.errors[0].message });
+    if (error instanceof z.ZodError) return res.status(400).json({ error: error.message });
     console.error('Update vendor error:', error);
     res.status(500).json({ error: 'Failed to update vendor' });
   }
@@ -431,7 +443,7 @@ router.post('/bulk-delete', authenticateAdmin, async (req: AuthRequest, res) => 
     await Vendor.updateMany({ _id: { $in: ids } }, { is_active: false });
     res.json({ message: `${ids.length} vendor(s) deactivated`, deleted: ids.length });
   } catch (error: any) {
-    if (error instanceof z.ZodError) return res.status(400).json({ error: error.errors[0].message });
+    if (error instanceof z.ZodError) return res.status(400).json({ error: error.message });
     console.error('Bulk delete vendors error:', error);
     res.status(500).json({ error: 'Failed to delete vendors' });
   }

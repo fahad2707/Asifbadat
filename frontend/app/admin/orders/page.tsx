@@ -5,6 +5,7 @@ import { Search } from 'lucide-react';
 import adminApi from '@/lib/admin-api';
 import toast from 'react-hot-toast';
 import { adminUi } from '@/lib/admin-ui';
+import { queryFromUrl } from '@/lib/queryFromUrl';
 import InvoiceFormLightbox, { type InvoiceInitialItem } from '@/components/admin/InvoiceFormLightbox';
 
 interface OrderItem {
@@ -93,7 +94,7 @@ export default function OnlineOrdersPage() {
   const [summary, setSummary] = useState<Summary | null>(null);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState('all');
-  const [search, setSearch] = useState('');
+  const [search, setSearch] = useState(() => queryFromUrl());
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [updating, setUpdating] = useState(false);
   const [quotationOpen, setQuotationOpen] = useState(false);
@@ -281,6 +282,21 @@ export default function OnlineOrdersPage() {
     fetchOrders();
   };
 
+  const deleteSelected = async () => {
+    if (updating || selectedRows.length === 0) return;
+    const count = selectedRows.length;
+    if (!confirm(`Delete ${count} online sale${count === 1 ? '' : 's'}? This cannot be undone.`)) return;
+    setUpdating(true);
+    const results = await Promise.allSettled(selectedRows.map((order) => adminApi.delete(`/online-orders/${order.id}`)));
+    const failed = results.filter((result) => result.status === 'rejected').length;
+    setUpdating(false);
+    if (failed) toast.error(`${count - failed} deleted. ${failed} could not be deleted.`);
+    else toast.success(count === 1 ? 'Online sale deleted' : `Deleted ${count} online sales`);
+    if (expandedId && selectedRows.some((order) => order.id === expandedId)) setExpandedId(null);
+    clearSelection();
+    fetchOrders();
+  };
+
   const chips = [
     { key: 'confirmed', label: 'To review', count: summary?.confirmed },
     { key: 'quoted', label: 'Quoted', count: summary?.quoted },
@@ -293,9 +309,6 @@ export default function OnlineOrdersPage() {
       <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4">
         <div>
           <h1 className={adminUi.pageTitle}>Online sales</h1>
-          <p className={`${adminUi.helper} mt-1`}>
-            Website orders are quotations to review — not invoices. Convert to an invoice, then ship. Stock comes off when delivered.
-          </p>
         </div>
         {summary && <span className={adminUi.meta}>{summary.total} total orders</span>}
       </div>
@@ -334,9 +347,17 @@ export default function OnlineOrdersPage() {
             type="button"
             disabled={updating}
             className={`${adminUi.btnDanger} disabled:opacity-50`}
+            onClick={deleteSelected}
+          >
+            {updating ? 'Working…' : 'Delete selected'}
+          </button>
+          <button
+            type="button"
+            disabled={updating}
+            className={`${adminUi.btnSecondary} disabled:opacity-50`}
             onClick={cancelSelected}
           >
-            {updating ? 'Cancelling…' : 'Cancel selected'}
+            Cancel selected
           </button>
           <button type="button" onClick={clearSelection} className={adminUi.btnGhost} disabled={updating}>
             Clear

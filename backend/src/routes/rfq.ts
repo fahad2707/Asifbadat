@@ -4,8 +4,10 @@ import mongoose from 'mongoose';
 import RFQ from '../models/RFQ';
 import Product from '../models/Product';
 import Customer from '../models/Customer';
-import { authenticateAdmin, AuthRequest } from '../middleware/auth';
+import Invoice from '../models/Invoice';
+import { authenticateAdmin, optionalAuthenticateUser, AuthRequest } from '../middleware/auth';
 import { DOC_PREFIX, nextPrefixedNumber } from '../utils/documentNumbers';
+import { recordAdminNotice } from '../services/adminNotice';
 import rateLimit from 'express-rate-limit';
 
 const router = express.Router();
@@ -20,6 +22,46 @@ const rfqCreateLimiter = rateLimit({
 
 async function generateRfqNumber(): Promise<string> {
   return nextPrefixedNumber(RFQ, 'rfq_number', DOC_PREFIX.rfq);
+}
+
+function convertedInvoiceNumber(shippingType?: string | null): string | null {
+  const raw = String(shippingType || '');
+  if (!raw.startsWith('converted:')) return null;
+  const number = raw.slice('converted:'.length).trim();
+  return number || null;
+}
+
+/** Quoted RFQs whose quotation is already an invoice move to closed, and missing RQ# / RI# are filled in. */
+async function syncQuotationChain(): Promise<void> {
+  if (mongoose.connection.readyState !== 1) return;
+  const rows = await RFQ.find({
+    quotation_id: { $ne: null },
+    $or: [
+      { status: 'quoted' },
+      { quotation_number: { $in: [null, ''] } },
+      { invoice_number: { $in: [null, ''] } },
+    ],
+  })
+    .select('_id quotation_id quotation_number invoice_number status')
+    .lean();
+  if (!rows.length) return;
+
+  const quotes = await Invoice.find({ _id: { $in: rows.map((row) => row.quotation_id) } })
+    .select('invoice_number shipping_type')
+    .lean();
+  const byId = new Map(quotes.map((quote) => [String(quote._id), quote]));
+  const writes = [];
+  for (const row of rows) {
+    const quote = byId.get(String(row.quotation_id));
+    if (!quote) continue;
+    const set: Record<string, string> = {};
+    if (!row.quotation_number && quote.invoice_number) set.quotation_number = String(quote.invoice_number);
+    const invoiceNumber = convertedInvoiceNumber((quote as { shipping_type?: string }).shipping_type);
+    if (invoiceNumber && row.invoice_number !== invoiceNumber) set.invoice_number = invoiceNumber;
+    if (invoiceNumber && row.status === 'quoted') set.status = 'closed';
+    if (Object.keys(set).length) writes.push(RFQ.updateOne({ _id: row._id }, { $set: set }));
+  }
+  if (writes.length) await Promise.all(writes);
 }
 
 const itemSchema = z.object({
@@ -60,7 +102,7 @@ const createSchema = z.object({
  * Public: submit an RFQ from website/store. No auth required so anonymous
  * visitors can request a quote without creating an account first.
  */
-router.post('/', rfqCreateLimiter, async (req, res) => {
+router.post('/', rfqCreateLimiter, optionalAuthenticateUser, async (req: AuthRequest, res) => {
   try {
     const data = createSchema.parse(req.body);
 
@@ -95,6 +137,13 @@ router.post('/', rfqCreateLimiter, async (req, res) => {
     );
 
     const rfqNumber = await generateRfqNumber();
+    let customerId: mongoose.Types.ObjectId | undefined;
+    if (req.userId && mongoose.Types.ObjectId.isValid(req.userId)) {
+      const linked = await Customer.findOne({ user_id: new mongoose.Types.ObjectId(req.userId) })
+        .select('_id')
+        .lean();
+      if (linked?._id) customerId = linked._id as mongoose.Types.ObjectId;
+    }
     const rfq = await RFQ.create({
       rfq_number: rfqNumber,
       status: 'pending',
@@ -103,6 +152,7 @@ router.post('/', rfqCreateLimiter, async (req, res) => {
       customer_phone: data.customer_phone,
       customer_company: data.customer_company,
       customer_comments: data.customer_comments,
+      customer_id: customerId,
       source: data.source || 'website',
       items,
     });
@@ -113,9 +163,16 @@ router.post('/', rfqCreateLimiter, async (req, res) => {
       status: rfq.status,
       created_at: rfq.created_at,
     });
+    void recordAdminNotice({
+      kind: 'rfq',
+      title: `${rfq.rfq_number} quote request`,
+      body: `${rfq.customer_name} sent a quote request`,
+      href: `/admin/rfq?q=${encodeURIComponent(rfq.rfq_number)}&open=${rfq._id.toString()}`,
+      ref: rfq.rfq_number,
+    });
   } catch (error: any) {
     if (error instanceof z.ZodError) {
-      return res.status(400).json({ error: error.errors[0]?.message || 'Invalid request' });
+      return res.status(400).json({ error: error.message || 'Invalid request' });
     }
     console.error('Create RFQ error:', error);
     res.status(500).json({ error: 'Failed to submit quote request' });
@@ -140,6 +197,8 @@ router.get('/', authenticateAdmin, async (req: AuthRequest, res) => {
         { customer_email: { $regex: search, $options: 'i' } },
       ];
     }
+
+    await syncQuotationChain();
 
     const [rfqs, total, pending, quoted] = await Promise.all([
       RFQ.find(query)
@@ -175,6 +234,7 @@ router.get('/', authenticateAdmin, async (req: AuthRequest, res) => {
         item_count: (r.items || []).reduce((s: number, it: any) => s + (it.quantity || 0), 0),
         quotation_id: r.quotation_id ? String(r.quotation_id) : null,
         quotation_number: r.quotation_number,
+        invoice_number: r.invoice_number,
         source: r.source,
         created_at: r.created_at,
         updated_at: r.updated_at,
@@ -223,6 +283,7 @@ router.get('/:id', authenticateAdmin, async (req: AuthRequest, res) => {
       })),
       quotation_id: r.quotation_id ? String(r.quotation_id) : null,
       quotation_number: r.quotation_number,
+      invoice_number: r.invoice_number,
       source: r.source,
       notes: r.notes,
       created_at: r.created_at,
@@ -255,7 +316,7 @@ router.patch('/:id', authenticateAdmin, async (req: AuthRequest, res) => {
     res.json({ ok: true });
   } catch (error: any) {
     if (error instanceof z.ZodError) {
-      return res.status(400).json({ error: error.errors[0]?.message || 'Invalid request' });
+      return res.status(400).json({ error: error.message || 'Invalid request' });
     }
     console.error('Update RFQ error:', error);
     res.status(500).json({ error: 'Failed to update RFQ' });
@@ -274,12 +335,17 @@ router.post('/:id/link-quotation', authenticateAdmin, async (req: AuthRequest, r
       return res.status(404).json({ error: 'RFQ not found' });
     }
     const data = linkQuotationSchema.parse(req.body);
+    let quotationNumber = data.quotation_number;
+    if (!quotationNumber && mongoose.Types.ObjectId.isValid(data.quotation_id)) {
+      const quote = await Invoice.findById(data.quotation_id).select('invoice_number').lean();
+      if (quote?.invoice_number) quotationNumber = String(quote.invoice_number);
+    }
     const updated = await RFQ.findByIdAndUpdate(
       req.params.id,
       {
         $set: {
           quotation_id: mongoose.Types.ObjectId.isValid(data.quotation_id) ? data.quotation_id : undefined,
-          quotation_number: data.quotation_number,
+          quotation_number: quotationNumber,
           status: 'quoted',
         },
       },
@@ -289,7 +355,7 @@ router.post('/:id/link-quotation', authenticateAdmin, async (req: AuthRequest, r
     res.json({ ok: true });
   } catch (error: any) {
     if (error instanceof z.ZodError) {
-      return res.status(400).json({ error: error.errors[0]?.message || 'Invalid request' });
+      return res.status(400).json({ error: error.message || 'Invalid request' });
     }
     console.error('Link RFQ quotation error:', error);
     res.status(500).json({ error: 'Failed to link quotation' });
@@ -344,7 +410,7 @@ router.post('/:id/ensure-customer', authenticateAdmin, async (req: AuthRequest, 
     res.json({ customer_id: existing._id.toString() });
   } catch (error: any) {
     if (error instanceof z.ZodError) {
-      return res.status(400).json({ error: error.errors[0]?.message || 'Invalid request' });
+      return res.status(400).json({ error: error.message || 'Invalid request' });
     }
     console.error('Ensure RFQ customer error:', error);
     res.status(500).json({ error: 'Failed to prepare customer' });
