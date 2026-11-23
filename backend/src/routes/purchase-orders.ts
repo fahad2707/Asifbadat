@@ -14,6 +14,7 @@ import { z } from 'zod';
 import { receivePurchaseOrder, PurchaseOrderReceiveError } from '../services/purchaseOrderReceiveService';
 import { postVendorLedger } from '../modules/vendors/services/vendorLedgerService';
 import { DOC_PREFIX, nextPrefixedNumber } from '../utils/documentNumbers';
+import { recordAdminNotice } from '../services/adminNotice';
 
 const router = express.Router();
 
@@ -402,8 +403,15 @@ router.post('/', authenticateAdmin, async (req: AuthRequest, res) => {
       total_amount: po.total_amount,
       created_at: po.created_at,
     });
+    void recordAdminNotice({
+      kind: 'purchase_order',
+      title: `${po.po_number} purchase order`,
+      body: `PO created for ${vendor.name} · $${Number(total_amount).toFixed(2)}`,
+      href: `/admin/purchase-orders/${po._id.toString()}`,
+      ref: po.po_number,
+    });
   } catch (error: any) {
-    if (error instanceof z.ZodError) return res.status(400).json({ error: error.message });
+    if (error instanceof z.ZodError) return res.status(400).json({ error: error.errors[0].message });
     console.error('Create PO error:', error);
     res.status(500).json({ error: 'Failed to create purchase order' });
   }
@@ -459,7 +467,7 @@ router.put('/:id', authenticateAdmin, async (req: AuthRequest, res) => {
     }
     res.json({ id: po._id.toString(), ...po.toObject() });
   } catch (error: any) {
-    if (error instanceof z.ZodError) return res.status(400).json({ error: error.message });
+    if (error instanceof z.ZodError) return res.status(400).json({ error: error.errors[0].message });
     console.error('Update PO error:', error);
     res.status(500).json({ error: 'Failed to update purchase order' });
   }
@@ -510,12 +518,27 @@ router.post('/:id/receive', authenticateAdmin, async (req: AuthRequest, res) => 
       items,
       adminId: req.userId,
     });
+    const po = await PurchaseOrder.findById(result.id).populate('vendor_id', 'name').lean();
+    if (po) {
+      const names = new Map((po.items || []).map((line) => [String(line.product_id), line.product_name]));
+      const parts = items
+        .filter((line) => Number(line.quantity_received) > 0)
+        .map((line) => `${line.quantity_received} ${names.get(String(line.product_id)) || 'item'}`);
+      const vendor = po.vendor_id as { name?: string } | null;
+      void recordAdminNotice({
+        kind: 'purchase_order',
+        title: `${po.po_number} received`,
+        body: `${vendor?.name || 'Supplier'} · ${parts.join(', ') || 'Goods received'}`,
+        href: `/admin/purchase-orders/${String(po._id)}`,
+        ref: `${po.po_number}:RECEIVED:${Date.now()}`,
+      });
+    }
     res.json(result);
   } catch (error: any) {
     if (error instanceof PurchaseOrderReceiveError) {
       return res.status(error.status).json(error.body);
     }
-    if (error instanceof z.ZodError) return res.status(400).json({ error: error.message });
+    if (error instanceof z.ZodError) return res.status(400).json({ error: error.errors[0].message });
     console.error('Receive PO error:', error);
     res.status(500).json({ error: 'Failed to receive PO' });
   }
@@ -623,6 +646,14 @@ router.post('/:id/payments', authenticateAdmin, async (req: AuthRequest, res) =>
     po.amount_paid = newAmountPaid;
     po.payment_status = newPaymentStatus;
     await po.save();
+    const vendor = await Vendor.findById(po.vendor_id).select('name').lean();
+    void recordAdminNotice({
+      kind: 'purchase_payment',
+      title: `${po.po_number} supplier payment`,
+      body: `$${payAmount.toFixed(2)} ${data.payment_method || 'Cash'} to ${vendor?.name || 'supplier'}`,
+      href: `/admin/purchase-orders/${po._id.toString()}`,
+      ref: `${po.po_number}:PAY:${payAmount}:${Date.now()}`,
+    });
 
     // Post to vendor ledger
     if (po.vendor_id) {
@@ -658,7 +689,7 @@ router.post('/:id/payments', authenticateAdmin, async (req: AuthRequest, res) =>
       payments: po.payments,
     });
   } catch (error: any) {
-    if (error instanceof z.ZodError) return res.status(400).json({ error: error.message });
+    if (error instanceof z.ZodError) return res.status(400).json({ error: error.errors[0].message });
     console.error('Record PO payment error:', error);
     res.status(500).json({ error: 'Failed to record payment' });
   }

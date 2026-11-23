@@ -3,14 +3,18 @@
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import adminApi from '@/lib/admin-api';
+import toast from 'react-hot-toast';
 
 type Hold = 'waiting' | 'held' | 'returned';
 
 type DamagedRow = {
   id: string;
+  source?: string;
   date: string | null;
   product_name: string;
   quantity: number;
+  unit_cost?: number | null;
+  line_total?: number | null;
   quantity_still_held: number;
   quantity_returned_to_supplier: number;
   customer_name: string;
@@ -21,8 +25,8 @@ type DamagedRow = {
   po_id: string | null;
   po_number: string | null;
   invoice_number: string | null;
-  credit_memo_id: string;
-  credit_memo_number: string;
+  credit_memo_id: string | null;
+  credit_memo_number: string | null;
   supplier_credit_memo_number: string | null;
   hold: Hold;
 };
@@ -51,6 +55,8 @@ export default function DamagedReturns() {
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<(typeof FILTERS)[number]['id']>('held');
   const [search, setSearch] = useState('');
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [creating, setCreating] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -119,6 +125,27 @@ export default function DamagedReturns() {
             {option.id === 'returned' ? ` (${counts.returned})` : ''}
           </button>
         ))}
+        <button
+          type="button"
+          disabled={creating || selected.size === 0}
+          onClick={async () => {
+            setCreating(true);
+            try {
+              const res = await adminApi.post('/credit-memos/from-damaged-stock', { ids: [...selected] });
+              toast.success(`${res.data?.count || 0} supplier credit memo(s) drafted`);
+              setSelected(new Set());
+              const fresh = await adminApi.get('/inventory/damaged-returns');
+              setRows(fresh.data.rows || []);
+            } catch (err: any) {
+              toast.error(err.response?.data?.error || 'Could not create supplier credits');
+            } finally {
+              setCreating(false);
+            }
+          }}
+          className="px-3 py-1.5 rounded-lg text-xs font-semibold border border-[#0F172A] bg-black text-white disabled:opacity-40"
+        >
+          Credit selected suppliers
+        </button>
         <input
           type="search"
           value={search}
@@ -143,9 +170,11 @@ export default function DamagedReturns() {
           <table className="w-full border-collapse min-w-[1100px] text-xs">
             <thead className="bg-[#F8FAFC] text-[#64748B]">
               <tr>
+                <th className="w-8 py-2.5 px-3" />
                 <th className="text-left py-2.5 px-3 font-bold uppercase tracking-wider text-[10px]">Date</th>
                 <th className="text-left py-2.5 px-3 font-bold uppercase tracking-wider text-[10px]">Product</th>
                 <th className="text-right py-2.5 px-3 font-bold uppercase tracking-wider text-[10px]">Qty</th>
+                <th className="text-right py-2.5 px-3 font-bold uppercase tracking-wider text-[10px]">Unit</th>
                 <th className="text-left py-2.5 px-3 font-bold uppercase tracking-wider text-[10px]">Customer</th>
                 <th className="text-left py-2.5 px-3 font-bold uppercase tracking-wider text-[10px]">Supplier</th>
                 <th className="text-left py-2.5 px-3 font-bold uppercase tracking-wider text-[10px]">PO</th>
@@ -157,6 +186,23 @@ export default function DamagedReturns() {
             <tbody>
               {visible.map((row) => (
                 <tr key={row.id} className="border-t border-[#E2E8F0]">
+                  <td className="py-2.5 px-3">
+                    {row.source === 'warehouse' && row.hold === 'held' && row.supplier_id && (
+                      <input
+                        type="checkbox"
+                        aria-label={`Select ${row.product_name}`}
+                        checked={selected.has(row.id)}
+                        onChange={() => {
+                          setSelected((prev) => {
+                            const next = new Set(prev);
+                            if (next.has(row.id)) next.delete(row.id);
+                            else next.add(row.id);
+                            return next;
+                          });
+                        }}
+                      />
+                    )}
+                  </td>
                   <td className="py-2.5 px-3 whitespace-nowrap">{fmtDate(row.date)}</td>
                   <td className="py-2.5 px-3 font-semibold text-[#0F172A]">
                     {row.product_name}
@@ -171,6 +217,7 @@ export default function DamagedReturns() {
                   <td className={`py-2.5 px-3 text-right font-mono font-bold ${row.hold === 'held' ? 'text-red-600' : 'text-[#0F172A]'}`}>
                     {row.quantity}
                   </td>
+                  <td className="py-2.5 px-3 text-right font-mono">{money(row.unit_cost ?? row.purchase_rate ?? null)}</td>
                   <td className="py-2.5 px-3">{row.customer_name}</td>
                   <td className="py-2.5 px-3">
                     {row.supplier_name ? (

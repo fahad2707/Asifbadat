@@ -13,6 +13,7 @@ import {
   markCreditMemoDeliveredToVendor,
   markCreditMemoDispatched,
   markCreditMemoReceived,
+  markVendorCreditPaymentReceived,
   CreditMemoInventoryError,
 } from '../services/creditMemoService';
 import {
@@ -29,6 +30,10 @@ import {
 } from '../services/creditMemoFromPurchaseOrder';
 import { sendPdfResponse } from '../../../utils/pdfHelpers';
 import { annotateDamagedPurchaseSources } from '../services/purchaseSourceByRate';
+import { createVendorCreditsFromDamages, CreditMemoFromPoError as DamagePoError, InventoryDamageError } from '../../../services/inventoryDamage';
+import { getVendorCreditMemoSplits } from '../services/creditMemoBalances';
+import { vendorAccountPosition, vendorCreditCoversUnpaidBills } from '../../../modules/vendors/services/vendorAccountPosition';
+import PurchaseOrder from '../../../models/PurchaseOrder';
 
 const router = express.Router();
 
@@ -368,6 +373,8 @@ router.get('/', authenticateAdmin, async (req: AuthRequest, res) => {
         received_at: cm.received_at,
         dispatched_at: cm.dispatched_at,
         delivered_at: cm.delivered_at,
+        vendor_payment_received_at: cm.vendor_payment_received_at,
+        vendor_payment_method: cm.vendor_payment_method,
         items: cm.items,
       })),
       pagination: { page: Number(page), limit: Number(limit), total, total_pages: Math.ceil(total / Number(limit)) },
@@ -437,6 +444,9 @@ router.get('/:id', authenticateAdmin, async (req: AuthRequest, res) => {
       received_at: c.received_at,
       dispatched_at: c.dispatched_at,
       delivered_at: c.delivered_at,
+      vendor_payment_received_at: c.vendor_payment_received_at,
+      vendor_payment_method: c.vendor_payment_method,
+      vendor_payment_reference: c.vendor_payment_reference,
       items: c.items,
     });
   } catch (e) {
@@ -523,7 +533,7 @@ router.post('/', authenticateAdmin, async (req: AuthRequest, res) => {
         tax_percent: priced.tax_percent,
         tax_amount: priced.tax_amount,
         total: priced.total,
-        ...(purchaseStamp(i) as any),
+        ...purchaseStamp(i),
       };
     });
     const subtotal = items.reduce((s, i) => s + i.quantity * i.unit_price, 0);
@@ -673,10 +683,46 @@ router.put('/:id', authenticateAdmin, async (req: AuthRequest, res) => {
 });
 
 // Approve
+router.post('/from-damaged-stock', authenticateAdmin, async (req: AuthRequest, res) => {
+  try {
+    const ids = Array.isArray(req.body?.ids) ? req.body.ids.map(String) : [];
+    const created = await createVendorCreditsFromDamages(ids, req.userId);
+    for (const memo of created) {
+      void recordAdminNotice({
+        kind: 'credit_memo',
+        title: `${memo.credit_memo_number} credit memo`,
+        body: 'Supplier credit drafted from warehouse damaged stock',
+        href: `/admin/credit-memos/vendors?q=${encodeURIComponent(memo.credit_memo_number)}`,
+        ref: memo.credit_memo_number,
+      });
+    }
+    res.status(201).json({ created, count: created.length });
+  } catch (e: any) {
+    if (e instanceof InventoryDamageError || e instanceof DamagePoError || e instanceof CreditMemoFromPoError) {
+      return res.status(e.status || 400).json({ error: e.message });
+    }
+    console.error('Credit memos from damaged stock:', e);
+    res.status(500).json({ error: 'Failed to create supplier credits' });
+  }
+});
+
 router.post('/:id/mark-dispatched', authenticateAdmin, async (req: AuthRequest, res) => {
   try {
     const result = await markCreditMemoDispatched(req.params.id, req.userId!);
     if (!result.success) return res.status(400).json({ error: result.error });
+    const cm = await CreditMemo.findById(req.params.id).lean();
+    if (cm) {
+      const parts = (cm.items || [])
+        .filter((item) => Number(item.quantity) > 0)
+        .map((item) => `${item.quantity} ${item.product_name || 'item'}`);
+      void recordAdminNotice({
+        kind: 'credit_memo',
+        title: `${cm.credit_memo_number} dispatched`,
+        body: parts.length ? `${parts.join(', ')} left inventory` : `Return ${cm.credit_memo_number} dispatched`,
+        href: `/admin/credit-memos/vendors?q=${encodeURIComponent(cm.credit_memo_number)}`,
+        ref: `${cm.credit_memo_number}:DISPATCHED`,
+      });
+    }
     res.json({ success: true, message: 'Return marked dispatched' });
   } catch (e: any) {
     if (e instanceof CreditMemoInventoryError) {
@@ -712,10 +758,102 @@ router.post('/:id/mark-received', authenticateAdmin, async (req: AuthRequest, re
   }
 });
 
+router.post('/:id/mark-vendor-payment-received', authenticateAdmin, async (req: AuthRequest, res) => {
+  try {
+    const schema = z.object({
+      payment_method: z.string().optional(),
+      reference: z.string().optional(),
+    });
+    const data = schema.parse(req.body || {});
+    const current = await CreditMemo.findById(req.params.id);
+    if (!current) return res.status(404).json({ error: 'Credit memo not found' });
+    if (current.type !== 'VENDOR' || !current.vendor_id) {
+      return res.status(400).json({ error: 'Only supplier credit memos collect payment from a vendor' });
+    }
+    const [poAgg, splits] = await Promise.all([
+      PurchaseOrder.aggregate([
+        { $match: { vendor_id: current.vendor_id, status: { $ne: 'cancelled' } } },
+        {
+          $group: {
+            _id: null,
+            totalPurchases: { $sum: '$total_amount' },
+            totalPaid: { $sum: { $ifNull: ['$amount_paid', 0] } },
+          },
+        },
+      ]),
+      getVendorCreditMemoSplits('VENDOR', [current.vendor_id as mongoose.Types.ObjectId]),
+    ]);
+    const split = splits.get(String(current.vendor_id)) || { open: 0, received: 0 };
+    const withoutThis = vendorAccountPosition({
+      purchases: poAgg[0]?.totalPurchases ?? 0,
+      paid: poAgg[0]?.totalPaid ?? 0,
+      credits_open: Math.max(0, split.open - Number(current.total_amount || 0)),
+    }).account_position;
+    if (vendorCreditCoversUnpaidBills(withoutThis)) {
+      return res.status(400).json({
+        error: 'This credit is reducing what you owe this supplier. Leave it open to pay less on the next purchase order.',
+      });
+    }
+    const result = await markVendorCreditPaymentReceived(req.params.id, req.userId!, data);
+    if (!result.success) return res.status(400).json({ error: result.error });
+    const vendor = await Vendor.findById(current.vendor_id).select('name').lean();
+    void recordAdminNotice({
+      kind: 'credit_memo',
+      title: `${current.credit_memo_number} payment received`,
+      body: `$${Number(current.total_amount).toFixed(2)} collected from ${vendor?.name || 'supplier'}`,
+      href: `/admin/credit-memos/vendors?q=${encodeURIComponent(current.credit_memo_number)}`,
+      ref: `${current.credit_memo_number}:VENDOR_PAYMENT`,
+    });
+    res.json({ success: true, message: 'Payment from supplier recorded' });
+  } catch (e: any) {
+    if (e.name === 'ZodError') return res.status(400).json({ error: e.errors?.[0]?.message || 'Validation error' });
+    console.error('Mark vendor credit payment received:', e);
+    res.status(500).json({ error: 'Failed to record supplier payment' });
+  }
+});
+
 router.post('/:id/approve', authenticateAdmin, async (req: AuthRequest, res) => {
   try {
     const result = await approveCreditMemo(req.params.id, req.userId!);
     if (!result.success) return res.status(400).json({ error: result.error });
+    const cm = await CreditMemo.findById(req.params.id).populate('vendor_id', 'name').lean();
+    if (cm && cm.type === 'VENDOR' && cm.vendor_id) {
+      const vendorDoc = cm.vendor_id as { _id?: unknown; name?: string };
+      const vendorId = vendorDoc._id || cm.vendor_id;
+      const [poAgg, splits] = await Promise.all([
+        PurchaseOrder.aggregate([
+          { $match: { vendor_id: vendorId, status: { $ne: 'cancelled' } } },
+          {
+            $group: {
+              _id: null,
+              totalPurchases: { $sum: '$total_amount' },
+              totalPaid: { $sum: { $ifNull: ['$amount_paid', 0] } },
+            },
+          },
+        ]),
+        getVendorCreditMemoSplits('VENDOR', [vendorId as mongoose.Types.ObjectId]),
+      ]);
+      const split = splits.get(String(vendorId)) || { open: 0, received: 0 };
+      const position = vendorAccountPosition({
+        purchases: poAgg[0]?.totalPurchases ?? 0,
+        paid: poAgg[0]?.totalPaid ?? 0,
+        credits_open: split.open,
+        credits_received: split.received,
+      });
+      const balanceLine =
+        position.receivable > 0
+          ? `Supplier owes $${position.receivable.toFixed(2)}`
+          : position.payable > 0
+            ? `You owe $${position.payable.toFixed(2)}`
+            : 'Supplier balance is settled';
+      void recordAdminNotice({
+        kind: 'credit_memo',
+        title: `${cm.credit_memo_number} approved`,
+        body: `${vendorDoc.name || 'Supplier'} · ${balanceLine}`,
+        href: `/admin/credit-memos/vendors?q=${encodeURIComponent(cm.credit_memo_number)}`,
+        ref: `${cm.credit_memo_number}:APPROVED`,
+      });
+    }
     res.json({ success: true, message: 'Credit memo approved' });
   } catch (e: any) {
     if (e instanceof CreditMemoInventoryError) {

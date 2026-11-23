@@ -8,7 +8,7 @@ import { isAdminAuthRedirectError } from '@/lib/admin-auth-redirect';
 import RegionCombobox from '@/components/RegionCombobox';
 import { STATE_PROVINCE_OPTIONS } from '@/lib/regions';
 import toast from 'react-hot-toast';
-import { moneyOut, moneyPlain } from '@/lib/moneyTone';
+import { moneyIn, moneyOut, moneyPlain } from '@/lib/moneyTone';
 import { adminUi } from '@/lib/admin-ui';
 import PurchaseBooksStatement from '@/components/admin/PurchaseBooksStatement';
 import { STATEMENT_PERIODS, type StatementPeriod } from '@/components/admin/statementPeriods';
@@ -32,6 +32,8 @@ interface Vendor {
   balance?: number;
   open_balance?: number;
   paid_balance?: number;
+  payable?: number;
+  receivable?: number;
 }
 
 export default function VendorsPage() {
@@ -273,7 +275,11 @@ export default function VendorsPage() {
                       <td className="py-3.5 px-4 text-xs font-mono font-bold text-teal-450">{v.supplier_id || '—'}</td>
                       <td className="py-3.5 px-4 text-xs font-semibold text-slate-205">{v.contact_name || v.name}</td>
                       <td className="py-3.5 px-4 text-xs text-slate-400">{v.name}</td>
-                      <td className={`py-3.5 px-4 text-xs text-right font-extrabold font-mono ${Number(v.open_balance ?? v.balance ?? 0) > 0 ? moneyOut : moneyPlain}`}>${Number(v.open_balance ?? v.balance ?? 0).toLocaleString(undefined, {minimumFractionDigits: 2})}</td>
+                      <td className={`py-3.5 px-4 text-xs text-right font-extrabold font-mono ${Number(v.receivable || 0) > 0 ? moneyIn : Number(v.payable ?? v.open_balance ?? v.balance ?? 0) > 0 ? moneyOut : moneyPlain}`}>
+                        {Number(v.receivable || 0) > 0
+                          ? `+$${Number(v.receivable).toLocaleString(undefined, { minimumFractionDigits: 2 })}`
+                          : `$${Number(v.payable ?? v.open_balance ?? v.balance ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}`}
+                      </td>
                       <td className={`py-3.5 px-4 text-xs text-right font-extrabold font-mono ${moneyPlain}`}>${Number(v.paid_balance ?? v.payments ?? 0).toLocaleString(undefined, {minimumFractionDigits: 2})}</td>
                       <td className="py-3.5 px-4 text-right text-xs">
                         <div className="flex items-center justify-end gap-3" onClick={(e) => e.stopPropagation()}>

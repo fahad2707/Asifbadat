@@ -45,6 +45,7 @@ import reportRoutes from './modules/reports/routes/reports';
 import complianceRoutes from './routes/compliance';
 import onlineOrderRoutes from './routes/online-orders';
 import rfqRoutes from './routes/rfq';
+import bankingRoutes from './routes/banking';
 
 // Keep the process alive on unhandled promise rejections (e.g. async route errors)
 // so the server does not crash and you can see the logged error.
@@ -204,6 +205,7 @@ app.use('/api/rfq', rfqRoutes);
 app.use('/api/expenses', expenseRoutes);
 app.use('/api/reports', reportRoutes);
 app.use('/api/compliance', complianceRoutes);
+app.use('/api/banking', bankingRoutes);
 
 // Error handling middleware
 app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {

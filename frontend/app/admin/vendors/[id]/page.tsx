@@ -7,7 +7,7 @@ import { ArrowLeft, FileText, UploadCloud } from 'lucide-react';
 import adminApi, { uploadApi } from '@/lib/admin-api';
 import toast from 'react-hot-toast';
 import { EditableAddress, EditableField } from '@/components/admin/EditableField';
-import { moneyOut, moneyPlain } from '@/lib/moneyTone';
+import { moneyIn, moneyOut, moneyPlain } from '@/lib/moneyTone';
 
 interface Supplier {
   id: string;
@@ -55,7 +55,8 @@ export default function SupplierDetailPage() {
   const id = params.id as string;
 
   const [supplier, setSupplier] = useState<Supplier | null>(null);
-  const [balance, setBalance] = useState<number | null>(null);
+  const [payable, setPayable] = useState(0);
+  const [receivable, setReceivable] = useState(0);
   const [ledger, setLedger] = useState<LedgerEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
@@ -74,7 +75,8 @@ export default function SupplierDetailPage() {
         adminApi.get(`/vendors/${id}/ledger`, { params: { limit: 100 } }),
       ]);
       setSupplier(vendorRes.data);
-      setBalance(balanceRes.data?.balance ?? null);
+      setPayable(Number(balanceRes.data?.payable ?? balanceRes.data?.balance) || 0);
+      setReceivable(Number(balanceRes.data?.receivable) || 0);
       setLedger((ledgerRes.data?.entries || []) as LedgerEntry[]);
     } catch (e: any) {
       toast.error(e.response?.data?.error || 'Failed to load supplier');
@@ -138,8 +140,6 @@ export default function SupplierDetailPage() {
     );
   }
 
-  const openBalance = balance ?? 0;
-
   return (
     <div className="space-y-6">
       <div>
@@ -169,8 +169,10 @@ export default function SupplierDetailPage() {
           </div>
         </div>
         <div className="bg-white border border-[#E2E8F0] rounded-lg px-4 py-3 min-w-[220px]">
-          <p className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">Outstanding Dues Payable</p>
-          <p className={`text-2xl font-extrabold mt-1 font-mono ${openBalance > 0 ? moneyOut : moneyPlain}`}>${openBalance.toFixed(2)}</p>
+          <p className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">{receivable > 0 ? 'Supplier owes us' : 'Outstanding dues payable'}</p>
+          <p className={`text-2xl font-extrabold mt-1 font-mono ${receivable > 0 ? moneyIn : payable > 0 ? moneyOut : moneyPlain}`}>
+            ${receivable > 0 ? receivable.toFixed(2) : payable.toFixed(2)}
+          </p>
           <div className="mt-2">
             <EditableField
               label="Credit limit"

@@ -8,6 +8,8 @@ export const ADMIN_NOTICE_KINDS = [
   'receipt_deposit',
   'shipment',
   'credit_memo',
+  'purchase_order',
+  'purchase_payment',
 ] as const;
 
 export type AdminNoticeKind = (typeof ADMIN_NOTICE_KINDS)[number];

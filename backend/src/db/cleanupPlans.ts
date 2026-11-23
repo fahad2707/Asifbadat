@@ -33,6 +33,7 @@ import TaxType from '../models/TaxType';
 import User from '../models/User';
 import Vendor from '../models/Vendor';
 import WebsiteSignupApplication from '../models/WebsiteSignupApplication';
+import InventoryDamage from '../models/InventoryDamage';
 import CreditMemo from '../modules/credit-memo/models/CreditMemo';
 import Expense from '../modules/expenses/models/Expense';
 import ExpenseCategory from '../modules/expenses/models/ExpenseCategory';
@@ -207,6 +208,7 @@ export const FULL_RESET_MODELS: readonly NamedModel[] = [
   { name: 'POSSales', model: POSSale },
   { name: 'AuditLogs', model: AuditLog, note: 'audit history is permanently lost' },
   { name: 'AdminNotices', model: AdminNotice },
+  { name: 'InventoryDamages', model: InventoryDamage },
   { name: 'Products', model: Product },
   { name: 'SubCategories', model: SubCategory },
   { name: 'Categories', model: Category },

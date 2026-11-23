@@ -18,6 +18,12 @@ import {
 import { serializeStockMovement } from '../utils/stockMovementDisplay';
 import { buildInventoryStatement } from '../services/inventoryStatement';
 import { damagedRowsForStatement, loadDamagedReturnRows } from '../services/damagedReturns';
+import InventoryDamage from '../models/InventoryDamage';
+import {
+  markInventoryDamaged,
+  serializeDamage,
+  InventoryDamageError,
+} from '../services/inventoryDamage';
 import StoreSettings from '../models/StoreSettings';
 import { createStockMovement, StockMovementWriteError } from '../utils/createStockMovement';
 import { StockMovementType } from '../shared/enums';
@@ -181,7 +187,7 @@ router.post('/adjust', authenticateAdmin, async (req: AuthRequest, res) => {
         : 'Prices updated',
     });
   } catch (error: any) {
-    if (error instanceof z.ZodError) return res.status(400).json({ error: error.message });
+    if (error instanceof z.ZodError) return res.status(400).json({ error: error.errors[0].message });
     if (error instanceof StockMovementWriteError) {
       return res.status(error.status).json({ error: error.message });
     }
@@ -248,7 +254,7 @@ router.post('/physical-count', authenticateAdmin, async (req: AuthRequest, res) 
     if (error instanceof PhysicalCountError || error instanceof StockSheetError) {
       return res.status(error.status).json(error.body);
     }
-    if (error instanceof z.ZodError) return res.status(400).json({ error: error.message });
+    if (error instanceof z.ZodError) return res.status(400).json({ error: error.errors[0].message });
     console.error('Physical count error:', error);
     const msg = String(error?.message || '');
     if (/Transaction numbers are only allowed on a replica set/i.test(msg)) {
@@ -265,7 +271,12 @@ router.post('/physical-count', authenticateAdmin, async (req: AuthRequest, res) 
 // Get stock movements for a product
 router.get('/damaged-returns', authenticateAdmin, async (req: AuthRequest, res) => {
   try {
-    const rows = await loadDamagedReturnRows();
+    const [customerRows, warehouseDocs] = await Promise.all([
+      loadDamagedReturnRows(),
+      InventoryDamage.find().sort({ created_at: -1 }).lean(),
+    ]);
+    const warehouse = warehouseDocs.map((row) => serializeDamage(row));
+    const rows = [...warehouse, ...customerRows];
     const stillHeld = rows.reduce((sum, row) => sum + row.quantity_still_held, 0);
     res.json({
       still_held: stillHeld,
@@ -276,6 +287,35 @@ router.get('/damaged-returns', authenticateAdmin, async (req: AuthRequest, res) 
   } catch (error) {
     console.error('Damaged returns:', error);
     res.status(500).json({ error: 'Failed to load damaged returns' });
+  }
+});
+
+router.post('/mark-damaged', authenticateAdmin, async (req: AuthRequest, res) => {
+  try {
+    const schema = z.object({
+      product_id: z.string().min(1),
+      quantity: z.coerce.number().int().positive(),
+      vendor_id: z.string().min(1),
+      po_id: z.string().optional(),
+      notes: z.string().optional(),
+    });
+    const data = schema.parse(req.body);
+    const row = await markInventoryDamaged({
+      productId: data.product_id,
+      quantity: data.quantity,
+      vendorId: data.vendor_id,
+      poId: data.po_id,
+      notes: data.notes,
+      adminId: req.userId,
+    });
+    res.status(201).json(row);
+  } catch (error: unknown) {
+    if (error instanceof InventoryDamageError) {
+      return res.status(error.status).json({ error: error.message });
+    }
+    if (error instanceof z.ZodError) return res.status(400).json({ error: error.errors[0].message });
+    console.error('Mark damaged:', error);
+    res.status(500).json({ error: 'Failed to mark damaged stock' });
   }
 });
 
@@ -359,7 +399,7 @@ router.post('/adjustment-sheets', authenticateAdmin, async (req: AuthRequest, re
     res.status(201).json(sheet);
   } catch (error: any) {
     if (error instanceof StockSheetError) return res.status(error.status).json(error.body);
-    if (error instanceof z.ZodError) return res.status(400).json({ error: error.message });
+    if (error instanceof z.ZodError) return res.status(400).json({ error: error.errors[0].message });
     console.error('Create adjustment sheet error:', error);
     const msg = String(error?.message || '');
     if (/Transaction numbers are only allowed on a replica set/i.test(msg)) {

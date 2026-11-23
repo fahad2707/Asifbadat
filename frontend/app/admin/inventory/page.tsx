@@ -13,7 +13,6 @@ import { sellingBelowMin, minSellingPrice } from '@/lib/min-selling-price';
 import { formatStockDifference, physicalCountPreview } from '@/lib/physical-count';
 import { toastBarcodeNotFound, toastProductAdded } from '@/lib/barcode-feedback';
 import InventoryStatement, { type InventoryStatementData } from '@/components/admin/InventoryStatement';
-import MarkDamageModal from '@/components/admin/MarkDamageModal';
 
 interface InventoryItem {
   id: string;
@@ -220,6 +219,10 @@ function InventoryPageInner() {
   const [supplierFilter, setSupplierFilter] = useState('');
   const [selectedReorderIds, setSelectedReorderIds] = useState<Set<string>>(new Set());
   const [vendors, setVendors] = useState<Array<{ id: string; name: string }>>([]);
+  const [damageTarget, setDamageTarget] = useState<InventoryItem | null>(null);
+  const [damageQty, setDamageQty] = useState('1');
+  const [damageVendorId, setDamageVendorId] = useState('');
+  const [damageSaving, setDamageSaving] = useState(false);
   const [showItemModal, setShowItemModal] = useState(false);
   const [showTypeModal, setShowTypeModal] = useState(false);
   const [showCategoryModal, setShowCategoryModal] = useState(false);
@@ -228,14 +231,6 @@ function InventoryPageInner() {
   const [adjustLines, setAdjustLines] = useState<AdjustLine[]>(() => Array.from({ length: ADJUST_LINES }, emptyAdjustLine));
   const [adjustScan, setAdjustScan] = useState('');
   const [adjustNotes, setAdjustNotes] = useState('');
-  // damage modal state
-  const [damageModalProduct, setDamageModalProduct] = useState<any>(null);
-  const openMarkDamage = (p: any) => setDamageModalProduct(p);
-  const closeMarkDamage = () => setDamageModalProduct(null);
-  const reloadAfterDamage = () => {
-    router.refresh();
-    closeMarkDamage();
-  };
   const [adjustSaving, setAdjustSaving] = useState(false);
   const [priceGroups, setPriceGroups] = useState<PriceGroupOption[]>([]);
   const [selectedPriceGroupId, setSelectedPriceGroupId] = useState('');
@@ -1449,6 +1444,17 @@ function InventoryPageInner() {
                         <td className="py-3 px-4 text-xs text-right font-mono text-[#0F172A]">{lineValue(p.price, p.stock_quantity)}</td>
                         <td className="py-3 px-4 text-right text-xs">
                           <div className="flex items-center justify-end gap-3">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setDamageTarget(p);
+                                setDamageQty('1');
+                                setDamageVendorId(p.best_vendor_id || '');
+                              }}
+                              className="text-red-600 hover:underline font-semibold"
+                            >
+                              Damage
+                            </button>
                             <button type="button" onClick={() => openHistory(p)} className="text-[#64748B] hover:text-[#0F9F8F] hover:underline font-semibold">
                               History
                             </button>
@@ -2533,6 +2539,53 @@ function InventoryPageInner() {
         </div>
       )}
       {statement && <InventoryStatement statement={statement} onClose={() => setStatement(null)} />}
+
+      {damageTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => setDamageTarget(null)}>
+          <div className="bg-white rounded-xl shadow-xl max-w-md w-full p-6" onClick={(e) => e.stopPropagation()}>
+            <h2 className="text-lg font-semibold text-gray-900 mb-1">Mark as damaged</h2>
+            <p className="text-sm text-gray-500 mb-4">{damageTarget.name} · {damageTarget.stock_quantity} on hand</p>
+            <label className="block text-xs font-semibold mb-1">Quantity</label>
+            <input type="number" min={1} value={damageQty} onChange={(e) => setDamageQty(e.target.value)} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm mb-3" />
+            <label className="block text-xs font-semibold mb-1">Supplier</label>
+            <select value={damageVendorId} onChange={(e) => setDamageVendorId(e.target.value)} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm mb-4">
+              <option value="">Choose supplier</option>
+              {vendors.map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}
+            </select>
+            <div className="flex justify-end gap-2">
+              <button type="button" onClick={() => setDamageTarget(null)} className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg">Cancel</button>
+              <button
+                type="button"
+                disabled={damageSaving}
+                className="px-4 py-2 text-sm font-semibold bg-black text-white rounded-lg disabled:opacity-40"
+                onClick={async () => {
+                  if (!damageVendorId) {
+                    toast.error('Choose a supplier');
+                    return;
+                  }
+                  setDamageSaving(true);
+                  try {
+                    await adminApi.post('/inventory/mark-damaged', {
+                      product_id: damageTarget.id,
+                      quantity: Number(damageQty),
+                      vendor_id: damageVendorId,
+                    });
+                    toast.success('Moved to damaged stock');
+                    setDamageTarget(null);
+                    fetchProducts();
+                  } catch (err: any) {
+                    toast.error(err.response?.data?.error || 'Failed to mark damaged');
+                  } finally {
+                    setDamageSaving(false);
+                  }
+                }}
+              >
+                Save
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {trackOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => setTrackOpen(false)}>

@@ -43,6 +43,10 @@ export interface ICreditMemo extends Document {
   dispatched_by?: mongoose.Types.ObjectId;
   delivered_at?: Date;
   delivered_by?: mongoose.Types.ObjectId;
+  vendor_payment_received_at?: Date;
+  vendor_payment_received_by?: mongoose.Types.ObjectId;
+  vendor_payment_method?: string;
+  vendor_payment_reference?: string;
   created_at: Date;
   updated_at: Date;
   items: ICreditMemoItem[];
@@ -94,6 +98,10 @@ const CreditMemoSchema = new Schema<ICreditMemo>(
     dispatched_by: { type: Schema.Types.ObjectId, ref: 'Admin' },
     delivered_at: Date,
     delivered_by: { type: Schema.Types.ObjectId, ref: 'Admin' },
+    vendor_payment_received_at: Date,
+    vendor_payment_received_by: { type: Schema.Types.ObjectId, ref: 'Admin' },
+    vendor_payment_method: String,
+    vendor_payment_reference: String,
     items: [CreditMemoItemSchema],
   },
   { timestamps: { createdAt: 'created_at', updatedAt: 'updated_at' } }

@@ -17,7 +17,7 @@ export default function DamagedInventoryPage() {
         </Link>
         <h1 className="mt-3 text-2xl font-semibold text-[#0F172A] tracking-tight">Damaged returns</h1>
         <p className="mt-1 text-xs text-[#64748B]">
-          Customer returns held as damaged. The supplier is the purchase received at the product’s cost rate.
+          Warehouse damage and customer returns. Select warehouse rows to draft a supplier credit memo.
         </p>
       </div>
       <DamagedReturns />

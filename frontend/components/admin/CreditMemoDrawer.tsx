@@ -26,6 +26,7 @@ export interface CreditMemoDrawerRecord {
   received_at?: string;
   dispatched_at?: string;
   delivered_at?: string;
+  vendor_payment_received_at?: string;
   notes?: string;
   created_at: string;
   items?: {
@@ -113,6 +114,7 @@ export default function CreditMemoDrawer({
   const canMarkReceived = customerReturn && memo?.status === 'APPROVED' && memo.affects_inventory;
   const canMarkDispatched = vendorReturn && memo?.status === 'APPROVED' && memo.affects_inventory;
   const canMarkDelivered = vendorReturn && memo?.status === 'ADJUSTED';
+  const canCollectVendorPayment = vendorReturn && !!memo && ['APPROVED', 'ADJUSTED', 'CLOSED'].includes(memo.status) && !memo.vendor_payment_received_at;
 
   return (
     <div className="fixed inset-0 z-40">
@@ -154,6 +156,10 @@ export default function CreditMemoDrawer({
                 <li className={canMarkDelivered ? 'font-medium text-[#1A1A1A]' : 'text-[#6B6C72]'}>
                   Mark delivered to supplier
                   {memo.delivered_at ? ' (done)' : ''}
+                </li>
+                <li className={canCollectVendorPayment ? 'font-medium text-[#1A1A1A]' : 'text-[#6B6C72]'}>
+                  Mark payment received — settle cash from the supplier, or leave open to pay less on the next PO
+                  {memo.vendor_payment_received_at ? ' (done)' : ''}
                 </li>
               </ol>
             )}
@@ -358,6 +364,29 @@ export default function CreditMemoDrawer({
                 }}
               >
                 Mark delivered
+              </button>
+            )}
+            {canCollectVendorPayment && (
+              <button
+                type="button"
+                disabled={acting}
+                className={`${adminUi.btnSecondary} disabled:opacity-50`}
+                onClick={async () => {
+                  if (!confirm(`Record cash/cheque received from the supplier for ${memo.credit_memo_number}? This settles the amount they owe you.`)) return;
+                  setActing(true);
+                  try {
+                    await adminApi.post(`/credit-memos/${memo.id}/mark-vendor-payment-received`, { payment_method: 'Cash' });
+                    toast.success('Supplier payment recorded');
+                    onChanged();
+                    await load(memo.id);
+                  } catch (err: any) {
+                    toast.error(err.response?.data?.error || 'Failed to record supplier payment');
+                  } finally {
+                    setActing(false);
+                  }
+                }}
+              >
+                Mark payment received
               </button>
             )}
             {canMarkReceived && (

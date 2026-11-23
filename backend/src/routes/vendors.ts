@@ -14,7 +14,8 @@ import {
   getVendorReturnsAnalytics,
   getLastPurchasePrices,
 } from '../modules/vendors/services/vendorAnalyticsService';
-import { getCreditMemoTotalsByParty } from '../modules/credit-memo/services/creditMemoBalances';
+import { getVendorCreditMemoSplits } from '../modules/credit-memo/services/creditMemoBalances';
+import { vendorAccountPosition } from '../modules/vendors/services/vendorAccountPosition';
 import { loadBestSupplierRates } from '../modules/vendors/services/bestSupplierRates';
 import { STATE_PROVINCE_OPTIONS } from '../utils/regions';
 import { purchaseBooksStatement } from '../services/loadPurchaseBooksStatement';
@@ -65,7 +66,7 @@ router.get('/', authenticateAdmin, async (req: AuthRequest, res) => {
       Vendor.countDocuments(query),
     ]);
     const vendorIds = (vendors as any[]).map((v) => v._id);
-    const [poAgg, creditTotals] = await Promise.all([
+    const [poAgg, creditSplits] = await Promise.all([
       PurchaseOrder.aggregate([
         { $match: { vendor_id: { $in: vendorIds }, status: { $ne: 'cancelled' } } },
         {
@@ -76,7 +77,7 @@ router.get('/', authenticateAdmin, async (req: AuthRequest, res) => {
           },
         },
       ]),
-      getCreditMemoTotalsByParty('VENDOR', vendorIds),
+      getVendorCreditMemoSplits('VENDOR', vendorIds),
     ]);
     const poMap = new Map(
       poAgg.map((r: any) => [
@@ -91,12 +92,13 @@ router.get('/', authenticateAdmin, async (req: AuthRequest, res) => {
       vendors: (vendors as any[]).map((v) => {
         const id = v._id.toString();
         const poData = poMap.get(id) || { purchases: 0, paid: 0 };
-        const purchases = poData.purchases;
-        const paid = poData.paid;
-        const credits = creditTotals.get(id) ?? 0;
-        // Credit memos settle dues like payments: reduce open AP, increase paid dues.
-        const paidBalance = paid + credits;
-        const balance = Math.max(0, purchases - paidBalance);
+        const split = creditSplits.get(id) || { open: 0, received: 0 };
+        const position = vendorAccountPosition({
+          purchases: poData.purchases,
+          paid: poData.paid,
+          credits_open: split.open,
+          credits_received: split.received,
+        });
         return {
           id,
           supplier_id: v.supplier_id || v._id.toString().slice(-6).toUpperCase(),
@@ -113,12 +115,17 @@ router.get('/', authenticateAdmin, async (req: AuthRequest, res) => {
           notes: v.notes,
           is_active: v.is_active,
           created_at: v.created_at,
-          purchases,
-          payments: paid,
-          credit_memo_total: credits,
-          balance,
-          open_balance: balance,
-          paid_balance: paidBalance,
+          purchases: position.purchases,
+          payments: position.paid,
+          credit_memo_total: position.credits_open + position.credits_received,
+          credits_open: position.credits_open,
+          account_position: position.account_position,
+          payable: position.payable,
+          receivable: position.receivable,
+          balance: position.payable,
+          open_balance: position.payable,
+          vendor_credit: position.receivable,
+          paid_balance: position.paid + position.credits_received,
         };
       }),
       pagination: { page: Number(page), limit: Number(limit), total, totalPages: Math.ceil(total / Number(limit)) },
@@ -290,7 +297,7 @@ router.get('/:id/balance', authenticateAdmin, async (req: AuthRequest, res) => {
   try {
     const vendor = await Vendor.findById(req.params.id);
     if (!vendor) return res.status(404).json({ error: 'Vendor not found' });
-    const [poAgg, creditTotals] = await Promise.all([
+    const [poAgg, creditSplits] = await Promise.all([
       PurchaseOrder.aggregate([
         { $match: { vendor_id: vendor._id, status: { $ne: 'cancelled' } } },
         {
@@ -301,19 +308,25 @@ router.get('/:id/balance', authenticateAdmin, async (req: AuthRequest, res) => {
           },
         },
       ]),
-      getCreditMemoTotalsByParty('VENDOR', [vendor._id as any]),
+      getVendorCreditMemoSplits('VENDOR', [vendor._id as any]),
     ]);
-    const totalPurchases = poAgg[0]?.totalPurchases ?? 0;
-    const totalPaid = poAgg[0]?.totalPaid ?? 0;
-    const creditMemoTotal = creditTotals.get(vendor._id.toString()) ?? 0;
-    const totalSettled = totalPaid + creditMemoTotal;
-    const balance = Math.max(0, totalPurchases - totalSettled);
+    const split = creditSplits.get(vendor._id.toString()) || { open: 0, received: 0 };
+    const position = vendorAccountPosition({
+      purchases: poAgg[0]?.totalPurchases ?? 0,
+      paid: poAgg[0]?.totalPaid ?? 0,
+      credits_open: split.open,
+      credits_received: split.received,
+    });
     res.json({
-      balance,
-      total_purchases: totalPurchases,
-      total_paid: totalPaid,
-      credit_memo_total: creditMemoTotal,
-      paid_balance: totalSettled,
+      balance: position.payable,
+      payable: position.payable,
+      receivable: position.receivable,
+      account_position: position.account_position,
+      total_purchases: position.purchases,
+      total_paid: position.paid,
+      credit_memo_total: position.credits_open + position.credits_received,
+      credits_open: position.credits_open,
+      paid_balance: position.paid + position.credits_received,
     });
   } catch (e) {
     console.error('Vendor balance:', e);
@@ -383,7 +396,7 @@ router.post('/', authenticateAdmin, async (req: AuthRequest, res) => {
     const vendor = await Vendor.create(payload);
     res.status(201).json({ id: vendor._id.toString(), ...vendor.toObject() });
   } catch (error: any) {
-    if (error instanceof z.ZodError) return res.status(400).json({ error: error.message });
+    if (error instanceof z.ZodError) return res.status(400).json({ error: error.errors[0].message });
     console.error('Create vendor error:', error);
     res.status(500).json({ error: 'Failed to create vendor' });
   }
@@ -418,7 +431,7 @@ router.put('/:id', authenticateAdmin, async (req: AuthRequest, res) => {
     if (!vendor) return res.status(404).json({ error: 'Vendor not found' });
     res.json({ id: vendor._id.toString(), ...vendor.toObject() });
   } catch (error: any) {
-    if (error instanceof z.ZodError) return res.status(400).json({ error: error.message });
+    if (error instanceof z.ZodError) return res.status(400).json({ error: error.errors[0].message });
     console.error('Update vendor error:', error);
     res.status(500).json({ error: 'Failed to update vendor' });
   }
@@ -443,7 +456,7 @@ router.post('/bulk-delete', authenticateAdmin, async (req: AuthRequest, res) => 
     await Vendor.updateMany({ _id: { $in: ids } }, { is_active: false });
     res.json({ message: `${ids.length} vendor(s) deactivated`, deleted: ids.length });
   } catch (error: any) {
-    if (error instanceof z.ZodError) return res.status(400).json({ error: error.message });
+    if (error instanceof z.ZodError) return res.status(400).json({ error: error.errors[0].message });
     console.error('Bulk delete vendors error:', error);
     res.status(500).json({ error: 'Failed to delete vendors' });
   }

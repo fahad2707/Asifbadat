@@ -21,7 +21,7 @@ export class CreditMemoInventoryError extends Error {
   }
 }
 
-async function generateCreditMemoNumber(type: 'VENDOR' | 'CUSTOMER' = 'CUSTOMER'): Promise<string> {
+export async function generateCreditMemoNumber(type: 'VENDOR' | 'CUSTOMER' = 'CUSTOMER'): Promise<string> {
   const prefix = type === 'VENDOR' ? DOC_PREFIX.vendorCreditMemo : DOC_PREFIX.customerCreditMemo;
   return nextPrefixedNumber(CreditMemo, 'credit_memo_number', prefix);
 }
@@ -536,6 +536,49 @@ export async function markCreditMemoDeliveredToVendor(
   return { success: true };
 }
 
+export async function markVendorCreditPaymentReceived(
+  creditMemoId: string,
+  userId: string,
+  opts: { payment_method?: string; reference?: string } = {}
+): Promise<{ success: boolean; error?: string; memo?: { credit_memo_number: string; total_amount: number; vendor_id?: unknown } }> {
+  if (!mongoose.Types.ObjectId.isValid(creditMemoId) || !mongoose.Types.ObjectId.isValid(userId)) {
+    return { success: false, error: 'Credit memo not found' };
+  }
+  const claimed = await CreditMemo.findOneAndUpdate(
+    {
+      _id: creditMemoId,
+      type: 'VENDOR',
+      status: { $in: ['APPROVED', 'ADJUSTED', 'CLOSED'] },
+      $or: [{ vendor_payment_received_at: { $exists: false } }, { vendor_payment_received_at: null }],
+    },
+    {
+      $set: {
+        vendor_payment_received_at: new Date(),
+        vendor_payment_received_by: new mongoose.Types.ObjectId(userId),
+        vendor_payment_method: String(opts.payment_method || 'Cash').trim() || 'Cash',
+        vendor_payment_reference: String(opts.reference || '').trim() || undefined,
+      },
+    },
+    { new: true }
+  );
+  if (!claimed) {
+    const current = await CreditMemo.findById(creditMemoId);
+    if (!current) return { success: false, error: 'Credit memo not found' };
+    if (current.type !== 'VENDOR') return { success: false, error: 'Only supplier credit memos collect payment from a vendor' };
+    if (current.vendor_payment_received_at) return { success: false, error: 'Payment from this supplier is already recorded' };
+    if (current.status === 'DRAFT') return { success: false, error: 'Approve the credit memo before recording payment from the supplier' };
+    return { success: false, error: 'This credit memo cannot collect a supplier payment' };
+  }
+  return {
+    success: true,
+    memo: {
+      credit_memo_number: claimed.credit_memo_number,
+      total_amount: claimed.total_amount,
+      vendor_id: claimed.vendor_id,
+    },
+  };
+}
+
 /**
  * Cancel credit memo.
  * DRAFT → CANCELLED is allowed (no inventory/ledger applied yet).
@@ -580,5 +623,3 @@ export async function cancelCreditMemo(creditMemoId: string): Promise<{ success:
   await CreditMemo.findByIdAndUpdate(creditMemoId, { status: 'CANCELLED' });
   return { success: true };
 }
-
-export { generateCreditMemoNumber };

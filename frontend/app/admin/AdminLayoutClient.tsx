@@ -114,7 +114,8 @@ function headerContextLabel(pathname: string | null | undefined, creatingInvoice
   if (pathname === '/admin/orders' || pathname.startsWith('/admin/orders/')) return 'Online sales';
   if (pathname === '/admin/products/new') return 'Product';
   if (pathname === '/admin/products' || pathname.startsWith('/admin/products/')) return 'Products';
-  if (pathname === '/admin/receipts' || pathname.startsWith('/admin/receipts/')) return 'Bank transactions';
+  if (pathname === '/admin/receipts/paid' || pathname.startsWith('/admin/receipts/paid')) return 'Money paid';
+  if (pathname === '/admin/receipts' || pathname.startsWith('/admin/receipts/')) return 'Money received';
   if (pathname === '/admin/inventory/damaged') return 'Damaged returns';
   if ((pathname === '/admin/inventory' || pathname.startsWith('/admin/inventory/')) && countingStock) return 'Physical count';
   if ((pathname === '/admin/inventory' || pathname.startsWith('/admin/inventory/')) && adjustingStock) return 'Stock adjustments';
@@ -320,7 +321,8 @@ export default function AdminLayoutClient({ children }: { children: React.ReactN
       slug: 'banking',
       label: 'Banking',
       items: [
-        { href: '/admin/receipts', label: 'Bank transactions', icon: Landmark, active: pathMatches(pathname, '/admin/receipts') },
+        { href: '/admin/receipts', label: 'Money received', icon: Landmark, active: pathname === '/admin/receipts' || (pathMatches(pathname, '/admin/receipts') && pathname !== '/admin/receipts/paid') },
+        { href: '/admin/receipts/paid', label: 'Money paid', icon: Landmark, active: pathname === '/admin/receipts/paid' },
         { href: '/admin/catalog?tab=tax', label: 'Tax types', icon: Percent, active: pathMatches(pathname, '/admin/catalog') && catalogTabIs(searchParams, 'tax') },
         { href: '/admin/catalog?tab=bank', label: 'Bank accounts', icon: Landmark, active: pathMatches(pathname, '/admin/catalog') && catalogTabIs(searchParams, 'bank') },
         { href: '/admin/catalog?tab=payment', label: 'Payment methods', icon: CreditCard, active: pathMatches(pathname, '/admin/catalog') && catalogTabIs(searchParams, 'payment') },
